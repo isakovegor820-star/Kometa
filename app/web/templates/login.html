@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="login">
+  <h1>Вход в админ-панель</h1>
+  {% if not enabled %}
+    <div class="flash err">
+      Панель выключена: в <code>.env</code> не задан <code>ADMIN_PANEL_PASSWORD</code>.
+      Добавь пароль и перезапусти бота.
+    </div>
+  {% else %}
+  <form method="post" action="/admin/login">
+    <div class="card">
+      <label class="k" for="password">Пароль</label><br><br>
+      <input type="password" id="password" name="password" autofocus required style="width:100%">
+      <br><br>
+      <button type="submit" style="width:100%">Войти</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

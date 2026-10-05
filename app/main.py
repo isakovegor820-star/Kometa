@@ -115,8 +115,8 @@ def setup_logging() -> None:
     )
 
 
-async def run_web() -> None:
-    app = await build_app()
+async def run_web(bot: Bot) -> None:
+    app = await build_app(bot)
     config = uvicorn.Config(
         app,
         host=settings.web_host,
@@ -125,7 +125,13 @@ async def run_web() -> None:
         access_log=False,
     )
     server = uvicorn.Server(config)
-    logger.info("Веб-слой подписок: http://%s:%s/sub/<token>", settings.web_host, settings.web_port)
+    logger.info("Подписки: http://%s:%s/sub/<token>", settings.web_host, settings.web_port)
+    logger.info(
+        "Админ-панель: http://%s:%s/admin %s",
+        settings.web_host,
+        settings.web_port,
+        "" if settings.admin_panel_password else "(ВЫКЛЮЧЕНА: задай ADMIN_PANEL_PASSWORD)",
+    )
     await server.serve()
 
 
@@ -160,7 +166,7 @@ async def main() -> None:
     scheduler.add_job(job_node_health, "interval", minutes=5, args=[bot], id="node_health")
     scheduler.start()
 
-    web_task = asyncio.create_task(run_web())
+    web_task = asyncio.create_task(run_web(bot))
 
     me = await bot.get_me()
     logger.info("Бот запущен: @%s", me.username)

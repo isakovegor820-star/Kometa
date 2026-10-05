@@ -1,21 +1,22 @@
-2026-10-05 21:24:30,466 | INFO     | kometa | База готова: sqlite+aiosqlite:////Users/egor/Downloads/VPN servise/data/kometa.db
-2026-10-05 21:24:30,471 | INFO     | kometa | Способы оплаты: manual, stars
-2026-10-05 21:24:30,472 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:24:30,472 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:24:30,472 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:24:30,472 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:24:30,472 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:24:30,472 | INFO     | apscheduler.scheduler | Added job "job_expire_subscriptions" to job store "default"
-2026-10-05 21:24:30,472 | INFO     | apscheduler.scheduler | Added job "job_reminders" to job store "default"
-2026-10-05 21:24:30,473 | INFO     | apscheduler.scheduler | Added job "job_expire_orders" to job store "default"
-2026-10-05 21:24:30,473 | INFO     | apscheduler.scheduler | Added job "job_check_crypto" to job store "default"
-2026-10-05 21:24:30,473 | INFO     | apscheduler.scheduler | Added job "job_node_health" to job store "default"
-2026-10-05 21:24:30,473 | INFO     | apscheduler.scheduler | Scheduler started
-2026-10-05 21:24:30,487 | INFO     | kometa | Веб-слой подписок: http://0.0.0.0:8090/sub/<token>
-INFO:     Started server process [74421]
+2026-10-05 21:32:46,039 | INFO     | kometa | База готова: sqlite+aiosqlite:////Users/egor/Downloads/VPN servise/data/kometa.db
+2026-10-05 21:32:46,043 | INFO     | kometa | Способы оплаты: manual, stars
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Added job "job_expire_subscriptions" to job store "default"
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Added job "job_reminders" to job store "default"
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Added job "job_expire_orders" to job store "default"
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Added job "job_check_crypto" to job store "default"
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Added job "job_node_health" to job store "default"
+2026-10-05 21:32:46,044 | INFO     | apscheduler.scheduler | Scheduler started
+2026-10-05 21:32:46,065 | INFO     | kometa | Подписки: http://0.0.0.0:8090/sub/<token>
+2026-10-05 21:32:46,065 | INFO     | kometa | Админ-панель: http://0.0.0.0:8090/admin 
+INFO:     Started server process [75587]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8090 (Press CTRL+C to quit)
-2026-10-05 21:24:31,104 | INFO     | kometa | Бот запущен: @kometavpnservise_bot
-2026-10-05 21:24:31,504 | INFO     | aiogram.dispatcher | Start polling
-2026-10-05 21:24:31,608 | INFO     | aiogram.dispatcher | Run polling for bot @kometavpnservise_bot id=8958117679 - 'Kometa VPN'
+2026-10-05 21:32:46,753 | INFO     | kometa | Бот запущен: @kometavpnservise_bot
+2026-10-05 21:32:47,083 | INFO     | aiogram.dispatcher | Start polling
+2026-10-05 21:32:47,268 | INFO     | aiogram.dispatcher | Run polling for bot @kometavpnservise_bot id=8958117679 - 'Kometa VPN'

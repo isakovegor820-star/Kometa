@@ -129,10 +129,12 @@ def admin_order_kb(order_id: int) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def admin_panel_kb(pending_count: int = 0, nodes_ok: bool = True) -> InlineKeyboardMarkup:
+def admin_panel_kb(pending_count: int = 0, nodes_ok: bool = True, panel_url: str | None = None) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text=f"🧾 Заявки ({pending_count})", callback_data="admin:orders")
     kb.button(text="📊 Статистика", callback_data="admin:stats")
     kb.button(text="🖥 Ноды", callback_data="admin:nodes")
+    if panel_url:
+        kb.button(text="🌐 Веб-панель", url=panel_url)
     kb.adjust(1)
     return kb.as_markup()

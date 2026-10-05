@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% set page = 'nodes' %}
+{% set session_active = True %}
+{% block content %}
+<h1>Ноды и панель</h1>
+
+<div class="cards">
+  <div class="card"><div class="k">Активных подписок</div><div class="v">{{ active }}</div></div>
+  <div class="card"><div class="k">Пользователей всего</div><div class="v">{{ total_users }}</div></div>
+  <div class="card"><div class="k">Тип панели</div><div class="v" style="font-size:16px">{{ panels[0].name if panels else '—' }}</div></div>
+</div>
+
+{% for panel in panels %}
+<h2>{{ panel.name }}</h2>
+<div class="card">
+  {% if panel.ok %}<span class="pill ok">панель отвечает</span>
+  {% else %}<span class="pill err">нет ответа</span>{% endif %}
+  {% if panel.error %}<div class="muted" style="margin-top:8px">{{ panel.error }}</div>{% endif %}
+  {% if panel.inbounds %}
+  <table style="margin-top:12px">
+    <tr><th>ID</th><th>Название</th><th>Протокол</th><th>Порт</th><th>Транспорт</th><th>Безопасность</th></tr>
+    {% for inbound in panel.inbounds %}
+    <tr>
+      <td>{{ inbound.id }}</td>
+      <td>{{ inbound.remark }}</td>
+      <td>{{ inbound.protocol }}</td>
+      <td>{{ inbound.port }}</td>
+      <td>{{ inbound.network or '—' }}</td>
+      <td>{{ inbound.security or '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="muted" style="margin-top:8px">Инбаунды не найдены — установи панель и создай Reality/AmneziaWG (см. docs/ЗАПУСК.md)</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

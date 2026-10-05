@@ -31,13 +31,29 @@ class Broadcast(StatesGroup):
     text = State()
 
 
+def web_panel_url() -> str:
+    """Публичный адрес админ-панели (пусто, если он локальный)."""
+    base = settings.public_base_url.rstrip("/")
+    if not base or "127.0.0.1" in base or "localhost" in base:
+        return ""
+    return f"{base}/admin"
+
+
 @router.message(Command("admin"))
 async def cmd_admin(message: Message, session: AsyncSession) -> None:
     snapshot = await stats.collect(session)
-    await message.answer(
-        snapshot.as_text(),
-        reply_markup=keyboards.admin_panel_kb(pending_count=snapshot.pending_orders),
-    )
+    url = web_panel_url()
+    text = snapshot.as_text()
+    if not settings.admin_panel_password:
+        text += "\n\n🌐 Веб-панель выключена: задай <code>ADMIN_PANEL_PASSWORD</code> в .env"
+    elif url:
+        text += f"\n\n🌐 Веб-панель: {url}"
+    else:
+        text += (
+            f"\n\n🌐 Веб-панель: <code>{settings.public_base_url.rstrip('/')}/admin</code>"
+            "\n(адрес локальный — с телефона не откроется, пока не будет домена)"
+        )
+    await message.answer(text, reply_markup=keyboards.admin_panel_kb(pending_count=snapshot.pending_orders, panel_url=url or None))
 
 
 @router.message(Command("stats"))

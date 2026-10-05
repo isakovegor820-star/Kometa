@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% set page = 'dashboard' %}
+{% set session_active = True %}
+{% block content %}
+<h1>Дашборд</h1>
+
+<div class="cards">
+  <div class="card"><div class="k">Пользователей</div><div class="v">{{ stats.users_total }}</div></div>
+  <div class="card"><div class="k">На пробном</div><div class="v">{{ stats.trials_active }}</div></div>
+  <div class="card"><div class="k">Активных платных</div><div class="v">{{ stats.active_paid }}</div></div>
+  <div class="card"><div class="k">Платили хотя бы раз</div><div class="v">{{ stats.paying_total }}</div></div>
+  <div class="card"><div class="k">Выручка сегодня</div><div class="v">{{ stats.revenue_today }} ₽</div></div>
+  <div class="card"><div class="k">Выручка 7 дней</div><div class="v">{{ stats.revenue_week }} ₽</div></div>
+  <div class="card"><div class="k">Выручка 30 дней</div><div class="v">{{ stats.revenue_month }} ₽</div></div>
+  <div class="card"><div class="k">Конверсия в оплату</div><div class="v">{{ '%.1f'|format(stats.conversion) }}%</div></div>
+</div>
+
+<h2>Состояние сервиса</h2>
+<div class="card">
+  Панель VPN:
+  {% if panel_ok %}<span class="pill ok">отвечает</span>
+  {% else %}<span class="pill err">недоступна</span> — проверь сервер и токен панели{% endif %}
+  &nbsp;·&nbsp; Заявок в очереди: <b>{{ stats.pending_orders }}</b>
+</div>
+
+<h2>Заявки на оплату</h2>
+{% if pending %}
+<table>
+  <tr><th>Заказ</th><th>Пользователь</th><th>Тариф</th><th>Сумма</th><th>Способ</th><th>Создан</th><th></th></tr>
+  {% for row in pending %}
+  <tr>
+    <td>#{{ row.order.id }}</td>
+    <td>{{ row.user.display_name if row.user else '—' }}<br><span class="muted">{{ row.user.tg_id if row.user else '' }}</span></td>
+    <td>{{ row.plan.title if row.plan else '—' }}</td>
+    <td><b>{{ row.order.amount_rub }} ₽</b></td>
+    <td>{{ row.order.provider }}</td>
+    <td class="muted">{{ row.order.created_at.strftime('%d.%m %H:%M') }}</td>
+    <td class="row-actions">
+      <form class="inline" method="post" action="/admin/orders/{{ row.order.id }}/confirm"><button type="submit">Подтвердить</button></form>
+      <form class="inline" method="post" action="/admin/orders/{{ row.order.id }}/reject"><button class="danger" type="submit">Отклонить</button></form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="card muted">Заявок нет — все оплаты обработаны ✅</div>
+{% endif %}
+
+<h2>Рассылка</h2>
+<div class="card">
+  <form method="post" action="/admin/broadcast">
+    <textarea name="text" placeholder="Текст сообщения (HTML разрешён)"></textarea>
+    <div style="display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap:wrap">
+      <select name="audience">
+        <option value="active">Активные подписки</option>
+        <option value="expired">Истёкшие</option>
+        <option value="all">Все (кроме заблокированных)</option>
+      </select>
+      <button type="submit">Отправить</button>
+      <span class="muted">Отправка идёт в фоне, бот не зависает</span>
+    </div>
+  </form>
+</div>
+
+<h2>Последние события</h2>
+<table>
+  <tr><th>Когда</th><th>Событие</th><th>Данные</th></tr>
+  {% for event in events %}
+  <tr>
+    <td class="muted">{{ event.created_at.strftime('%d.%m %H:%M') }}</td>
+    <td>{{ event.kind }}</td>
+    <td class="muted"><span class="trunc">{{ event.payload or '' }}</span></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

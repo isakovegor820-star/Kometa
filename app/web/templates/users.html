@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% set page = 'users' %}
+{% set session_active = True %}
+{% block content %}
+<h1>Пользователи</h1>
+
+<div class="card">
+  <form method="get" action="/admin/users" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+    <input type="text" name="q" value="{{ q }}" placeholder="Поиск: имя, @username или tg_id">
+    <select name="status">
+      <option value="all" {{ 'selected' if current_status == 'all' else '' }}>Все статусы</option>
+      <option value="trial" {{ 'selected' if current_status == 'trial' else '' }}>Пробные</option>
+      <option value="active" {{ 'selected' if current_status == 'active' else '' }}>Активные</option>
+      <option value="expired" {{ 'selected' if current_status == 'expired' else '' }}>Истёкшие</option>
+      <option value="blocked" {{ 'selected' if current_status == 'blocked' else '' }}>Заблокированные</option>
+      <option value="none" {{ 'selected' if current_status == 'none' else '' }}>Без подписки</option>
+    </select>
+    <button type="submit">Найти</button>
+    <span class="muted">Всего: {{ stats.users_total }} · платных: {{ stats.active_paid }}</span>
+  </form>
+</div>
+
+{% if items %}
+<table>
+  <tr><th>ID</th><th>Пользователь</th><th>Статус</th><th>До</th><th>Осталось</th><th>Ссылка-подписка</th><th>Действия</th></tr>
+  {% for item in items %}
+  <tr>
+    <td>{{ item.user.id }}</td>
+    <td>
+      {{ item.user.display_name }}
+      {% if item.user.is_blocked %}<span class="pill err">заблокирован</span>{% endif %}
+      <br><span class="muted">{{ item.user.tg_id }}{% if item.user.username %} · @{{ item.user.username }}{% endif %}</span>
+    </td>
+    <td>{{ item.status_label }}</td>
+    <td class="muted">{{ item.sub.expires_at.strftime('%d.%m.%Y %H:%M') if item.sub else '—' }}</td>
+    <td>{{ item.sub.days_left ~ ' дн.' if item.sub else '—' }}</td>
+    <td>
+      {% if item.link %}
+      <code class="trunc" title="{{ item.link }}">{{ item.link }}</code>
+      {% else %}—{% endif %}
+    </td>
+    <td class="row-actions">
+      <form class="inline" method="post" action="/admin/users/{{ item.user.id }}/grant">
+        <input type="number" name="days" value="7" min="-3650" max="3650">
+        <button type="submit">Начислить</button>
+      </form>
+      {% if item.user.is_blocked %}
+      <form class="inline" method="post" action="/admin/users/{{ item.user.id }}/block">
+        <input type="hidden" name="block" value="0">
+        <button class="ghost" type="submit">Разблокировать</button>
+      </form>
+      {% else %}
+      <form class="inline" method="post" action="/admin/users/{{ item.user.id }}/block">
+        <input type="hidden" name="block" value="1">
+        <button class="danger" type="submit">Заблокировать</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="card muted">Ничего не найдено</div>
+{% endif %}
+{% endblock %}

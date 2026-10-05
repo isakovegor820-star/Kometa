@@ -83,6 +83,11 @@ async def session():
 
 @pytest.fixture
 def panel():
-    from app.panels.fake import FakePanel
+    """Панель-заглушка — тот же экземпляр, что видит приложение.
 
-    return FakePanel()
+    Важно: берём его из реестра, иначе тест работал бы с одной панелью,
+    а хендлеры — с другой, и пользователи «терялись».
+    """
+    from app.panels.registry import registry
+
+    return registry.primary()

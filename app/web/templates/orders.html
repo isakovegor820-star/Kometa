@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% set page = 'orders' %}
+{% set session_active = True %}
+{% block content %}
+<h1>Заказы</h1>
+
+<div class="card" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+  <a href="/admin/orders?status=pending" class="pill {{ 'ok' if current_status == 'pending' else '' }}">Ожидают ({{ stats.pending_orders }})</a>
+  <a href="/admin/orders?status=paid" class="pill {{ 'ok' if current_status == 'paid' else '' }}">Оплаченные</a>
+  <a href="/admin/orders?status=canceled" class="pill {{ 'ok' if current_status == 'canceled' else '' }}">Отклонённые</a>
+  <a href="/admin/orders?status=expired" class="pill {{ 'ok' if current_status == 'expired' else '' }}">Просроченные</a>
+  <a href="/admin/orders?status=all" class="pill {{ 'ok' if current_status == 'all' else '' }}">Все</a>
+  <span class="muted">Выручка за 30 дней: <b>{{ stats.revenue_month }} ₽</b></span>
+</div>
+
+{% if rows %}
+<table>
+  <tr><th>#</th><th>Пользователь</th><th>Тариф</th><th>Сумма</th><th>Способ</th><th>Статус</th><th>Создан</th><th>Оплачен</th><th></th></tr>
+  {% for row in rows %}
+  <tr>
+    <td>{{ row.order.id }}</td>
+    <td>
+      {{ row.user.display_name if row.user else '—' }}
+      {% if row.user %}<br><span class="muted">{{ row.user.tg_id }}</span>{% endif %}
+    </td>
+    <td>{{ row.plan.title if row.plan else '—' }}</td>
+    <td><b>{{ row.order.amount_rub }} ₽</b></td>
+    <td>{{ row.order.provider }}</td>
+    <td>
+      {% if row.order.status == 'paid' %}<span class="pill ok">оплачен</span>
+      {% elif row.order.status == 'pending' %}<span class="pill warn">ожидает</span>
+      {% elif row.order.status == 'canceled' %}<span class="pill err">отклонён</span>
+      {% else %}<span class="pill">{{ row.order.status }}</span>{% endif %}
+    </td>
+    <td class="muted">{{ row.order.created_at.strftime('%d.%m %H:%M') }}</td>
+    <td class="muted">{{ row.order.paid_at.strftime('%d.%m %H:%M') if row.order.paid_at else '—' }}</td>
+    <td class="row-actions">
+      {% if row.order.status == 'pending' %}
+      <form class="inline" method="post" action="/admin/orders/{{ row.order.id }}/confirm"><button type="submit">Подтвердить</button></form>
+      <form class="inline" method="post" action="/admin/orders/{{ row.order.id }}/reject"><button class="danger" type="submit">Отклонить</button></form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="card muted">Заказов в этом статусе нет</div>
+{% endif %}
+{% endblock %}

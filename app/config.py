@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     web_port: int = 8080
     public_base_url: str = "http://127.0.0.1:8080"
 
+    # --- Админ-панель (/admin) ---
+    #: Пароль для входа. Пусто = панель выключена (безопасное поведение по умолчанию).
+    admin_panel_password: str = ""
+    #: Ключ подписи сессионной cookie. Пусто = используется токен бота.
+    admin_panel_secret: str = ""
+    #: Время жизни сессии в часах.
+    admin_session_hours: int = 12
+
     # --- Продукт ---
     trial_days: int = 3
     trial_gb: int = 10

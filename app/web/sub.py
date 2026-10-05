@@ -15,7 +15,6 @@ from datetime import timezone
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.config import get_settings
 from app.db.models import Subscription
 from app.panels.base import PanelError
@@ -38,8 +37,17 @@ def _subscription_headers(sub: Subscription, used_bytes: int = 0) -> dict[str, s
     }
 
 
-async def build_app() -> FastAPI:
+async def build_app(bot: "Bot | None" = None) -> FastAPI:
+    """Собрать веб-приложение: публичная ссылка-подписка + админ-панель.
+
+    :param bot: экземпляр бота — нужен админке, чтобы писать пользователям
+        (подтверждение оплаты, начисление дней, рассылка).
+    """
+    from app.web.admin import router as admin_router
+
     app = FastAPI(title="Kometa subscription service", docs_url=None, redoc_url=None)
+    app.state.bot = bot
+    app.include_router(admin_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
