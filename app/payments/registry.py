@@ -27,7 +27,11 @@ class PaymentRegistry:
 
     def _build(self) -> None:
         settings = get_settings()
-        providers: dict[str, PaymentProvider] = {"manual": ManualProvider()}
+        providers: dict[str, PaymentProvider] = {}
+        # Перевод по СБП показываем только когда реквизиты реально заполнены:
+        # иначе пользователь увидит счёт с пустыми реквизитами и уйдёт.
+        if settings.manual_payment_details.strip():
+            providers["manual"] = ManualProvider()
         if settings.cryptobot_token:
             from app.payments.cryptobot import CryptoBotProvider
 
@@ -45,6 +49,11 @@ class PaymentRegistry:
     def _ensure_ready(self) -> None:
         if not self._providers:
             self._build()
+
+    def reload(self) -> None:
+        """Пересобрать список (например, после смены настроек в тестах)."""
+        self._providers = {}
+        self._build()
 
     def get(self, code: str) -> PaymentProvider | None:
         self._ensure_ready()
