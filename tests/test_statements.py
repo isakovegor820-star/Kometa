@@ -14,6 +14,7 @@ import json
 import os
 from datetime import datetime, timezone
 from email.header import Header
+from email.message import EmailMessage
 from pathlib import Path
 
 import pytest
@@ -378,6 +379,20 @@ async def test_csv_broken_file_does_not_break_the_good_one(tmp_path):
     assert [p.amount_kopecks for p in again] == [19913]
 
 
+async def test_csv_cp1251_encoding(tmp_path):
+    """Выгрузки российских банков часто в Windows-1251."""
+    text = "Дата;Сумма;Назначение;Плательщик\n05.10.2026;199,13;Kometa 1;ИВАНОВ\n"
+    (tmp_path / "cp1251.csv").write_bytes(text.encode("cp1251"))
+
+    # По умолчанию utf-8-sig: понятная ошибка с подсказкой, а не тихая потеря строк.
+    with pytest.raises(StatementError) as exc_info:
+        await CsvStatementSource(str(tmp_path / "*.csv")).fetch(LONG_AGO)
+    assert "cp1251" in str(exc_info.value)
+
+    payments = await CsvStatementSource(str(tmp_path / "*.csv"), encoding="cp1251").fetch(LONG_AGO)
+    assert [(p.amount_kopecks, p.counterparty) for p in payments] == [(19913, "ИВАНОВ")]
+
+
 async def test_csv_empty_glob_returns_empty_list(tmp_path):
     assert await CsvStatementSource(str(tmp_path / "nope-*.csv")).fetch(LONG_AGO) == []
 
@@ -517,6 +532,47 @@ def test_parse_email_broken_date_falls_back_to_now():
 def test_parse_garbage_email_returns_none():
     assert parse_email_payment(b"") is None
     assert parse_email_payment(b"\xff\xfe\x00\x01\x02") is None
+
+
+def test_parse_quoted_printable_email():
+    """Банки часто шлют письма в quoted-printable — тело должно декодироваться."""
+    message = EmailMessage()
+    message["From"] = "Сбербанк <no-reply@sberbank.ru>"
+    message["To"] = "client@example.com"
+    message["Subject"] = "Зачисление на карту"
+    message["Date"] = "Mon, 05 Oct 2026 14:30:00 +0300"
+    message["Message-ID"] = "<qp-1@sberbank.ru>"
+    message.set_content(SBER_BODY, charset="utf-8", cte="quoted-printable")
+
+    payment = parse_email_payment(message.as_bytes())
+
+    assert payment is not None
+    assert payment.amount_kopecks == 199050
+    assert payment.comment == "Kometa 5678"
+    assert payment.counterparty == "ПЕТРОВ ПЁТР ПЕТРОВИЧ"
+
+
+def test_parse_multipart_prefers_plain_text():
+    """multipart/alternative: берём text/plain, даже если HTML идёт вторым."""
+    message = EmailMessage()
+    message["From"] = "Т-Банк <no-reply@tbank.ru>"
+    message["To"] = "client@example.com"
+    message["Subject"] = "Поступление"
+    message["Date"] = "Mon, 05 Oct 2026 14:30:00 +0300"
+    message["Message-ID"] = "<multi-1@tbank.ru>"
+    message.set_content(TBANK_BODY, charset="utf-8")
+    message.add_alternative(
+        "<html><body><p>Поступление 199.13 ₽</p>"
+        "<p>Назначение платежа: Из HTML</p></body></html>",
+        subtype="html",
+        charset="utf-8",
+    )
+
+    payment = parse_email_payment(message.as_bytes())
+
+    assert payment is not None
+    assert payment.amount_kopecks == 19913
+    assert payment.comment == "Kometa 1234"  # из text/plain, а не «Из HTML»
 
 
 # ---------------------------------------------------------------------------
