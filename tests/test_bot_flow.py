@@ -105,3 +105,15 @@ async def test_referral_screen_shows_personal_link(bot, dispatcher, session):
     user = await subscriptions.get_user_by_tg(session, 7701)
     assert user is not None
     assert f"ref_{user.referral_code}" in bot.session.all_text()
+
+
+async def test_help_points_to_status_page_and_wifi(bot, dispatcher, session):
+    """Клиент должен знать, как проверить сервис, если Telegram недоступен."""
+    await dispatcher.feed_update(bot, make_update("/start", user_id=7801))
+    bot.session.clear()
+
+    await dispatcher.feed_update(bot, make_update(callback_data="help", user_id=7801))
+
+    sent = bot.session.all_text()
+    assert "/status" in sent
+    assert "Wi-Fi" in sent

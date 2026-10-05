@@ -41,8 +41,12 @@ async def show_referral(event: Message | CallbackQuery, session: AsyncSession, u
 @router.callback_query(F.data == "help")
 @router.message(F.text == keyboards.BTN_HELP)
 async def show_help(event: Message | CallbackQuery) -> None:
+    """Помощь + подсказка, как проверить сервис при ограничениях интернета."""
+    text = texts.HELP
+    if settings.public_base_url:
+        text += texts.SERVICE_STATUS_HINT.format(status_url=f"{settings.public_base_url.rstrip('/')}/status")
     if isinstance(event, CallbackQuery):
-        await event.message.edit_text(texts.HELP, reply_markup=keyboards.support_kb(), disable_web_page_preview=True)
+        await event.message.edit_text(text, reply_markup=keyboards.support_kb(), disable_web_page_preview=True)
         await event.answer()
     else:
-        await event.answer(texts.HELP, reply_markup=keyboards.support_kb(), disable_web_page_preview=True)
+        await event.answer(text, reply_markup=keyboards.support_kb(), disable_web_page_preview=True)

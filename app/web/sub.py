@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import base64
 import logging
-from datetime import timezone
+import time
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.models import Subscription
@@ -37,6 +38,51 @@ def _subscription_headers(sub: Subscription, used_bytes: int = 0) -> dict[str, s
     }
 
 
+#: Кэш состояния сервиса: проверять панели на каждый запрос нельзя
+_STATUS_CACHE: dict[str, object] = {"at": 0.0, "value": None}
+STATUS_CACHE_SECONDS = 60
+
+
+async def _service_status() -> dict:
+    """Собрать состояние сервиса (с кэшем на минуту)."""
+    now = time.time()
+    cached = _STATUS_CACHE.get("value")
+    if cached is not None and now - float(_STATUS_CACHE["at"]) < STATUS_CACHE_SECONDS:
+        return cached  # type: ignore[return-value]
+
+    from app.config import get_settings
+    from app.db.session import SessionMaker
+    from app.panels.registry import registry
+
+    settings = get_settings()
+    nodes: list[dict] = []
+    async with SessionMaker() as session:
+        for panel in await registry.all_panels(session):
+            entry = {"title": panel.name, "ok": False}
+            try:
+                entry["ok"] = await panel.health()
+            except Exception as exc:  # noqa: BLE001 - панель может быть недоступна
+                logger.warning("Статус: панель %s не ответила: %s", panel.name, exc)
+            nodes.append(entry)
+
+    # Источник подписок доступен, если жива хотя бы одна панель
+    value = {
+        "ok": bool(nodes) and any(node["ok"] for node in nodes),
+        "subscriptions_available": bool(nodes) and any(node["ok"] for node in nodes),
+        "payments": {
+            "stars": settings.stars_enabled,
+            "manual": bool(settings.manual_payment_details),
+            "crypto": bool(settings.cryptobot_token),
+            "wata": bool(settings.wata_token),
+        },
+        "nodes": nodes,
+        "checked_at": datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M"),
+    }
+    _STATUS_CACHE["at"] = now
+    _STATUS_CACHE["value"] = value
+    return value
+
+
 async def build_app(bot: "Bot | None" = None) -> FastAPI:
     """Собрать веб-приложение: публичная ссылка-подписка + админ-панель.
 
@@ -54,6 +100,59 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/status", response_class=HTMLResponse)
+    async def status_page(request: Request) -> Response:
+        """Публичная страница состояния сервиса.
+
+        Зачем: во время сбоев и ограничений клиент должен уметь проверить,
+        работает ли сервис, не заходя в Telegram. Показываем только страны и
+        состояние — никаких адресов нод и токенов.
+        """
+        snapshot = await _service_status()
+        if request.query_params.get("format") == "json":
+            return JSONResponse(snapshot)
+
+        rows = "".join(
+            f"<li><span class='dot {'ok' if node['ok'] else 'bad'}'></span>"
+            f"{node['title']} — {'доступна' if node['ok'] else 'недоступна'}</li>"
+            for node in snapshot["nodes"]
+        ) or "<li class='muted'>Ноды ещё не настроены</li>"
+
+        overall_ok = snapshot["ok"]
+        html = f"""<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Статус сервиса Kometa</title>
+<style>
+ body{{margin:0;background:#0f1117;color:#e8eaf0;font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}}
+ main{{max-width:520px;margin:10vh auto;padding:24px}}
+ .card{{background:#171a23;border:1px solid #2a2f3f;border-radius:14px;padding:22px}}
+ h1{{font-size:20px;margin:0 0 14px}}
+ .badge{{display:inline-block;padding:4px 12px;border-radius:999px;font-size:14px;
+        background:{'#16301f' if overall_ok else '#33191c'};color:{'#a7e6c1' if overall_ok else '#f3b6b6'}}}
+ ul{{list-style:none;padding:0;margin:16px 0 0}}
+ li{{padding:6px 0;border-bottom:1px solid #2a2f3f}}
+ li:last-child{{border:none}}
+ .dot{{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:9px}}
+ .dot.ok{{background:#45c07d}} .dot.bad{{background:#ef6b6b}}
+ .muted{{color:#98a0b3}}
+ footer{{margin-top:16px;font-size:13px}}
+ a{{color:#6ea8fe;text-decoration:none}}
+</style></head>
+<body><main><div class="card">
+ <h1>🛰 Kometa — состояние сервиса</h1>
+ <span class="badge">{'Всё работает' if overall_ok else 'Есть проблемы'}</span>
+ <ul>{rows}</ul>
+ <p class="muted" style="margin-top:16px">Обновлено: {snapshot['checked_at']} UTC</p>
+ <footer class="muted">
+   Если мобильный интернет не работает, попробуй Wi-Fi — при ограничениях у операторов
+   проводной интернет обычно продолжает работать.<br>
+   Вопросы — в поддержку из бота. <a href="?format=json">JSON</a>
+ </footer>
+</div></main></body></html>"""
+        return HTMLResponse(html)
 
     @app.get("/sub/{token}")
     async def get_subscription(token: str, request: Request) -> Response:
