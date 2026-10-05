@@ -47,11 +47,14 @@ def reply_menu() -> ReplyKeyboardMarkup:
     )
 
 
-def plans_kb(plans: list[Plan]) -> InlineKeyboardMarkup:
+def plans_kb(plans: list[Plan], show_stars: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for plan in plans:
         per_month = round(plan.price_rub / max(1, plan.days) * 30)
-        kb.button(text=f"{plan.title} — {plan.price_rub} ₽ ({per_month} ₽/мес)", callback_data=f"plan:{plan.id}")
+        label = f"{plan.title} — {plan.price_rub} ₽ ({per_month} ₽/мес)"
+        if show_stars and plan.price_stars:
+            label = f"{plan.title} — {plan.price_rub} ₽ или {plan.price_stars} ⭐"
+        kb.button(text=label, callback_data=f"plan:{plan.id}")
     kb.button(text="⬅️ Назад", callback_data="menu:main")
     kb.adjust(1)
     return kb.as_markup()

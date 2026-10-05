@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Kometa — Avatar C «Monogram K»</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #01150e; }
+  .stage { position: fixed; inset: 0; display: grid; place-items: center; }
+  svg { width: 100vmin; height: 100vmin; display: block; }
+</style>
+</head>
+<body>
+<div class="stage">
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Kometa — монограмма K со стрелой роста">
+  <defs>
+    <radialGradient id="bg" cx="36%" cy="28%" r="98%">
+      <stop offset="0%"   stop-color="#1aab75"/>
+      <stop offset="30%"  stop-color="#0e7350"/>
+      <stop offset="62%"  stop-color="#06432f"/>
+      <stop offset="100%" stop-color="#02231a"/>
+    </radialGradient>
+
+    <linearGradient id="sweep" gradientUnits="userSpaceOnUse" x1="40" y1="470" x2="440" y2="60">
+      <stop offset="0%"   stop-color="#4dffae" stop-opacity="0"/>
+      <stop offset="45%"  stop-color="#4dffae" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#d8ff66" stop-opacity="0.05"/>
+    </linearGradient>
+
+    <linearGradient id="k" gradientUnits="userSpaceOnUse" x1="160" y1="380" x2="344" y2="108">
+      <stop offset="0%"   stop-color="#35d98d"/>
+      <stop offset="50%"  stop-color="#6ff2a4"/>
+      <stop offset="100%" stop-color="#dcff5c"/>
+    </linearGradient>
+
+    <radialGradient id="aura" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#38ffa0" stop-opacity="0.26"/>
+      <stop offset="62%"  stop-color="#17c877" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#17c877" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="vig" cx="50%" cy="46%" r="74%">
+      <stop offset="52%"  stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000c08" stop-opacity="0.55"/>
+    </radialGradient>
+
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="22" result="far"/>
+      <feGaussianBlur stdDeviation="6"  result="near"/>
+      <feMerge>
+        <feMergeNode in="far"/>
+        <feMergeNode in="near"/>
+        <feMergeNode in="near"/>
+      </feMerge>
+    </filter>
+
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#sweep)"/>
+
+  <!-- бейдж -->
+  <circle cx="256" cy="256" r="213" fill="none" stroke="#7dffbe" stroke-width="3" opacity="0.22"/>
+  <circle cx="256" cy="256" r="213" fill="none" stroke="#dcff5c" stroke-width="9" opacity="0.16"
+          stroke-dasharray="140 1198" stroke-linecap="round" transform="rotate(-104 256 256)"/>
+
+  <ellipse cx="266" cy="250" rx="216" ry="204" fill="url(#aura)"/>
+
+  <!-- свечение знака -->
+  <g filter="url(#glow)" opacity="0.7" stroke="#3ceb95" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="176" y1="152" x2="176" y2="360" stroke-width="46"/>
+    <line x1="198" y1="256" x2="300" y2="152" stroke-width="48"/>
+    <line x1="198" y1="256" x2="306" y2="360" stroke-width="48"/>
+    <path d="M339.6 112.4 L329.7 181.7 L270.3 122.3 Z"/>
+  </g>
+
+  <!-- монограмма K -->
+  <g stroke="url(#k)" stroke-linecap="round" fill="none">
+    <line x1="176" y1="152" x2="176" y2="360" stroke-width="46"/>
+    <line x1="198" y1="256" x2="300" y2="152" stroke-width="48"/>
+    <line x1="198" y1="256" x2="306" y2="360" stroke-width="48"/>
+  </g>
+  <path d="M339.6 112.4 L329.7 181.7 L270.3 122.3 Z" fill="url(#k)"/>
+
+  <rect width="512" height="512" fill="url(#vig)"/>
+  <rect width="512" height="512" filter="url(#grain)" opacity="0.055" style="mix-blend-mode:overlay"/>
+</svg>
+</div>
+</body>
+</html>

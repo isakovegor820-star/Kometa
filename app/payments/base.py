@@ -49,8 +49,21 @@ class PaymentProvider(ABC):
     manual: bool = False
 
     @abstractmethod
-    async def create_invoice(self, order_id: int, amount_rub: int, title: str) -> Invoice:
-        """Создать счёт для заказа."""
+    async def create_invoice(
+        self,
+        order_id: int,
+        amount_rub: int,
+        title: str,
+        *,
+        price_override: int | None = None,
+    ) -> Invoice:
+        """Создать счёт для заказа.
+
+        :param price_override: цена в «родных» единицах провайдера (например,
+            звёзды для Telegram Stars). Нужна там, где рублёвая цена не
+            пересчитывается один-в-один: у Stars свой курс и своя сетка цен.
+            Если не задана — провайдер считает сам от ``amount_rub``.
+        """
 
     @abstractmethod
     async def check_payment(self, external_id: str) -> PaymentCheck:

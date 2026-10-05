@@ -141,9 +141,12 @@ async def main() -> None:
 
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     payments.init(bot)
+    logger.info("Способы оплаты: %s", ", ".join(p.code for p in payments.available()) or "нет")
 
     dispatcher = Dispatcher()
-    for observer in (dispatcher.message, dispatcher.callback_query):
+    # pre_checkout_query обязателен для оплаты в Stars — ему тоже нужны
+    # сессия БД и наш пользователь.
+    for observer in (dispatcher.message, dispatcher.callback_query, dispatcher.pre_checkout_query):
         observer.middleware(ThrottlingMiddleware())
         observer.middleware(DbSessionMiddleware())
         observer.middleware(UserMiddleware())

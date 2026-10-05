@@ -107,14 +107,26 @@ class StarsProvider(PaymentProvider):
         return text[:TITLE_LIMIT], text[:DESCRIPTION_LIMIT]
 
     # --- контракт PaymentProvider --------------------------------------
-    async def create_invoice(self, order_id: int, amount_rub: int, title: str) -> Invoice:
+    async def create_invoice(
+        self,
+        order_id: int,
+        amount_rub: int,
+        title: str,
+        *,
+        price_override: int | None = None,
+    ) -> Invoice:
         """Создать ссылку на счёт в звёздах.
 
         ``external_id`` — это payload счёта (``order:<order_id>``): другого
         идентификатора у ссылки на счёт нет, а по нему Telegram вернёт заказ
         в апдейте ``successful_payment``.
+
+        :param price_override: цена в звёздах из тарифа (``Plan.price_stars``).
+            Если не задана — считаем от рублей по курсу ``stars_per_rub``.
         """
-        stars = self.stars_for_rub(amount_rub)
+        stars = int(price_override) if price_override else self.stars_for_rub(amount_rub)
+        if stars <= 0:
+            raise PaymentError("Цена в звёздах должна быть больше нуля")
         payload = make_order_payload(order_id)
         title_text, description = self._invoice_texts(title)
 

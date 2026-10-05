@@ -45,6 +45,13 @@ TEST_CLIENT=0
 FORCE_REMOTE=0
 CURL_OPTS=()
 
+# Заполняются по ходу работы (нужны для итогового отчёта; заранее пустые,
+# чтобы `set -u` не ронял скрипт при повторном запуске, когда инбаунды уже есть).
+REALITY_ID=""
+AWG_ID=""
+REALITY_PUBKEY=""
+REALITY_SHORTID=""
+
 XUI_DIR="/usr/local/x-ui"
 XUI_BIN="${XUI_DIR}/x-ui"
 XUI_INSTALL_RESULT="/etc/x-ui/install-result.env"
@@ -146,14 +153,33 @@ local_ip() {
     { hostname -I 2>/dev/null | awk '{print $1}'; } || true
 }
 
+local_ips() { # все адреса этого сервера (включая публичный), по одному в строке
+    { hostname -I 2>/dev/null || true; } | tr ' ' '\n' | grep -v '^$' || true
+    local pub
+    pub="$(curl -fsS --max-time 6 https://api.ipify.org 2>/dev/null || true)"
+    [[ -n "$pub" ]] && printf '%s\n' "$pub"
+    return 0
+}
+
+# Панель на этом же сервере? Проверяем localhost, адреса из hostname -I и DNS-имена
+# (важно для случая PANEL_URL=https://panel.example.com/... — это тоже «своя» панель).
 is_local_panel() {
     local host
     host="$(printf '%s' "$PANEL_URL" | sed -E 's#^https?://##' | cut -d/ -f1 | cut -d: -f1)"
     case "$host" in
         localhost | 127.0.0.1 | ::1) return 0 ;;
     esac
-    local ip; ip="$(local_ip)"
-    [[ -n "$ip" && "$host" == "$ip" ]] && return 0
+    local ips ip resolved r
+    ips="$(local_ips | sort -u)"
+    for ip in $ips; do
+        [[ -n "$ip" && "$host" == "$ip" ]] && return 0
+    done
+    resolved="$(getent hosts "$host" 2>/dev/null | awk '{print $1}' || true)"
+    for r in $resolved; do
+        for ip in $ips; do
+            [[ -n "$ip" && "$r" == "$ip" ]] && return 0
+        done
+    done
     return 1
 }
 
@@ -486,6 +512,11 @@ print_port_checks() {
   # снаружи, с другого компьютера (TCP-порт Reality должен отвечать):
     nc -vz <IP_СЕРВЕРА> ${REALITY_PORT}
 
+  # если портов нет в firewall (install_panel.sh открывает 443/tcp и 51820/udp):
+    ufw allow ${REALITY_PORT}/tcp
+    ufw allow ${AWG_PORT}/udp
+    ufw status numbered
+
   # журнал панели, если что-то не поднялось:
     journalctl -u x-ui -n 50 --no-pager
 
@@ -515,9 +546,9 @@ EOF
         cat <<EOF
   inbound id : ${REALITY_ID}
   порт       : ${REALITY_PORT}/tcp
-  SNI (dest) : ${SNI}:443
-  shortId    : ${REALITY_SHORTID}
-  publicKey  : ${REALITY_PUBKEY}
+  SNI (dest) : ${SNI:-<не определён>}:443
+  shortId    : ${REALITY_SHORTID:-<см. панель>}
+  publicKey  : ${REALITY_PUBKEY:-<см. панель: Inbounds → инбаунд → клиент>}
   fingerprint: chrome, spiderX: /
 
   Клиентов создаёт бот (по одному на подписку) — вручную добавлять не нужно.
@@ -543,7 +574,7 @@ EOF
   1. Панель → Inbounds: оба инбаунда в статусе «enabled», Xray перезапущен
      (панель делает это сама в течение ~5 секунд после создания).
   2. Домен маскировки (проверка TLS 1.3 + h2 вручную):
-       openssl s_client -connect ${SNI}:443 -servername ${SNI} -tls1_3 -alpn h2 </dev/null | grep -E 'Protocol|ALPN'
+       openssl s_client -connect ${SNI:-<домен>}:443 -servername ${SNI:-<домен>} -tls1_3 -alpn h2 </dev/null | grep -E 'Protocol|ALPN'
      Ожидаем: Protocol: TLSv1.3 и ALPN protocol: h2
   3. Подключение с телефона: запусти скрипт с флагом --test-client и импортируй
      полученную ссылку vless:// в v2rayNG или Hiddify.
@@ -606,6 +637,14 @@ main() {
         if [[ -n "$reality_id" ]]; then
             ok "VLESS+Reality уже есть (id=${reality_id}) — пропускаю (идемпотентность)."
             REALITY_ID="$reality_id"
+            # Достаём параметры существующего инбаунда, чтобы напечатать их снова
+            # (streamSettings в API — это строка с JSON внутри, отсюда fromjson?).
+            REALITY_PUBKEY="$(printf '%s' "$existing" | jq -r --arg r "$REALITY_REMARK" \
+                '[.obj[]? | select(.remark == $r) | (.streamSettings | fromjson? | .realitySettings.settings.publicKey) // empty] | first // empty')"
+            REALITY_SHORTID="$(printf '%s' "$existing" | jq -r --arg r "$REALITY_REMARK" \
+                '[.obj[]? | select(.remark == $r) | (.streamSettings | fromjson? | .realitySettings.shortIds[0]) // empty] | first // empty')"
+            SNI="$(printf '%s' "$existing" | jq -r --arg r "$REALITY_REMARK" \
+                '[.obj[]? | select(.remark == $r) | (.streamSettings | fromjson? | .realitySettings.serverNames[0]) // empty] | first // empty')"
         else
             resolve_sni
             create_reality_inbound "$REALITY_REMARK" "$REALITY_PORT"

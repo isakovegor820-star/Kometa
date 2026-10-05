@@ -21,6 +21,7 @@ os.environ["PUBLIC_BASE_URL"] = "http://testserver"
 os.environ["TRIAL_DAYS"] = "3"
 os.environ["TRIAL_GB"] = "10"
 os.environ["TRIAL_DEVICES"] = "1"
+os.environ["STARS_ENABLED"] = "true"
 
 
 @pytest.fixture(autouse=True)
@@ -36,13 +37,16 @@ def reset_panel_registry():
 
 @pytest.fixture
 async def bot():
-    """Bot с заглушкой Telegram API (общий для всех тестов бота)."""
+    """Bot с заглушкой Telegram API; платежи инициализируются как в проде."""
     from aiogram import Bot
 
+    from app.payments.registry import payments
     from tests.fakes import BOT_TOKEN, FakeSession
 
     bot = Bot(token=BOT_TOKEN, session=FakeSession())
+    payments.init(bot)  # регистрирует Stars (нужен живой Bot)
     yield bot
+    await payments.close()
     await bot.session.close()
 
 
@@ -55,7 +59,7 @@ def dispatcher():
     from app.bot.middlewares import DbSessionMiddleware, UserMiddleware
 
     dp = Dispatcher()
-    for observer in (dp.message, dp.callback_query):
+    for observer in (dp.message, dp.callback_query, dp.pre_checkout_query):
         observer.middleware(DbSessionMiddleware())
         observer.middleware(UserMiddleware())
     dp.include_router(build_router())

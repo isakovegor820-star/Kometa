@@ -40,6 +40,7 @@ htmlcov/
 tests/
 docs/
 scripts/
+brand/
 pytest.ini
 README.md
 ТЗ.md

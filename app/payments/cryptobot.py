@@ -177,8 +177,19 @@ class CryptoBotProvider(PaymentProvider):
         return data.get("result")
 
     # --- контракт PaymentProvider --------------------------------------
-    async def create_invoice(self, order_id: int, amount_rub: int, title: str) -> Invoice:
-        """Создать счёт в USDT на сумму заказа."""
+    async def create_invoice(
+        self,
+        order_id: int,
+        amount_rub: int,
+        title: str,
+        *,
+        price_override: int | None = None,
+    ) -> Invoice:
+        """Создать счёт в USDT на сумму заказа.
+
+        ``price_override`` не используется: у крипты цена считается от рублей,
+        а не от «родных» единиц (звёзд), как у Telegram Stars.
+        """
         amount = self.amount_in_asset(amount_rub)
         params: dict[str, Any] = {
             "asset": self.ASSET,

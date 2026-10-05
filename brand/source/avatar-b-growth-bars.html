@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Kometa — Avatar B «Growth Bars»</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #f7fffb; }
+  .stage { position: fixed; inset: 0; display: grid; place-items: center; }
+  svg { width: 100vmin; height: 100vmin; display: block; }
+</style>
+</head>
+<body>
+<div class="stage">
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Kometa — восходящие столбцы и росток">
+  <defs>
+    <radialGradient id="bg" cx="30%" cy="20%" r="105%">
+      <stop offset="0%"   stop-color="#ffffff"/>
+      <stop offset="45%"  stop-color="#e6fcef"/>
+      <stop offset="100%" stop-color="#bfefd6"/>
+    </radialGradient>
+
+    <linearGradient id="bar" gradientUnits="userSpaceOnUse" x1="0" y1="400" x2="0" y2="190">
+      <stop offset="0%"   stop-color="#0b8f52"/>
+      <stop offset="55%"  stop-color="#22bb6e"/>
+      <stop offset="100%" stop-color="#4ade8a"/>
+    </linearGradient>
+
+    <linearGradient id="leaf" gradientUnits="userSpaceOnUse" x1="0" y1="206" x2="0" y2="130">
+      <stop offset="0%"   stop-color="#22b96b"/>
+      <stop offset="100%" stop-color="#a9f04a"/>
+    </linearGradient>
+
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#25d97a" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#25d97a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <ellipse cx="268" cy="264" rx="228" ry="222" fill="url(#halo)"/>
+
+  <!-- восходящие столбцы -->
+  <g>
+    <rect x="130" y="322" width="58" height="70"  rx="29" fill="url(#bar)" opacity="0.66"/>
+    <rect x="229" y="262" width="58" height="130" rx="29" fill="url(#bar)" opacity="0.84"/>
+    <rect x="328" y="196" width="58" height="196" rx="29" fill="url(#bar)"/>
+  </g>
+
+  <!-- росток на вершине -->
+  <g transform="translate(357 200)">
+    <path d="M0 0 C-6 -34 -36 -54 -72 -52 C-68 -14 -36 -2 0 0 Z" fill="url(#leaf)"/>
+    <path d="M0 0 C6 -34 36 -54 72 -52 C68 -14 36 -2 0 0 Z" fill="url(#leaf)" opacity="0.9"/>
+  </g>
+</svg>
+</div>
+</body>
+</html>

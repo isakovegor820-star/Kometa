@@ -45,12 +45,14 @@ PLANS_HEADER = (
 
 PLAN_CARD = (
     "💎 <b>{title}</b>\n\n"
-    "Цена: <b>{price} ₽</b> ({per_month} ₽ в месяц)\n"
+    "Цена: <b>{price} ₽</b> ({per_month} ₽ в месяц){stars_line}\n"
     "Срок: {days} дней\n"
     "Устройств: до {devices}\n"
     "Трафик: без ограничений\n\n"
     "Как удобнее оплатить?"
 )
+
+STARS_LINE = "\nИли <b>{stars} ⭐</b> в Telegram Stars — доступ включится сразу"
 
 PROVIDER_MANUAL = "🏦 Перевод по СБП / на карту"
 PROVIDER_CRYPTO = "🪙 Крипта (USDT/TON)"

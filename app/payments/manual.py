@@ -20,7 +20,14 @@ class ManualProvider(PaymentProvider):
         self.details = details or settings.manual_payment_details
         self.note = note or settings.manual_payment_note
 
-    async def create_invoice(self, order_id: int, amount_rub: int, title: str) -> Invoice:
+    async def create_invoice(
+        self,
+        order_id: int,
+        amount_rub: int,
+        title: str,
+        *,
+        price_override: int | None = None,
+    ) -> Invoice:
         instructions = (
             f"Переведи <b>{amount_rub} ₽</b> по реквизитам:\n\n"
             f"<code>{self.details or 'реквизиты не заполнены в .env'}</code>\n\n"

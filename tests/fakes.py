@@ -7,7 +7,15 @@ from datetime import datetime, timezone
 from aiogram import Bot
 from aiogram.client.session.base import BaseSession
 from aiogram.methods import TelegramMethod
-from aiogram.types import CallbackQuery, Chat, Message, Update, User as TgUser
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    Message,
+    PreCheckoutQuery,
+    SuccessfulPayment,
+    Update,
+    User as TgUser,
+)
 
 BOT_TOKEN = "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
@@ -41,7 +49,12 @@ class FakeSession(BaseSession):
             )
         if name == "GetMe":
             return TgUser(id=1, is_bot=True, first_name="Kometa", username="kometa_test_bot")
+        if name == "CreateInvoiceLink":
+            return "https://t.me/invoice/test-link"
         return True
+
+    def by_name(self, name: str) -> list[TelegramMethod]:
+        return [request for request in self.requests if type(request).__name__ == name]
 
     # --- удобные выборки для проверок -----------------------------------
     def texts(self) -> list[str]:
@@ -91,4 +104,40 @@ def make_update(text: str | None = None, callback_data: str | None = None, user_
     return Update(
         update_id=2,
         message=Message(message_id=2, date=datetime.now(timezone.utc), chat=chat, from_user=tg_user, text=text),
+    )
+
+
+def make_pre_checkout_update(order_id: int, amount: int, currency: str = "XTR", user_id: int = 42) -> Update:
+    """Апдейт pre_checkout_query — Telegram спрашивает разрешение на списание."""
+    return Update(
+        update_id=3,
+        pre_checkout_query=PreCheckoutQuery(
+            id="pc1",
+            from_user=TgUser(id=user_id, is_bot=False, first_name="Тест", username="tester"),
+            currency=currency,
+            total_amount=amount,
+            invoice_payload=f"order:{order_id}",
+        ),
+    )
+
+
+def make_stars_payment_update(order_id: int, amount: int, user_id: int = 42) -> Update:
+    """Апдейт successful_payment — звёзды списаны, пора выдать доступ."""
+    chat = Chat(id=user_id, type="private")
+    payment = SuccessfulPayment(
+        currency="XTR",
+        total_amount=amount,
+        invoice_payload=f"order:{order_id}",
+        telegram_payment_charge_id="tg-charge-1",
+        provider_payment_charge_id="provider-charge-1",
+    )
+    return Update(
+        update_id=4,
+        message=Message(
+            message_id=4,
+            date=datetime.now(timezone.utc),
+            chat=chat,
+            from_user=TgUser(id=user_id, is_bot=False, first_name="Тест", username="tester"),
+            successful_payment=payment,
+        ),
     )

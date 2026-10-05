@@ -20,7 +20,7 @@
 #  Скрипт ставит на каталог backups права 700, а на архив — 600.
 #
 #  Автоматизация (cron, каждый день в 04:30):
-#    30 4 * * * cd /root/kometa && bash scripts/backup.sh >> logs/backup.log 2>&1
+#    30 4 * * * cd /root/kometa && bash scripts/backup.sh >> /var/log/kometa-backup.log 2>&1
 # =============================================================================
 
 set -euo pipefail
@@ -153,15 +153,22 @@ backup_bot_db() { # backup_bot_db <каталог назначения>
 
 # ------------------------------------------------------------ бэкап панели ----
 backup_panel() { # backup_panel <каталог назначения>
-    local dest="$1" found=0 db
+    local dest="$1" found=0 db target
 
     for db in "$XUI_DB_NATIVE" "$XUI_DB_DOCKER"; do
         [[ -f "$db" ]] || continue
         found=1
+        # Имена разные: на одном сервере теоретически могут оказаться обе базы
+        # (нативная и докерная) — не перезаписываем одну другой.
+        if [[ "$db" == "$XUI_DB_NATIVE" ]]; then
+            target="${dest}/x-ui.db"
+        else
+            target="${dest}/x-ui-docker.db"
+        fi
         log "Копирую базу панели 3x-ui: ${db}"
-        copy_sqlite "$db" "${dest}/x-ui.db" || { warn "Не удалось скопировать ${db}"; continue; }
-        check_sqlite "${dest}/x-ui.db" || warn "Копия базы панели повреждена — проверь панель."
-        ok "База панели: x-ui.db ($(human_size "${dest}/x-ui.db"))"
+        copy_sqlite "$db" "$target" || { warn "Не удалось скопировать ${db}"; continue; }
+        check_sqlite "$target" || warn "Копия базы панели повреждена — проверь панель."
+        ok "База панели: $(basename "$target") ($(human_size "$target"))"
     done
 
     # Конфиги панели (что нашлось — то и копируем).

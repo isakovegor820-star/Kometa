@@ -29,10 +29,10 @@ async def seed_plans() -> None:
     from app.db.models import Plan
 
     defaults = [
-        dict(code="m1", title="1 месяц", days=30, price_rub=199, price_stars=150, devices_limit=3, sort_order=1),
-        dict(code="m3", title="3 месяца", days=90, price_rub=499, price_stars=350, devices_limit=3, sort_order=2),
-        dict(code="m6", title="6 месяцев", days=180, price_rub=890, price_stars=650, devices_limit=3, sort_order=3),
-        dict(code="m12", title="12 месяцев", days=365, price_rub=1590, price_stars=1100, devices_limit=3, sort_order=4),
+        dict(code="m1", title="1 месяц", days=30, price_rub=199, price_stars=180, devices_limit=3, sort_order=1),
+        dict(code="m3", title="3 месяца", days=90, price_rub=499, price_stars=450, devices_limit=3, sort_order=2),
+        dict(code="m6", title="6 месяцев", days=180, price_rub=890, price_stars=800, devices_limit=3, sort_order=3),
+        dict(code="m12", title="12 месяцев", days=365, price_rub=1590, price_stars=1420, devices_limit=3, sort_order=4),
     ]
     async with SessionMaker() as session:
         for item in defaults:

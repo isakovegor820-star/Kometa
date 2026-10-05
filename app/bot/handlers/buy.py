@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import Bot, F, Router
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards, texts
@@ -38,7 +38,8 @@ async def send_plans(target: Message | CallbackQuery, session: AsyncSession) -> 
     if not plans:
         text, markup = texts.WELCOME, keyboards.back_to_menu_kb()
     else:
-        text, markup = texts.PLANS_HEADER, keyboards.plans_kb(plans)
+        text = texts.PLANS_HEADER
+        markup = keyboards.plans_kb(plans, show_stars=settings.stars_enabled)
     if isinstance(target, CallbackQuery):
         await target.message.edit_text(text, reply_markup=markup)
         await target.answer()
@@ -69,12 +70,17 @@ async def cb_plan_card(call: CallbackQuery, session: AsyncSession) -> None:
         await call.answer("Приём оплаты временно недоступен", show_alert=True)
         return
 
+    stars_line = ""
+    if settings.stars_enabled and plan.price_stars:
+        stars_line = texts.STARS_LINE.format(stars=plan.price_stars)
+
     text = texts.PLAN_CARD.format(
         title=plan.title,
         price=plan.price_rub,
         per_month=round(plan.price_rub / max(1, plan.days) * 30),
         days=plan.days,
         devices=plan.devices_limit,
+        stars_line=stars_line,
     )
     markup = keyboards.providers_kb(plan.id, [(p.code, PROVIDER_TITLES.get(p.code, p.title)) for p in available])
     await call.message.edit_text(text, reply_markup=markup)
@@ -94,7 +100,14 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
     title = f"{texts.BRAND}: {plan.title}"
 
     try:
-        invoice = await provider.create_invoice(order.id, order.amount_rub, title)
+        invoice = await provider.create_invoice(
+            order.id,
+            order.amount_rub,
+            title,
+            # У Stars своя сетка цен и свой курс — берём цену из тарифа,
+            # а не пересчитываем из рублей.
+            price_override=plan.price_stars or None,
+        )
     except PaymentError as exc:
         logger.warning("Ошибка создания счёта: %s", exc)
         await call.message.edit_text(texts.ERROR_GENERIC, reply_markup=keyboards.back_to_menu_kb())
@@ -226,6 +239,38 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
         f"💰 Оплата: заказ #{order.id}, {order.amount_rub} ₽, {plan.title if plan else '—'}, "
         f"пользователь {user.display_name} (<code>{user.tg_id}</code>)",
     )
+
+
+@router.pre_checkout_query()
+async def on_pre_checkout(query: PreCheckoutQuery, session: AsyncSession) -> None:
+    """Подтверждение счёта ДО списания звёзд.
+
+    Telegram ждёт ответ 10 секунд и отменяет платёж, если ответа нет, —
+    поэтому этот хендлер обязателен для оплаты в Stars.
+    """
+    order_id = parse_order_id_from_payload(query.invoice_payload)
+    order = await orders.get_order(session, order_id) if order_id else None
+
+    if order is None:
+        await query.answer(ok=False, error_message="Заказ не найден. Открой меню и оформи заказ заново.")
+        return
+    if order.status != "pending":
+        await query.answer(ok=False, error_message="Этот заказ уже оплачен. Открой «Моя подписка».")
+        return
+
+    plan = await orders.get_plan(session, order.plan_id) if order.plan_id else None
+    if query.currency != "XTR" or (plan and plan.price_stars and query.total_amount != plan.price_stars):
+        logger.warning(
+            "Stars: несовпадение счёта order=%s currency=%s amount=%s expected=%s",
+            order.id,
+            query.currency,
+            query.total_amount,
+            plan.price_stars if plan else None,
+        )
+        await query.answer(ok=False, error_message="Сумма счёта не совпадает с тарифом. Оформи заказ заново.")
+        return
+
+    await query.answer(ok=True)
 
 
 @router.message(F.successful_payment)
