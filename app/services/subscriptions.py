@@ -140,15 +140,28 @@ async def activate_plan(
     sub = await get_subscription(session, user.id)
 
     if sub is None or not sub.panel_user_uuid:
-        panel_user = await panel.create_user(
-            UserSpec(
-                email=_panel_email(user),
-                days=days,
+        spec = UserSpec(
+            email=_panel_email(user),
+            days=days,
+            traffic_gb=plan.traffic_limit_gb,
+            devices=plan.devices_limit,
+            note=plan.code,
+        )
+        try:
+            panel_user = await panel.create_user(spec)
+        except PanelError:
+            # Панель уже знает такого пользователя (например, БД бота восстановили
+            # из бэкапа). Не теряем оплаченный доступ — находим и продлеваем.
+            existing = await panel.find_user_by_email(spec.email)
+            if existing is None:
+                raise
+            panel_user = await panel.update_user(
+                existing.uuid,
+                extend_days=days,
                 traffic_gb=plan.traffic_limit_gb,
                 devices=plan.devices_limit,
-                note=plan.code,
+                enable=True,
             )
-        )
         if sub is None:
             sub = Subscription(user_id=user.id, subscription_token=new_subscription_token())
             session.add(sub)

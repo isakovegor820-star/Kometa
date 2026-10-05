@@ -34,6 +34,15 @@ def _form(request: httpx.Request) -> dict[str, str]:
     return dict(urllib.parse.parse_qsl(request.content.decode("utf-8")))
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    """Привести settings/streamSettings к словарю (панель отдаёт и строку, и объект)."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        return json.loads(value)
+    return {}
+
+
 def _vless_inbound(inbound_id: int = 1) -> dict[str, Any]:
     """Инбаунд VLESS + TCP + Reality (как их отдаёт и старая, и новая панель)."""
     return {
@@ -75,8 +84,21 @@ class FakeXui:
         csrf: bool = False,
         subscription: str | None = None,
         subscription_status: int = 200,
+        fail_list: str = "",
+        require_auth: bool = False,
     ) -> None:
-        self.inbounds = inbounds if inbounds is not None else [_vless_inbound(), _wireguard_inbound()]
+        raw_inbounds = inbounds if inbounds is not None else [_vless_inbound(), _wireguard_inbound()]
+        # Внутри держим settings/streamSettings словарями (чтобы можно было
+        # менять список клиентов), а в ответе отдаём в той форме, в какой их
+        # прислали: строкой (3x-ui <= v3.0) или объектом (v3.9).
+        self.inbounds: list[dict[str, Any]] = []
+        self._string_settings: dict[int, bool] = {}
+        for item in raw_inbounds:
+            inbound = dict(item)
+            self._string_settings[inbound["id"]] = isinstance(inbound.get("settings"), str)
+            inbound["settings"] = _as_dict(inbound.get("settings"))
+            inbound["streamSettings"] = _as_dict(inbound.get("streamSettings"))
+            self.inbounds.append(inbound)
         self.token = token
         self.username = username
         self.password = password
@@ -84,6 +106,8 @@ class FakeXui:
         self.csrf = csrf
         self.subscription = subscription
         self.subscription_status = subscription_status
+        self.fail_list = fail_list
+        self.require_auth = require_auth
 
         self.requests: list[httpx.Request] = []
         self.login_count = 0
@@ -103,13 +127,21 @@ class FakeXui:
     def paths(self) -> list[str]:
         return [request.url.path for request in self.requests]
 
+    def wire_inbounds(self) -> list[dict[str, Any]]:
+        """Инбаунды в том виде, в каком их отдаёт ``/panel/api/inbounds/list``."""
+        result = []
+        for inbound in self.inbounds:
+            item = dict(inbound)
+            if self._string_settings.get(inbound["id"], True):
+                item["settings"] = json.dumps(inbound["settings"])
+                item["streamSettings"] = json.dumps(inbound["streamSettings"])
+            result.append(item)
+        return result
+
     def clients_of(self, inbound_id: int) -> list[dict[str, Any]]:
         for inbound in self.inbounds:
             if inbound["id"] == inbound_id:
-                settings = inbound["settings"]
-                if isinstance(settings, str):
-                    settings = json.loads(settings)
-                return settings["clients"]
+                return inbound["settings"]["clients"]
         raise AssertionError(f"нет инбаунда {inbound_id}")
 
     def find_client(self, uuid: str) -> dict[str, Any] | None:
@@ -120,6 +152,8 @@ class FakeXui:
         return None
 
     def _authed(self, request: httpx.Request) -> bool:
+        if not self.require_auth:
+            return True
         auth = request.headers.get("Authorization", "")
         if self.token and auth == f"Bearer {self.token}":
             return True
@@ -184,7 +218,9 @@ class FakeXui:
         method = request.method
 
         if method == "GET" and path == "/panel/api/inbounds/list":
-            return self._ok(self.inbounds)
+            if self.fail_list:
+                return self._fail(self.fail_list)
+            return self._ok(self.wire_inbounds())
 
         # --- старое API (3x-ui <= v3.0.x) ------------------------------
         if self.legacy:
@@ -222,9 +258,12 @@ class FakeXui:
     def _legacy_add(self, form: dict[str, str]) -> httpx.Response:
         inbound_id = int(form["id"])
         client = json.loads(form["settings"])["clients"][0]
-        if self.find_client(client["id"]) is not None:
-            return self._fail("client already exists")
-        self.clients_of(inbound_id).append(client)
+        clients = self.clients_of(inbound_id)
+        # Один и тот же клиент (uuid/subId) в разных инбаундах — это норма,
+        # повторная вставка того же email в тот же инбаунд — ошибка.
+        if any(item.get("email") == client["email"] for item in clients):
+            return self._fail(f"email already exists: {client['email']}")
+        clients.append(dict(client))
         return self._ok(None, "Inbound client added successfully")
 
     def _legacy_update(self, uuid: str, form: dict[str, str]) -> httpx.Response:
@@ -286,9 +325,17 @@ class FakeXui:
 
 
 def make_panel(fake: FakeXui, **kwargs: Any) -> tuple[XuiPanel, httpx.AsyncClient]:
-    """Собрать панель на общем httpx-клиенте с MockTransport (без сети)."""
+    """Собрать панель на общем httpx-клиенте с MockTransport (без сети).
+
+    По умолчанию панель авторизуется API-токеном: тестам, которые проверяют не
+    авторизацию, логин по паролю только мешал бы. Тесты авторизации передают
+    свои ``token``/``username``/``password``.
+    """
     client = fake.client()
-    panel = XuiPanel(BASE, sub_base=SUB_BASE, client=client, **kwargs)
+    kwargs.setdefault("sub_base", SUB_BASE)
+    if not kwargs.get("username") and not kwargs.get("token"):
+        kwargs["token"] = TOKEN
+    panel = XuiPanel(BASE, client=client, **kwargs)
     return panel, client
 
 
@@ -297,7 +344,7 @@ def make_panel(fake: FakeXui, **kwargs: Any) -> tuple[XuiPanel, httpx.AsyncClien
 # ---------------------------------------------------------------------------
 async def test_login_by_password_sends_form_and_keeps_cookie():
     """Логин по паролю: POST /login формой, cookie едет в следующих запросах."""
-    fake = FakeXui(token="", csrf=False)
+    fake = FakeXui(token="", csrf=False, require_auth=True)
     panel, client = make_panel(fake, username="admin", password="hunter2")
     async with client:
         assert await panel.health() is True
@@ -316,7 +363,7 @@ async def test_login_by_password_sends_form_and_keeps_cookie():
 
 async def test_login_uses_csrf_token_when_panel_requires_it():
     """3x-ui v3.x закрывает /login CSRF-мидлварью: токен берём из /csrf-token."""
-    fake = FakeXui(token="", csrf=True)
+    fake = FakeXui(token="", csrf=True, require_auth=True)
     panel, client = make_panel(fake, username="admin", password="hunter2")
     async with client:
         assert await panel.health() is True
@@ -329,7 +376,7 @@ async def test_login_uses_csrf_token_when_panel_requires_it():
 
 async def test_token_mode_uses_bearer_and_never_logs_in():
     """С API-токеном логин не выполняется, а заголовок Bearer уходит всегда."""
-    fake = FakeXui(token=TOKEN)
+    fake = FakeXui(token=TOKEN, require_auth=True)
     panel, client = make_panel(fake, token=TOKEN, username="admin", password="hunter2")
     async with client:
         assert await panel.health() is True
@@ -340,7 +387,7 @@ async def test_token_mode_uses_bearer_and_never_logs_in():
 
 async def test_expired_session_causes_relogin_and_retry():
     """Протухшая cookie: панель отвечает 404, клиент логинится заново и повторяет."""
-    fake = FakeXui(token="", csrf=False)
+    fake = FakeXui(token="", csrf=False, require_auth=True)
     panel, client = make_panel(fake, username="admin", password="hunter2")
     async with client:
         assert await panel.health() is True
@@ -454,9 +501,8 @@ async def test_create_user_flow_disabled_and_unlimited():
     async with client:
         created = await panel.create_user(UserSpec(email="trial_1", days=0, traffic_gb=0, devices=1))
 
-    sent = json.loads(_form(fake.requests[-1])["clients"] if False else _form(
-        [r for r in fake.requests if r.url.path.endswith("/addClient")][0]
-    )["settings"])["clients"][0]
+    add_request = next(r for r in fake.requests if r.url.path.endswith("/addClient"))
+    sent = json.loads(_form(add_request)["settings"])["clients"][0]
     assert sent["expiryTime"] == 0
     assert sent["totalGB"] == 0
     assert sent["flow"] == ""
@@ -481,22 +527,44 @@ async def test_create_user_falls_back_to_v3_clients_api():
     async with client:
         created = await panel.create_user(UserSpec(email="v3_user", days=10, traffic_gb=5, devices=2))
 
-    add_requests = [r for r in fake.requests if r.url.path == "/panel/api/clients/add"]
-    assert len(add_requests) == 1, "в API v3 клиент добавляется одним вызовом"
-    payload = json.loads(add_requests[0].content.decode())
-    assert payload["inboundIds"] == [1, 2]
-    assert payload["client"]["email"] == "v3_user"
-    assert payload["client"]["totalGB"] == 5 * GIB
-    assert payload["client"]["limitIp"] == 2
-    assert payload["client"]["id"] == created.uuid
-    assert payload["client"]["flow"] == "xtls-rprx-vision"
+        add_requests = [r for r in fake.requests if r.url.path == "/panel/api/clients/add"]
+        assert len(add_requests) == 1, "в API v3 клиент добавляется одним вызовом"
+        payload = json.loads(add_requests[0].content.decode())
+        assert payload["inboundIds"] == [1, 2]
+        assert payload["client"]["email"] == "v3_user"
+        assert payload["client"]["totalGB"] == 5 * GIB
+        assert payload["client"]["limitIp"] == 2
+        assert payload["client"]["id"] == created.uuid
+        assert payload["client"]["flow"] == "xtls-rprx-vision"
 
-    # повторное обращение к старым маршрутам больше не происходит
-    legacy_calls = [r for r in fake.requests if r.url.path.endswith("/addClient")]
-    assert len(legacy_calls) == 1
-    async with client:
+        # повторное обращение к старым маршрутам больше не происходит
+        legacy_calls = [r for r in fake.requests if r.url.path.endswith("/addClient")]
+        assert len(legacy_calls) == 1
         await panel.create_user(UserSpec(email="v3_user_2", days=10))
-    assert len([r for r in fake.requests if r.url.path.endswith("/addClient")]) == 1
+        assert len([r for r in fake.requests if r.url.path.endswith("/addClient")]) == 1
+
+        # read-путь тоже переключился на API v3
+        user = await panel.get_user(created.uuid)
+        assert user is not None and user.email == "v3_user"
+
+
+async def test_v3_api_used_for_update_and_delete_when_legacy_missing():
+    """Если старых маршрутов нет, через API v3 идут и обновление, и удаление."""
+    fake = FakeXui(legacy=False)
+    panel, client = make_panel(fake, inbound_ids=[1, 2])
+    async with client:
+        created = await panel.create_user(UserSpec(email="v3_full", days=3, traffic_gb=1, devices=1))
+        updated = await panel.update_user(created.uuid, extend_days=30, enable=False, devices=9)
+        assert updated.enabled is False
+        assert updated.devices_limit == 9
+
+        await panel.delete_user(created.uuid)
+        assert await panel.get_user(created.uuid) is None
+
+    assert "/panel/api/clients/update/v3_full" in fake.paths()
+    assert "/panel/api/clients/del/v3_full" in fake.paths()
+    dead_routes = [p for p in fake.paths() if "updateClient" in p or "delClient" in p]
+    assert not dead_routes, "старые маршруты больше не должны дёргаться"
 
 
 # ---------------------------------------------------------------------------
@@ -529,6 +597,22 @@ async def test_get_user_returns_none_for_unknown_uuid():
     panel, client = make_panel(fake)
     async with client:
         assert await panel.get_user("00000000-0000-0000-0000-000000000000") is None
+
+
+async def test_find_user_by_email_returns_state_or_none():
+    """Поиск по email (нужен боту для восстановления после сбоя БД)."""
+    fake = FakeXui()
+    panel, client = make_panel(fake, inbound_ids=[1, 2])
+    async with client:
+        created = await panel.create_user(UserSpec(email="restore_me", days=4, devices=2))
+        found = await panel.find_user_by_email("restore_me")
+        missing = await panel.find_user_by_email("nobody@example.com")
+
+    assert found is not None
+    assert found.uuid == created.uuid
+    assert found.email == "restore_me"
+    assert found.subscription_url == created.subscription_url
+    assert missing is None
 
 
 async def test_update_user_extends_active_subscription_from_current_expiry():
@@ -667,18 +751,26 @@ async def test_get_configs_without_sub_base_raises():
 #  Надёжность
 # ---------------------------------------------------------------------------
 async def test_success_false_becomes_panel_error_with_panel_message():
-    """``success=false`` → PanelError с сообщением панели."""
+    """``success=false`` → PanelError с сообщением панели (а не «тихий» пустой ответ)."""
+    fake = FakeXui(token=TOKEN, require_auth=True, fail_list="database is locked")
+    panel, client = make_panel(fake, token=TOKEN)
+    async with client:
+        with pytest.raises(PanelError, match="database is locked"):
+            await panel.list_inbounds()
+        assert await panel.health() is False
+
+
+async def test_get_user_survives_missing_traffic_record():
+    """Нет записи о трафике — used_bytes=0, состояние клиента не теряется."""
     fake = FakeXui()
     panel, client = make_panel(fake, inbound_ids=[1])
     async with client:
-        created = await panel.create_user(UserSpec(email="user_10", days=1))
-        fake.traffic["user_10"] = {"up": 1, "down": 1}
-        # удаляем клиента в обход API, чтобы getClientTraffics вернул success=false
-        for inbound in fake.inbounds:
-            fake.clients_of(inbound["id"]).clear()
-        with pytest.raises(PanelError, match="no traffic record"):
-            await panel._client_traffic("user_10")
-        assert created.uuid  # создание при этом прошло штатно
+        created = await panel.create_user(UserSpec(email="user_11", days=2))
+        user = await panel.get_user(created.uuid)
+
+    assert user is not None
+    assert user.used_bytes == 0
+    assert "no traffic record" in user.raw["traffic_error"]
 
 
 async def test_http_error_and_unreachable_panel_raise_panel_error():
@@ -687,28 +779,27 @@ async def test_http_error_and_unreachable_panel_raise_panel_error():
     def boom(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("network is unreachable", request=request)
 
-    broken = XuiPanel(BASE, token=TOKEN, client=httpx.AsyncClient(transport=httpx.MockTransport(boom)))
-    async with broken._client as client:  # noqa: SLF001 - проверяем именно этот клиент
-        assert broken._client is client
-        assert await broken.health() is False
+    unreachable_client = httpx.AsyncClient(transport=httpx.MockTransport(boom))
+    unreachable = XuiPanel(BASE, token=TOKEN, client=unreachable_client)
+    async with unreachable_client:
+        assert await unreachable.health() is False
         with pytest.raises(PanelError, match="сетевая ошибка"):
-            await broken.list_inbounds()
+            await unreachable.list_inbounds()
 
-    error_fake = FakeXui()
-    panel, client = make_panel(error_fake, token=TOKEN)
-    async with client:
+    def panic(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"success": False, "msg": "panic"})
+
+    broken_client = httpx.AsyncClient(transport=httpx.MockTransport(panic))
+    broken = XuiPanel(BASE, token=TOKEN, client=broken_client)
+    async with broken_client:
         with pytest.raises(PanelError, match="HTTP 500"):
-
-            async def handler(request: httpx.Request) -> httpx.Response:
-                return httpx.Response(500, json={"success": False, "msg": "panic"})
-
-            panel._client._transport = httpx.MockTransport(handler)  # noqa: SLF001
-            await panel.list_inbounds()
+            await broken.list_inbounds()
+        assert await broken.health() is False
 
 
 async def test_health_returns_false_on_bad_token_instead_of_raising():
     """health() не бросает исключений даже при отказе авторизации."""
-    fake = FakeXui(token=TOKEN)
+    fake = FakeXui(token=TOKEN, require_auth=True)
     panel, client = make_panel(fake, token="wrong-token")
     async with client:
         assert await panel.health() is False

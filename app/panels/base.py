@@ -78,6 +78,16 @@ class PanelClient(ABC):
     async def get_user(self, uuid: str) -> PanelUser | None:
         """Получить состояние пользователя или None, если его нет."""
 
+    async def find_user_by_email(self, email: str) -> PanelUser | None:
+        """Найти пользователя по логину (email).
+
+        Нужен для восстановления: если панель уже знает такого пользователя
+        (например, БД бота восстановили из бэкапа), мы не должны терять
+        оплаченный доступ — находим его и продлеваем.
+        По умолчанию панель может не поддерживать поиск.
+        """
+        return None
+
     @abstractmethod
     async def update_user(
         self,

@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     manual_payment_note: str = ""
     cryptobot_token: str = ""
     stars_enabled: bool = False
+    #: Курс для счетов в крипте: сколько рублей стоит 1 USDT (API курса рубля не отдаёт).
+    crypto_rub_per_usdt: float = 95.0
+    #: Курс для Stars: сколько звёзд стоит 1 рубль (у Telegram нет единого курса).
+    stars_per_rub: float = 0.75
 
     log_level: str = "INFO"
 

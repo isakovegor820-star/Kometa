@@ -23,6 +23,45 @@ os.environ["TRIAL_GB"] = "10"
 os.environ["TRIAL_DEVICES"] = "1"
 
 
+@pytest.fixture(autouse=True)
+def reset_panel_registry():
+    """Реестр панелей — процессный кэш; между тестами его нужно очищать,
+    иначе пользователи «перетекают» из теста в тест."""
+    from app.panels.registry import registry
+
+    registry._cache.clear()
+    yield
+    registry._cache.clear()
+
+
+@pytest.fixture
+async def bot():
+    """Bot с заглушкой Telegram API (общий для всех тестов бота)."""
+    from aiogram import Bot
+
+    from tests.fakes import BOT_TOKEN, FakeSession
+
+    bot = Bot(token=BOT_TOKEN, session=FakeSession())
+    yield bot
+    await bot.session.close()
+
+
+@pytest.fixture(scope="session")
+def dispatcher():
+    """Dispatcher собирается ОДИН раз: роутеры — модульные синглтоны."""
+    from aiogram import Dispatcher
+
+    from app.bot.handlers import build_router
+    from app.bot.middlewares import DbSessionMiddleware, UserMiddleware
+
+    dp = Dispatcher()
+    for observer in (dp.message, dp.callback_query):
+        observer.middleware(DbSessionMiddleware())
+        observer.middleware(UserMiddleware())
+    dp.include_router(build_router())
+    return dp
+
+
 @pytest.fixture
 async def session():
     """Чистая БД на каждый тест + справочник тарифов."""

@@ -84,6 +84,17 @@ class _RouteMissing(Exception):
     """Маршрут эндпоинта отсутствует в этой версии панели (HTTP 404/405)."""
 
 
+def _looks_like_auth_failure(status_code: int) -> bool:
+    """Похож ли ответ на «сессия недействительна».
+
+    3x-ui отвечает 401/403 на запрос с неверным Bearer-токеном и просто 302/404,
+    если cookie-сессия кончилась (``checkAPIAuth`` в
+    ``internal/web/controller/api.go``: без логина неизвестный путь отдаёт 404).
+    Поэтому 404 тоже считается поводом перелогиниться — но только один раз.
+    """
+    return status_code in (401, 403, 404, 405) or 300 <= status_code < 400
+
+
 # ---------------------------------------------------------------------------
 #  Вспомогательные функции
 # ---------------------------------------------------------------------------
@@ -323,16 +334,18 @@ class XuiPanel(PanelClient):
             return
         await self._login()
 
-    async def _relogin(self) -> None:
-        """Перелогиниться, если сессия протухла. Ошибку логина глотаем.
+    async def _relogin(self) -> str:
+        """Перелогиниться, если сессия протухла.
 
-        Нужно, чтобы отличить протухшую cookie от реально отсутствующего
-        маршрута: 3x-ui отдаёт 404 и в том, и в другом случае.
+        :return: пустая строка при успехе, иначе текст ошибки логина. Ошибку не
+            поднимаем: по ответу панели нужно ещё отличить протухшую cookie от
+            реально отсутствующего маршрута (3x-ui отдаёт 404 в обоих случаях).
         """
         try:
             await self._login(force=True)
-        except PanelError:
-            pass
+        except PanelError as exc:
+            return str(exc)
+        return ""
 
     async def _fetch_csrf_token(self) -> str:
         """Получить CSRF-токен панели (нужен для ``POST /login`` в 3x-ui v3.x).
@@ -404,21 +417,19 @@ class XuiPanel(PanelClient):
             вызывающий код переключается на API ``/panel/api/clients/*``.
         :raises PanelError: сеть, таймаут, HTTP-ошибка, ``success=false``.
         """
-        response: httpx.Response | None = None
-        for attempt in (0, 1):
-            if not self.token:
-                await self._ensure_auth()
-            response = await self._send(method, path, data=data, json_body=json_body)
-            if attempt == 0 and not self.token:
-                # Протухшая сессия: 3x-ui отвечает 401/403/302, а на /panel/api/*
-                # без валидной сессии — вообще 404. Пробуем перелогиниться.
-                expired = response.status_code in (401, 403, 405) or 300 <= response.status_code < 400
-                if expired or (legacy_route and response.status_code == 404):
-                    await self._relogin()
-                    continue
-            break
+        if not self.token:
+            await self._ensure_auth()
+        response = await self._send(method, path, data=data, json_body=json_body)
 
-        assert response is not None  # цикл всегда выполняет хотя бы одну итерацию
+        if not self.token and _looks_like_auth_failure(response.status_code):
+            # Протухшая сессия: 3x-ui отвечает 401/403/302, а на /panel/api/*
+            # без валидной сессии — вообще 404. Пробуем перелогиниться и
+            # повторить запрос ровно один раз.
+            error = await self._relogin()
+            if error:
+                raise PanelError(f"не удалось восстановить сессию панели: {error}")
+            response = await self._send(method, path, data=data, json_body=json_body)
+
         if legacy_route and response.status_code in (404, 405):
             raise _RouteMissing(f"{method} {path}")
         if response.status_code == 401:
@@ -470,13 +481,27 @@ class XuiPanel(PanelClient):
         JSON-строка, в v3.9 — уже объект, поэтому разбор идёт через
         :func:`_as_json_dict`.
         """
+        return XuiPanel._find_clients(inbounds, "id", uuid)
+
+    @staticmethod
+    def _find_client_by_email(
+        inbounds: list[dict[str, Any]], email: str
+    ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        """Найти клиента по email во всех инбаундах."""
+        return XuiPanel._find_clients(inbounds, "email", email)
+
+    @staticmethod
+    def _find_clients(
+        inbounds: list[dict[str, Any]], field: str, value: str
+    ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        """Найти клиентов с заданным значением поля (``id`` или ``email``)."""
         found: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for inbound in inbounds:
             clients = _as_json_dict(inbound.get("settings")).get("clients")
             if not isinstance(clients, list):
                 continue
             for client in clients:
-                if isinstance(client, dict) and str(client.get("id") or "") == uuid:
+                if isinstance(client, dict) and str(client.get(field) or "") == value:
                     found.append((inbound, client))
         return found
 
@@ -650,7 +675,25 @@ class XuiPanel(PanelClient):
         found = self._find_client(inbounds, uuid)
         if not found:
             return None
+        return await self._build_panel_user(found)
 
+    async def find_user_by_email(self, email: str) -> PanelUser | None:
+        """Найти клиента по email (нужно для восстановления после сбоя БД бота).
+
+        Панель хранит email в поле ``email`` клиента; поиск идёт по всем
+        инбаундам панели (не только по ``inbound_ids``), чтобы найти клиента,
+        даже если состав инбаундов с тех пор поменялся.
+        """
+        inbounds = await self._fetch_inbounds()
+        found = self._find_client_by_email(inbounds, email)
+        if not found:
+            return None
+        return await self._build_panel_user(found)
+
+    async def _build_panel_user(
+        self, found: list[tuple[dict[str, Any], dict[str, Any]]]
+    ) -> PanelUser:
+        """Собрать :class:`PanelUser` по найденным вхождениям клиента."""
         inbound, client = found[0]
         email = str(client.get("email") or "")
         used_bytes = 0
@@ -663,7 +706,7 @@ class XuiPanel(PanelClient):
                 traffic_error = str(exc)
 
         return PanelUser(
-            uuid=str(client.get("id") or uuid),
+            uuid=str(client.get("id") or ""),
             email=email,
             enabled=bool(client.get("enable", True)),
             expires_at=_ms_to_datetime(client.get("expiryTime")),
@@ -791,12 +834,17 @@ class XuiPanel(PanelClient):
 
         url = self._subscription_url(sub_id)
         try:
-            response = await self._client.get(url)
+            response = await self._client.get(url, follow_redirects=True)
         except httpx.TimeoutException as exc:
             raise PanelError(f"сервис подписок не ответил за {self.timeout:g} с: {url}") from exc
         except httpx.HTTPError as exc:
             raise PanelError(f"не удалось обратиться к сервису подписок {url}: {exc}") from exc
 
+        if 300 <= response.status_code < 400:
+            raise PanelError(
+                f"сервис подписок {url} отвечает редиректом (HTTP {response.status_code}) — "
+                "укажи в sub_base адрес, который отдаёт подписку напрямую"
+            )
         if response.status_code >= 400:
             raise PanelError(
                 f"сервис подписок вернул HTTP {response.status_code} для {url} — "

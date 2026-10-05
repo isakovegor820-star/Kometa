@@ -93,7 +93,7 @@ class StarsProvider(PaymentProvider):
         if self.stars_per_rub <= 0:
             raise PaymentError(f"Курс stars_per_rub должен быть больше нуля, а не {self.stars_per_rub!r}")
         try:
-            stars = (Decimal(amount_rub) * Decimal(str(self.stars_per_rub))).to_integral_value(
+            stars = (Decimal(str(amount_rub)) * Decimal(str(self.stars_per_rub))).to_integral_value(
                 rounding=ROUND_CEILING
             )
         except (InvalidOperation, ValueError) as exc:

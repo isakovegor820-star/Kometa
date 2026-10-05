@@ -64,6 +64,10 @@ class FakePanel(PanelClient):
     async def get_user(self, uuid: str) -> PanelUser | None:
         return self._users.get(uuid)
 
+    async def find_user_by_email(self, email: str) -> PanelUser | None:
+        uuid = self._by_email.get(email)
+        return self._users.get(uuid) if uuid else None
+
     async def update_user(
         self,
         uuid: str,

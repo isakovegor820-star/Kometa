@@ -140,7 +140,7 @@ class CryptoBotProvider(PaymentProvider):
         if self.rub_per_usdt <= 0:
             raise PaymentError(f"Курс rub_per_usdt должен быть больше нуля, а не {self.rub_per_usdt!r}")
         try:
-            amount = Decimal(amount_rub) / Decimal(str(self.rub_per_usdt))
+            amount = Decimal(str(amount_rub)) / Decimal(str(self.rub_per_usdt))
             amount = amount.quantize(Decimal("0.01"), rounding=ROUND_CEILING)
         except (InvalidOperation, ValueError) as exc:
             raise PaymentError(f"Не удалось пересчитать рубли в USDT по курсу {self.rub_per_usdt!r}") from exc
