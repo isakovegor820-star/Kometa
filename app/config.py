@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     admin_panel_secret: str = ""
     #: Время жизни сессии в часах.
     admin_session_hours: int = 12
+    #: Панель доступна только с localhost (через SSH-туннель). Так безопасно
+    #: работать без домена и HTTPS: пароль не уходит в открытый интернет.
+    admin_local_only: bool = True
+    #: Список IP через запятую, которым панель доступна дополнительно
+    #: (например, домашний IP владельца). Работает при ADMIN_LOCAL_ONLY=true.
+    admin_allowed_ips: str = ""
 
     # --- Продукт ---
     trial_days: int = 3

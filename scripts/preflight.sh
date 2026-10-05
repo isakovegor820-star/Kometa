@@ -136,10 +136,16 @@ if [[ -n "$WATA_TOKEN" ]]; then
 fi
 
 # --- админ-панель
+ADMIN_LOCAL_ONLY="$(env_value ADMIN_LOCAL_ONLY || true)"
 if [[ -z "$ADMIN_PANEL_PASSWORD" ]]; then
   warn "ADMIN_PANEL_PASSWORD не задан — веб-панель /admin выключена"
+elif [[ "$ADMIN_LOCAL_ONLY" == "false" ]]; then
+  case "${PUBLIC_BASE_URL:-}" in
+    https://*) ok "Веб-панель /admin открыта наружу по HTTPS — допустимо" ;;
+    *) bad "ADMIN_LOCAL_ONLY=false без HTTPS: пароль админки пойдёт открытым текстом. Верни true и ходи через SSH-туннель" ;;
+  esac
 else
-  ok "Веб-панель /admin включена"
+  ok "Веб-панель /admin доступна только с localhost (SSH-туннель: ssh -L 8090:127.0.0.1:8090 root@IP)"
 fi
 
 head_ "2. Сервис запущен"
@@ -196,7 +202,11 @@ fi
 head_ "4. Ссылка-подписка"
 
 if [[ -z "$PUBLIC_BASE_URL" || "$PUBLIC_BASE_URL" == *"127.0.0.1"* || "$PUBLIC_BASE_URL" == *"localhost"* ]]; then
-  warn "PUBLIC_BASE_URL локальный (${PUBLIC_BASE_URL:-пусто}) — клиенты с телефонов не откроют ссылку. Укажи http://IP:${WEB_PORT}"
+  bad "PUBLIC_BASE_URL локальный (${PUBLIC_BASE_URL:-пусто}) — клиенты с телефонов не откроют ссылку. Укажи http://IP:${WEB_PORT}"
+elif [[ "$PUBLIC_BASE_URL" == http://* ]]; then
+  # Старт на IP без домена — нормальный режим, но с оговорками
+  ok "Публичный адрес: ${PUBLIC_BASE_URL} (работаем по IP, без домена)"
+  warn "HTTPS нет: подписки идут по http — это работает, но IP легче заблокировать, а админку нельзя открывать наружу"
 else
   ok "Публичный адрес: ${PUBLIC_BASE_URL}"
   if curl -s -m 8 -o /dev/null -w "%{http_code}" "${PUBLIC_BASE_URL%/}/health" | grep -q 200; then

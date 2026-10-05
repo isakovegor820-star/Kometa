@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from aiogram import Bot
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import String, cast, func, or_, select
@@ -39,7 +39,39 @@ STATUS_LABELS = {
 
 
 # --------------------------------------------------------------------- доступ
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else ""
+
+
+def _allowed_admin_ips() -> set[str]:
+    base = {"127.0.0.1", "::1"}
+    base |= {ip.strip() for ip in settings.admin_allowed_ips.split(",") if ip.strip()}
+    return base
+
+
+def _deny_if_foreign(request: Request) -> None:
+    """Закрыть панель от чужих IP.
+
+    Без домена и HTTPS панель висит на том же порту, что ссылки-подписки,
+    поэтому по умолчанию пускаем только с localhost: владелец ходит через
+    SSH-туннель, а пароль не улетает в открытый интернет.
+    """
+    if not settings.admin_local_only:
+        return
+    if _client_ip(request) not in _allowed_admin_ips():
+        logger.warning("Отказ в доступе к админ-панели с IP %s", _client_ip(request))
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Админ-панель доступна только с localhost. Открой SSH-туннель: "
+                "ssh -L 8090:127.0.0.1:8090 root@IP — и заходи на http://127.0.0.1:8090/admin. "
+                "Либо добавь свой IP в ADMIN_ALLOWED_IPS."
+            ),
+        )
+
+
 def _redirect_if_unauthorized(request: Request) -> RedirectResponse | None:
+    _deny_if_foreign(request)
     if not security.panel_enabled():
         return None
     if not security.verify_session(request.cookies.get(security.COOKIE_NAME)):
@@ -66,6 +98,7 @@ async def _notify(request: Request, tg_id: int, text: str) -> None:
 # ---------------------------------------------------------------------- вход
 @router.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request):
+    _deny_if_foreign(request)
     if security.panel_enabled() and security.verify_session(request.cookies.get(security.COOKIE_NAME)):
         return RedirectResponse("/admin", status_code=303)
     return _page(request, "login.html", enabled=security.panel_enabled())
@@ -73,6 +106,7 @@ async def login_form(request: Request):
 
 @router.post("/login")
 async def login_submit(request: Request, password: str = Form("")):
+    _deny_if_foreign(request)
     client_key = request.client.host if request.client else "unknown"
     if security.login_throttle.blocked(client_key):
         return RedirectResponse("/admin/login?error=Слишком много попыток, подожди 10 минут", status_code=303)
