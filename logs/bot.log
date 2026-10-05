@@ -22,3 +22,15 @@ INFO:     Uvicorn running on http://0.0.0.0:8090 (Press CTRL+C to quit)
 2026-10-05 22:14:15,561 | INFO     | kometa | Бот запущен: @kometavpnservise_bot
 2026-10-05 22:14:15,812 | INFO     | aiogram.dispatcher | Start polling
 2026-10-05 22:14:15,969 | INFO     | aiogram.dispatcher | Run polling for bot @kometavpnservise_bot id=8958117679 - 'Kometa VPN'
+2026-10-05 22:16:14,886 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 20:18:14 UTC)" (scheduled at 2026-10-05 20:16:14.882744+00:00)
+2026-10-05 22:16:14,887 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 20:18:14 UTC)" executed successfully
+2026-10-05 22:18:14,884 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 20:20:14 UTC)" (scheduled at 2026-10-05 20:18:14.882744+00:00)
+2026-10-05 22:18:14,885 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 20:20:14 UTC)" executed successfully
+2026-10-05 22:19:14,884 | INFO     | apscheduler.executors.default | Running job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-05 20:24:14 UTC)" (scheduled at 2026-10-05 20:19:14.882713+00:00)
+2026-10-05 22:19:14,889 | INFO     | apscheduler.executors.default | Running job "job_autopay (trigger: interval[0:05:00], next run at: 2026-10-05 20:24:14 UTC)" (scheduled at 2026-10-05 20:19:14.882772+00:00)
+2026-10-05 22:19:14,894 | INFO     | apscheduler.executors.default | Job "job_autopay (trigger: interval[0:05:00], next run at: 2026-10-05 20:24:14 UTC)" executed successfully
+2026-10-05 22:19:14,894 | INFO     | apscheduler.executors.default | Running job "job_node_health (trigger: interval[0:05:00], next run at: 2026-10-05 20:24:14 UTC)" (scheduled at 2026-10-05 20:19:14.882795+00:00)
+2026-10-05 22:19:14,894 | INFO     | apscheduler.executors.default | Job "job_node_health (trigger: interval[0:05:00], next run at: 2026-10-05 20:24:14 UTC)" executed successfully
+2026-10-05 22:19:14,896 | INFO     | apscheduler.executors.default | Job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-05 20:24:14 UTC)" executed successfully
+2026-10-05 22:20:14,884 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 20:22:14 UTC)" (scheduled at 2026-10-05 20:20:14.882744+00:00)
+2026-10-05 22:20:14,884 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 20:22:14 UTC)" executed successfully
