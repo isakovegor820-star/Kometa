@@ -182,14 +182,43 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
                 raise HTTPException(status_code=503, detail="no configs available")
 
         body = "\n".join(configs)
-        if request.query_params.get("format") == "plain":
-            return PlainTextResponse(body, headers=_subscription_headers(sub, used_bytes))
+        headers = _subscription_headers(sub, used_bytes)
+
+        # Формат выбираем по User-Agent приложения: Clash и sing-box умеют
+        # группу авто-выбора локации, остальным отдаём привычный base64-список.
+        try:
+            from app.web.subscription_format import (
+                build_clash_yaml,
+                build_singbox_json,
+                detect_client_format,
+            )
+        except ImportError:  # pragma: no cover - модуль форматов необязателен
+            build_clash_yaml = build_singbox_json = None  # type: ignore[assignment]
+            detect_client_format = lambda *_: "base64"  # noqa: E731
+
+        requested = request.query_params.get("format")
+        if requested == "plain":
+            return PlainTextResponse(body, headers=headers)
+
+        client_format = detect_client_format(request.headers.get("user-agent"), requested)
+        if client_format == "clash" and build_clash_yaml is not None:
+            return Response(
+                content=build_clash_yaml(configs, title="Kometa"),
+                media_type="text/yaml; charset=utf-8",
+                headers=headers,
+            )
+        if client_format == "singbox" and build_singbox_json is not None:
+            return Response(
+                content=build_singbox_json(configs, title="Kometa"),
+                media_type="application/json; charset=utf-8",
+                headers=headers,
+            )
 
         encoded = base64.b64encode(body.encode()).decode()
         return Response(
             content=encoded,
             media_type="text/plain; charset=utf-8",
-            headers=_subscription_headers(sub, used_bytes),
+            headers=headers,
         )
 
     @app.get("/sub/{token}/info")
