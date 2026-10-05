@@ -239,6 +239,21 @@ async def test_csv_skips_debits_and_foreign_currency(tmp_path):
 # ---------------------------------------------------------------------------
 # CSV: состояние и дедупликация
 # ---------------------------------------------------------------------------
+async def test_csv_credit_and_debit_columns(tmp_path):
+    """Колонка «Сумма списания» не должна превращаться в поступление."""
+    write_csv(
+        tmp_path,
+        "both.csv",
+        "Дата;Сумма списания;Сумма зачисления;Назначение\n"
+        "05.10.2026 10:00;500,00;;Оплата связи\n"
+        "05.10.2026 11:00;;199,13;Kometa 1\n",
+    )
+
+    payments = await CsvStatementSource(str(tmp_path / "*.csv")).fetch(LONG_AGO)
+
+    assert [(p.amount_kopecks, p.comment) for p in payments] == [(19913, "Kometa 1")]
+
+
 async def test_csv_state_file_skips_processed_rows(tmp_path):
     path = write_csv(
         tmp_path,
@@ -410,6 +425,38 @@ async def test_csv_corrupt_state_file_raises(tmp_path):
         await CsvStatementSource(str(tmp_path / "*.csv"), state_file=state).fetch(LONG_AGO)
 
 
+async def test_csv_unterminated_quote_raises_statement_error(tmp_path):
+    """Битый CSV (незакрытая кавычка) — это StatementError, а не падение бота."""
+    write_csv(
+        tmp_path,
+        "broken.csv",
+        'Дата;Сумма;Назначение\n05.10.2026 10:00;"199,13;Kometa 1\n',
+    )
+
+    with pytest.raises(StatementError) as exc_info:
+        await CsvStatementSource(str(tmp_path / "*.csv")).fetch(LONG_AGO)
+
+    assert "broken.csv" in str(exc_info.value)
+
+
+async def test_csv_state_file_is_not_read_as_statement(tmp_path):
+    """Файл состояния не разбирается как выписка, даже если попал под glob."""
+    write_csv(
+        tmp_path,
+        "stmt.csv",
+        "Дата;Сумма;Назначение\n05.10.2026 10:00;199,13;Kometa 1\n",
+    )
+    state = tmp_path / "state.json"
+    source = CsvStatementSource(str(tmp_path / "*"), state_file=state)
+
+    first = await source.fetch(LONG_AGO)
+    assert [p.external_id for p in first] == ["stmt.csv:2"]
+    assert state.exists()
+
+    # Второй вызов: state.json уже лежит в папке и подходит под glob.
+    assert await source.fetch(LONG_AGO) == []
+
+
 # ---------------------------------------------------------------------------
 # Разбор письма банка (чистая функция)
 # ---------------------------------------------------------------------------
@@ -518,6 +565,24 @@ def test_parse_email_custom_source_name():
     assert payment is not None
     assert payment.source == "tbank-mail"
     assert payment.raw["matched_pattern"]
+
+
+def test_parse_email_transfer_phrasing():
+    """«Перевод от … на сумму … RUB» — фраза, частая у банков."""
+    raw = make_email(
+        "Перевод от ИВАНОВ И.И. на сумму 199,13 RUB\nНазначение: Kometa 42\n",
+        subject="Пополнение",
+    )
+
+    payment = parse_email_payment(raw)
+
+    assert payment is not None
+    assert payment.amount_kopecks == 19913
+    assert payment.comment == "Kometa 42"
+    assert payment.counterparty == "ИВАНОВ И.И."
+
+
+
 
 
 def test_parse_email_broken_date_falls_back_to_now():

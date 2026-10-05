@@ -216,8 +216,12 @@ def _with_payload(
     return error
 
 
-def _delimiter_score(sample_lines: Sequence[str], delimiter: str) -> tuple[int, int, int]:
-    """Оценка разделителя: (строк с типовым числом полей, есть ли колонки, полей)."""
+def _delimiter_score(sample_lines: Sequence[str], delimiter: str) -> tuple[int, int]:
+    """Оценка разделителя: (сколько строк он вообще разбил, типичное число колонок).
+
+    Считаем именно так, а не по «частоте одинакового числа полей»: одна битая
+    строка ломает частотный подсчёт и правильный разделитель проигрывает.
+    """
     counts: list[int] = []
     for line in sample_lines:
         try:
@@ -226,17 +230,18 @@ def _delimiter_score(sample_lines: Sequence[str], delimiter: str) -> tuple[int, 
             continue
         counts.append(len(row))
     if not counts:
-        return (0, 0, 0)
-    typical, frequency = Counter(counts).most_common(1)[0]
-    return (frequency, 1 if typical >= 2 else 0, typical)
+        return (0, 0)
+    split_lines = sum(1 for count in counts if count >= 2)
+    typical = Counter(counts).most_common(1)[0][0]
+    return (split_lines, typical)
 
 
 def _detect_delimiter(text: str) -> str:
     """Определить разделитель CSV через :class:`csv.Sniffer`, фолбэк — «;».
 
     Sniffer легко путает «,» и «;» на короткой выписке, поэтому его догадку
-    проверяем: берём разделитель, который даёт больше колонок при одинаковом
-    числе полей во всех строках.
+    проверяем: берём разделитель, который разбивает больше строк и даёт больше
+    колонок (при равенстве остаётся выбор Sniffer).
     """
     lines = [line for line in text.splitlines()[:20] if line.strip()]
     sample = "\n".join(lines)[:8192]
@@ -257,18 +262,30 @@ def _detect_delimiter(text: str) -> str:
     return best
 
 
-def _iter_csv_rows(text: str, delimiter: str) -> list[tuple[int, list[str]]]:
+def _iter_csv_rows(
+    text: str, delimiter: str, file_name: str = "выписка"
+) -> list[tuple[int, list[str]]]:
     """Прочитать CSV в список ``(номер физической строки, ячейки)``.
 
     Номер строки берётся у :class:`csv.reader` (``line_num``), поэтому он
     остаётся корректным даже для многострочных значений в кавычках.
     """
-    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
     rows: list[tuple[int, list[str]]] = []
-    for cells in reader:
-        if not any(cell.strip() for cell in cells):
-            continue
-        rows.append((reader.line_num, [cell.strip() for cell in cells]))
+    # strict=True: незакрытая кавычка и прочий мусор должны стать понятной
+    # ошибкой, а не молча испортить разбор строк (иначе платёж потеряется тихо).
+    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter, strict=True)
+    try:
+        for cells in reader:
+            if not any(cell.strip() for cell in cells):
+                continue
+            rows.append((reader.line_num, [cell.strip() for cell in cells]))
+    except csv.Error as exc:
+        # Незакрытая кавычка и прочий мусор: файл битый, но остальные файлы
+        # всё равно должны быть прочитаны.
+        raise StatementError(
+            f"файл выписки {file_name} не разобран как CSV "
+            f"(разделитель {delimiter!r}, строка {reader.line_num}): {exc}"
+        ) from exc
     return rows
 
 
@@ -324,6 +341,15 @@ _NEGATIVE_HEADER_RE = re.compile(r"(списани|дебет|debit|расход
 
 #: Значения колонки «тип операции», означающие списание.
 _OUTGOING_RE = re.compile(r"(списани|дебет|debit|расход|исходящ|withdraw|outgoing)", re.IGNORECASE)
+
+#: Обозначения валюты внутри ячейки суммы.
+_AMOUNT_NOISE_RE = re.compile(
+    r"(₽|рубл\w*|руб\.?|RUB|RUR|р\.|\$|€|USD|EUR|USDT|KZT|₸|UAH|₴|GBP|£)",
+    re.IGNORECASE,
+)
+
+#: Ячейка суммы после удаления валюты: только цифры, разделители и минус.
+_AMOUNT_CELL_RE = re.compile(r"^[\d\s\u00a0.,\-]*$")
 
 _MONEY_LIKE_RE = re.compile(r"\d[.,]\d{2}\b")
 _BARE_NUMBER_RE = re.compile(r"^-?\d{1,15}$")
@@ -381,13 +407,21 @@ def _looks_like_header(cells: Sequence[str]) -> bool:
 
 
 def _amount_from_cell(text: str | None) -> int | None:
-    """Сумма из ячейки выписки; пустая ячейка — это не ошибка, а «нет данных»."""
+    """Сумма из ячейки выписки; пустая ячейка — это не ошибка, а «нет данных».
+
+    Ячейка сначала проверяется на «похожесть на сумму»: без этого строка вида
+    ``05.10.2026 10:00;"199,13`` (следствие неверного разделителя) разобралась
+    бы как гигантское число и превратилась в фантомное поступление.
+    """
     if text is None:
         return None
     value = str(text).strip()
     if not value:
         return None
-    return parse_amount_to_kopecks(value)
+    cleaned = _AMOUNT_NOISE_RE.sub("", value).strip()
+    if not cleaned or not _AMOUNT_CELL_RE.match(cleaned):
+        return None
+    return parse_amount_to_kopecks(cleaned)
 
 
 class _CsvState:
@@ -548,6 +582,21 @@ class CsvStatementSource(StatementSource):
         except OSError:  # pragma: no cover - защита от экзотических ФС
             return str(path)
 
+    def _resolved_state_path(self) -> Path | None:
+        if self.state_file is None:
+            return None
+        try:
+            return self.state_file.resolve()
+        except OSError:  # pragma: no cover - защита от экзотических ФС
+            return self.state_file
+
+    @staticmethod
+    def _same_path(left: Path, right: Path) -> bool:
+        try:
+            return left.resolve() == right
+        except OSError:  # pragma: no cover - защита от экзотических ФС
+            return left == right
+
     def _fetch_sync(self, since: datetime) -> list[IncomingPayment]:
         since_utc = _as_utc(since)
         state = _CsvState(self.state_file)
@@ -556,8 +605,13 @@ class CsvStatementSource(StatementSource):
         # Отпечаток -> файл, из которого поступление уже пришло в этом вызове.
         # Так один и тот же файл под двумя именами не даёт двух оплат.
         seen: dict[tuple, str] = {}
+        state_path = self._resolved_state_path()
 
         for path in self._resolve_files():
+            if state_path is not None and self._same_path(path, state_path):
+                # Файл состояния попал под glob выписок — читать его бессмысленно.
+                logger.warning("Пропускаю файл состояния %s: он попал под шаблон выписок", path)
+                continue
             file_key = self._file_key(path)
             try:
                 found, processed, size = self._read_file(path, since_utc, state.get(file_key))
@@ -629,12 +683,15 @@ class CsvStatementSource(StatementSource):
             # Файл перезаписан с нуля (ротация выгрузки) — читаем заново.
             skip_rows = 0
 
-        rows = _iter_csv_rows(text, delimiter)
+        rows = _iter_csv_rows(text, delimiter, path.name)
         if not rows:
             return [], 0, size
 
         header, data_rows = self._split_header(rows)
-        mapping = self._map_columns(header) if header is not None else {}
+        mapping: dict[str, int] = {}
+        excluded: frozenset[int] = frozenset()
+        if header is not None:
+            mapping, excluded = self._map_columns(header)
 
         payments: list[IncomingPayment] = []
         processed = 0
@@ -646,7 +703,7 @@ class CsvStatementSource(StatementSource):
                 processed = data_index
                 continue
             payment, unreadable = self._build_payment(
-                path, line_no, cells, mapping, since_utc, mtime
+                path, line_no, cells, mapping, since_utc, mtime, excluded
             )
             last_row_unreadable = unreadable
             processed = data_index
@@ -669,7 +726,13 @@ class CsvStatementSource(StatementSource):
             return first_cells, list(rows[1:])
         return None, list(rows)
 
-    def _map_columns(self, header: Sequence[str]) -> dict[str, int]:
+    def _map_columns(self, header: Sequence[str]) -> tuple[dict[str, int], frozenset[int]]:
+        """Колонки выписки: ``(карта логических колонок, индексы списаний)``.
+
+        Индексы списаний нужны отдельно: если в выписке две колонки — «Сумма
+        списания» и «Сумма зачисления», — позиционный разбор не должен выдать
+        списание за поступление.
+        """
         normalized = [_normalize_header(cell) for cell in header]
         negative = frozenset(
             index for index, cell in enumerate(normalized) if _NEGATIVE_HEADER_RE.search(cell)
@@ -693,7 +756,7 @@ class CsvStatementSource(StatementSource):
                     f"заголовки файла: {', '.join(header)}"
                 )
             mapping[key] = index
-        return mapping
+        return mapping, negative
 
     def _build_payment(
         self,
@@ -703,12 +766,13 @@ class CsvStatementSource(StatementSource):
         mapping: dict[str, int],
         since_utc: datetime,
         mtime: datetime,
+        excluded: frozenset[int] = frozenset(),
     ) -> tuple[IncomingPayment | None, bool]:
         """Собрать поступление из строки.
 
         :returns: ``(поступление или None, строка выглядит недописанной)``.
         """
-        used: set[int] = set()
+        used: set[int] = set(excluded)
 
         def cell(key: str) -> str | None:
             index = mapping.get(key)
@@ -733,7 +797,11 @@ class CsvStatementSource(StatementSource):
         amount_index = mapping.get("amount")
         if amount_index is not None:
             used.add(amount_index)
-        amount_raw = cells[amount_index] if amount_index is not None and amount_index < len(cells) else None
+        amount_raw = (
+            cells[amount_index]
+            if amount_index is not None and amount_index < len(cells)
+            else None
+        )
 
         amount_kopecks = _amount_from_cell(amount_raw)
         unreadable = amount_kopecks is None and bool((amount_raw or "").strip())
@@ -889,7 +957,7 @@ _COUNTERPARTY_RE = re.compile(
 
 #: Обрезка значения поля: два пробела подряд или начало следующего поля.
 _FIELD_STOP_RE = re.compile(
-    r"\s{2,}|(?=\s(?:сумма|назначение|сообщение|комментарий|описание|"
+    r"\s{2,}|(?=\s(?:сумма|на\s+сумму|в\s+размере|назначение|сообщение|комментарий|описание|"
     r"от\s+кого|плательщик|отправитель|дата|balance|amount|итого)\b)",
     re.IGNORECASE,
 )
@@ -1038,7 +1106,10 @@ def _clean_field(value: str | None, *, limit: int = 200) -> str:
     parts = _FIELD_STOP_RE.split(text, maxsplit=1)
     if parts:
         text = parts[0]
-    text = text.strip().strip("\"'").strip(".,;:-–—").strip()
+    text = text.strip().strip("\"'").strip(" ,;:-–—").strip()
+    # Точку в конце убираем только если это не инициалы («ИВАНОВ И.И.»).
+    if text.endswith(".") and not re.search(r"[А-ЯЁA-Z]\.$", text):
+        text = text[:-1].strip()
     for left, right in (("«", "»"), ("(", ")"), ("[", "]"), ("“", "”")):
         if len(text) > 1 and text.startswith(left) and text.endswith(right):
             text = text[1:-1].strip()

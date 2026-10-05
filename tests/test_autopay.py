@@ -13,7 +13,7 @@ import pytest
 
 from app.config import get_settings
 from app.db.models import Event, User
-from app.payments.statements import IncomingPayment, StatementSource
+from app.payments.statements import IncomingPayment, StatementError, StatementSource
 from app.services import autopay, orders, subscriptions
 
 settings = get_settings()
@@ -209,3 +209,52 @@ async def test_payment_before_order_creation_is_kept_for_admin(session, panel):
 
     assert result.unmatched
     assert "не найден" in bot.texts().lower()
+
+
+class FailingSource(StatementSource):
+    """Источник, который падает, но часть поступлений успел прочитать."""
+
+    name = "failing"
+
+    def __init__(self, recovered: list[IncomingPayment]) -> None:
+        self.recovered = recovered
+
+    async def fetch(self, since: datetime) -> list[IncomingPayment]:
+        error = StatementError("битый файл выписки")
+        error.payments = self.recovered  # как договорились с источником
+        raise error
+
+
+async def test_payments_recovered_from_failed_source_are_confirmed(session, panel):
+    """Один битый файл не должен задерживать оплату из остальных файлов."""
+    _, _, order = await make_manual_order(session, tg_id=7701)
+    await session.commit()
+
+    result = await autopay.reconcile(
+        session, panel, None, sources=[FailingSource([payment_for(order, key="recovered-1")])]
+    )
+    await session.commit()
+
+    assert result.confirmed == [order.id]
+    assert result.errors  # об ошибке всё равно сообщаем
+    await session.refresh(order)
+    assert order.status == "paid"
+
+
+async def test_failed_source_does_not_advance_time_window(session, panel, tmp_path):
+    """При ошибке чтения окно проверки не сдвигается — иначе платёж потеряется."""
+    _, _, order = await make_manual_order(session, tg_id=7801)
+    await session.commit()
+
+    await autopay.reconcile(session, panel, None, sources=[FailingSource([])])
+    state_after_failure = autopay.load_state()
+
+    assert "last_check" not in state_after_failure or state_after_failure["last_check"] <= (
+        datetime.now(timezone.utc).isoformat()
+    )
+    # и повторный прогон с рабочим источником по-прежнему видит платёж
+    result = await autopay.reconcile(
+        session, panel, None, sources=[FakeSource([payment_for(order, key="after-failure")])]
+    )
+    await session.commit()
+    assert result.confirmed == [order.id]

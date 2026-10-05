@@ -116,6 +116,25 @@ else
   warn "Автоплатёж выключен: переводы по СБП придётся подтверждать вручную (AUTOPAY_ENABLED=true включает автопроверку)"
 fi
 
+# --- WATA (карты, СБП, T-Pay, SberPay)
+WATA_TOKEN="$(env_value WATA_TOKEN || true)"
+WATA_BASE="$(env_value WATA_BASE_URL || true)"
+[[ -z "$WATA_BASE" ]] && WATA_BASE="https://api.wata.pro/api/h2h"
+if [[ -n "$WATA_TOKEN" ]]; then
+  WATA_RESP="$(curl -s -m 15 -H "Authorization: Bearer ${WATA_TOKEN}" "${WATA_BASE%/}/public-key" || true)"
+  if grep -q "BEGIN PUBLIC KEY" <<<"$WATA_RESP"; then
+    ok "WATA: токен принят, публичный ключ получен"
+    ok "Вебхук для кабинета WATA: ${PUBLIC_BASE_URL%/}/payments/wata/webhook"
+  else
+    warn "WATA не приняла токен. Проверь: срок жизни токена, что сервер в списке разрешённых IP, адрес ${WATA_BASE}"
+  fi
+  case "${PUBLIC_BASE_URL:-}" in
+    *127.0.0.1*|*localhost*|"") bad "WATA не сможет доставить вебхук: PUBLIC_BASE_URL локальный" ;;
+    https://*) : ;;
+    http://*) warn "Вебхук WATA идёт по http — лучше HTTPS, иначе возможна подмена" ;;
+  esac
+fi
+
 # --- админ-панель
 if [[ -z "$ADMIN_PANEL_PASSWORD" ]]; then
   warn "ADMIN_PANEL_PASSWORD не задан — веб-панель /admin выключена"

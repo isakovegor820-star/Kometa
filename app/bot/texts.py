@@ -57,6 +57,15 @@ STARS_LINE = "\nИли <b>{stars} ⭐</b> в Telegram Stars — доступ в�
 PROVIDER_MANUAL = "🏦 Перевод по СБП / на карту"
 PROVIDER_CRYPTO = "🪙 Крипта (USDT/TON)"
 PROVIDER_STARS = "⭐️ Telegram Stars"
+PROVIDER_WATA = "💳 Карта / СБП / T-Pay"
+
+ORDER_CREATED_WATA = (
+    "💳 <b>Заказ #{order_id} на {amount} ₽</b>\n\n"
+    "Нажми «Оплатить» — откроется защищённая страница оплаты: карта (МИР, Visa, Mastercard), "
+    "СБП, T-Pay или SberPay.\n\n"
+    "Доступ включится <b>автоматически</b> сразу после оплаты. Если этого не произошло за пару минут — "
+    "нажми «Проверить оплату»."
+)
 
 ORDER_CREATED_MANUAL = (
     "🧾 <b>Заказ #{order_id}</b>\n\n"

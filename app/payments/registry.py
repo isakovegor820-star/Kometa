@@ -44,6 +44,17 @@ class PaymentRegistry:
             from app.payments.stars import StarsProvider
 
             providers["stars"] = StarsProvider(bot=self._bot, stars_per_rub=settings.stars_per_rub)
+        if settings.wata_token:
+            from app.payments.wata import WataProvider
+
+            providers["wata"] = WataProvider(
+                token=settings.wata_token,
+                base_url=settings.wata_base_url,
+                link_ttl_minutes=settings.wata_link_ttl_minutes,
+                success_redirect_url=settings.wata_success_redirect_url,
+                fail_redirect_url=settings.wata_fail_redirect_url,
+                public_key=settings.wata_public_key,
+            )
         self._providers = providers
 
     def _ensure_ready(self) -> None:

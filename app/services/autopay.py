@@ -213,9 +213,14 @@ async def reconcile(
         try:
             payments.extend(await source.fetch(since))
         except StatementError as exc:
+            # Источник мог разобрать часть файлов/писем до ошибки — эти
+            # поступления нельзя терять, обрабатываем их в этом же цикле.
+            recovered = list(getattr(exc, "payments", []) or [])
+            if recovered:
+                payments.extend(recovered)
             message = f"{source.name}: {exc}"
             result.errors.append(message)
-            logger.warning("Источник выписки не сработал — %s", message)
+            logger.warning("Источник выписки не сработал — %s (спасено поступлений: %s)", message, len(recovered))
         except Exception as exc:  # noqa: BLE001 - источник не должен ронять бота
             message = f"{source.name}: неожиданная ошибка {exc}"
             result.errors.append(message)
@@ -291,7 +296,14 @@ async def reconcile(
         )
 
     # --- сохраняем состояние
-    state["last_check"] = datetime.now(timezone.utc).isoformat()
+    # Окно проверки двигаем ТОЛЬКО когда все источники прочитаны без ошибок:
+    # иначе платёж из непрочитанного файла/письма окажется старше нового since
+    # и будет отфильтрован — то есть потерян.
+    if result.errors:
+        state["last_check"] = since.isoformat()
+        logger.warning("Окно автоплатежа не сдвинуто из-за ошибок чтения выписки")
+    else:
+        state["last_check"] = datetime.now(timezone.utc).isoformat()
     state["processed"] = processed[-MAX_REMEMBERED_KEYS:]
     save_state(state)
     return result

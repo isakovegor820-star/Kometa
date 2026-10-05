@@ -94,6 +94,19 @@ class Settings(BaseSettings):
     #: Сообщать админам о поступлениях, которые не удалось сопоставить с заказом.
     autopay_notify_unmatched: bool = True
 
+    # --- WATA: карты РФ и зарубежные, СБП, T-Pay, SberPay ---
+    #: Access token терминала из личного кабинета merchant.wata.pro (живёт 1–12 месяцев).
+    wata_token: str = ""
+    #: Боевой API; песочница — https://api-sandbox.wata.pro/api/h2h
+    wata_base_url: str = "https://api.wata.pro/api/h2h"
+    #: Публичный ключ для проверки подписи вебхука. Пусто — скачаем через API.
+    wata_public_key: str = ""
+    #: Срок жизни платёжной ссылки в минутах (WATA: от 10 минут до 30 дней).
+    wata_link_ttl_minutes: int = 30
+    #: Куда вернуть плательщика после оплаты (необязательно).
+    wata_success_redirect_url: str = ""
+    wata_fail_redirect_url: str = ""
+
     log_level: str = "INFO"
 
     # ------------------------------------------------------------------

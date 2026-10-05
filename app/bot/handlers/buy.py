@@ -26,6 +26,7 @@ PROVIDER_TITLES = {
     "manual": texts.PROVIDER_MANUAL,
     "crypto": texts.PROVIDER_CRYPTO,
     "stars": texts.PROVIDER_STARS,
+    "wata": texts.PROVIDER_WATA,
 }
 
 
@@ -130,6 +131,9 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
         markup = keyboards.manual_order_kb(order.id)
     elif provider.code == "crypto":
         text = texts.ORDER_CREATED_CRYPTO.format(order_id=order.id, amount=order.amount_rub)
+        markup = keyboards.crypto_order_kb(order.id, invoice.pay_url or "")
+    elif provider.code == "wata":
+        text = texts.ORDER_CREATED_WATA.format(order_id=order.id, amount=order.amount_rub)
         markup = keyboards.crypto_order_kb(order.id, invoice.pay_url or "")
     else:
         text = texts.ORDER_CREATED_STARS.format(order_id=order.id, amount=order.amount_rub)
