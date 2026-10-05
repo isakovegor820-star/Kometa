@@ -20,19 +20,30 @@
   Панель VPN:
   {% if panel_ok %}<span class="pill ok">отвечает</span>
   {% else %}<span class="pill err">недоступна</span> — проверь сервер и токен панели{% endif %}
+  &nbsp;·&nbsp; Автоплатёж:
+  {% if autopay_enabled %}<span class="pill ok">включён</span> — переводы подтверждаются сами
+  {% else %}<span class="pill warn">выключен</span> — переводы подтверждаются вручную{% endif %}
   &nbsp;·&nbsp; Заявок в очереди: <b>{{ stats.pending_orders }}</b>
+  {% if autopay_enabled %}
+  <div style="margin-top:12px">
+    <form class="inline" method="post" action="/admin/autopay/run">
+      <button type="submit">🔄 Проверить выписку сейчас</button>
+      <span class="muted">обычно проверяется автоматически каждые несколько минут</span>
+    </form>
+  </div>
+  {% endif %}
 </div>
 
 <h2>Заявки на оплату</h2>
 {% if pending %}
 <table>
-  <tr><th>Заказ</th><th>Пользователь</th><th>Тариф</th><th>Сумма</th><th>Способ</th><th>Создан</th><th></th></tr>
+  <tr><th>Заказ</th><th>Пользователь</th><th>Тариф</th><th>К переводу</th><th>Способ</th><th>Создан</th><th></th></tr>
   {% for row in pending %}
   <tr>
     <td>#{{ row.order.id }}</td>
     <td>{{ row.user.display_name if row.user else '—' }}<br><span class="muted">{{ row.user.tg_id if row.user else '' }}</span></td>
     <td>{{ row.plan.title if row.plan else '—' }}</td>
-    <td><b>{{ row.order.amount_rub }} ₽</b></td>
+    <td><b>{{ row.order.pay_amount_text }} ₽</b>{% if row.order.pay_kopecks %}<br><span class="muted">копейки — для автосверки</span>{% endif %}</td>
     <td>{{ row.order.provider }}</td>
     <td class="muted">{{ row.order.created_at.strftime('%d.%m %H:%M') }}</td>
     <td class="row-actions">

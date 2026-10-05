@@ -15,7 +15,7 @@
 
 {% if rows %}
 <table>
-  <tr><th>#</th><th>Пользователь</th><th>Тариф</th><th>Сумма</th><th>Способ</th><th>Статус</th><th>Создан</th><th>Оплачен</th><th></th></tr>
+  <tr><th>#</th><th>Пользователь</th><th>Тариф</th><th>К переводу</th><th>Способ</th><th>Статус</th><th>Создан</th><th>Оплачен</th><th></th></tr>
   {% for row in rows %}
   <tr>
     <td>{{ row.order.id }}</td>
@@ -24,7 +24,7 @@
       {% if row.user %}<br><span class="muted">{{ row.user.tg_id }}</span>{% endif %}
     </td>
     <td>{{ row.plan.title if row.plan else '—' }}</td>
-    <td><b>{{ row.order.amount_rub }} ₽</b></td>
+    <td><b>{{ row.order.pay_amount_text }} ₽</b></td>
     <td>{{ row.order.provider }}</td>
     <td>
       {% if row.order.status == 'paid' %}<span class="pill ok">оплачен</span>

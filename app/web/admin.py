@@ -126,6 +126,7 @@ async def dashboard(request: Request):
         pending=rows,
         events=recent_events,
         panel_ok=await _panel_health(),
+        autopay_enabled=settings.autopay_enabled,
     )
 
 
@@ -296,6 +297,31 @@ async def user_block(user_id: int, request: Request, block: int = Form(1)):
 
 
 # -------------------------------------------------------------------- ноды
+@router.post("/autopay/run")
+async def autopay_run(request: Request):
+    """Разовый прогон автопроверки выписки — не ждать планировщика."""
+    if (redirect := _redirect_if_unauthorized(request)):
+        return redirect
+    if not settings.autopay_enabled:
+        return RedirectResponse("/admin?error=Автоплатёж выключен: поставь AUTOPAY_ENABLED=true", status_code=303)
+
+    from app.services import autopay
+
+    bot = getattr(request.app.state, "bot", None)
+    try:
+        async with SessionMaker() as session:
+            result = await autopay.reconcile(session, registry.primary(), bot)
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001 - показываем ошибку админу, а не 500
+        logger.exception("Автопроверка из панели упала")
+        return RedirectResponse(f"/admin?error=Автопроверка упала: {exc}", status_code=303)
+
+    message = f"Проверка выписки: {result.as_text()}"
+    if result.errors:
+        return RedirectResponse(f"/admin?error={message}; ошибки: {'; '.join(result.errors[:3])}", status_code=303)
+    return RedirectResponse(f"/admin?message={message}", status_code=303)
+
+
 @router.get("/nodes", response_class=HTMLResponse)
 async def nodes_page(request: Request):
     if (redirect := _redirect_if_unauthorized(request)):
