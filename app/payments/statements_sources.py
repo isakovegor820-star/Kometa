@@ -38,10 +38,12 @@ import logging
 import os
 import re
 import ssl
+from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from email import message_from_bytes
 from email.header import decode_header
-from email.message import Message, message_from_bytes
+from email.message import Message
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
@@ -214,16 +216,45 @@ def _with_payload(
     return error
 
 
+def _delimiter_score(sample_lines: Sequence[str], delimiter: str) -> tuple[int, int, int]:
+    """Оценка разделителя: (строк с типовым числом полей, есть ли колонки, полей)."""
+    counts: list[int] = []
+    for line in sample_lines:
+        try:
+            row = next(csv.reader([line], delimiter=delimiter), [])
+        except csv.Error:  # pragma: no cover - экзотические строки
+            continue
+        counts.append(len(row))
+    if not counts:
+        return (0, 0, 0)
+    typical, frequency = Counter(counts).most_common(1)[0]
+    return (frequency, 1 if typical >= 2 else 0, typical)
+
+
 def _detect_delimiter(text: str) -> str:
-    """Определить разделитель CSV через :class:`csv.Sniffer`, фолбэк — «;»."""
-    sample = "\n".join(text.splitlines()[:20])[:8192]
+    """Определить разделитель CSV через :class:`csv.Sniffer`, фолбэк — «;».
+
+    Sniffer легко путает «,» и «;» на короткой выписке, поэтому его догадку
+    проверяем: берём разделитель, который даёт больше колонок при одинаковом
+    числе полей во всех строках.
+    """
+    lines = [line for line in text.splitlines()[:20] if line.strip()]
+    sample = "\n".join(lines)[:8192]
     if not sample.strip():
         return ";"
     try:
-        return csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+        sniffed = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
     except csv.Error:
-        # Одна колонка или нестандартный формат — «;» самый частый у банков РФ.
-        return ";"
+        sniffed = ";"
+
+    candidates = [sniffed] + [item for item in (",", ";", "\t", "|") if item != sniffed]
+    best = sniffed
+    best_score = _delimiter_score(lines, sniffed)
+    for candidate in candidates[1:]:
+        score = _delimiter_score(lines, candidate)
+        if score > best_score:
+            best, best_score = candidate, score
+    return best
 
 
 def _iter_csv_rows(text: str, delimiter: str) -> list[tuple[int, list[str]]]:
@@ -332,16 +363,21 @@ def _looks_like_header(cells: Sequence[str]) -> bool:
     """Отличить строку заголовков от строки данных.
 
     Данные почти всегда содержат дату или сумму, поэтому наличие разобранной
-    даты/времени сразу снимает подозрения; шапка опознаётся по известным
-    ключевым словам или по полному отсутствию чисел.
+    даты/времени или денежного значения сразу снимает подозрения; шапка
+    опознаётся по известным ключевым словам либо по полному отсутствию чисел.
     """
-    for cell in cells:
+    values = [cell.strip() for cell in cells if cell.strip()]
+    if not values:
+        return False
+    for cell in values:
         if _parse_datetime(cell) is not None or _parse_time(cell) is not None:
             return False
-    normalized = [_normalize_header(cell) for cell in cells]
+        if _money_like(cell):
+            return False
+    normalized = [_normalize_header(cell) for cell in values]
     if any(_find_column([cell], _ALL_HEADER_KEYWORDS) is not None for cell in normalized):
         return True
-    return not any(parse_amount_to_kopecks(cell) is not None for cell in cells)
+    return not any(parse_amount_to_kopecks(cell) is not None for cell in values)
 
 
 def _amount_from_cell(text: str | None) -> int | None:
@@ -995,14 +1031,18 @@ def _matching_pattern(text: str, patterns: Sequence[str] | None) -> str | None:
 
 
 def _clean_field(value: str | None, *, limit: int = 200) -> str:
-    """Причесать значение поля письма (обрезать хвост и кавычки)."""
+    """Причесать значение поля письма (обрезать хвост и парные кавычки)."""
     if not value:
         return ""
     text = str(value).strip()
     parts = _FIELD_STOP_RE.split(text, maxsplit=1)
     if parts:
         text = parts[0]
-    text = text.strip().strip("\"'«»").strip().strip(".,;:-–—").strip()
+    text = text.strip().strip("\"'").strip(".,;:-–—").strip()
+    for left, right in (("«", "»"), ("(", ")"), ("[", "]"), ("“", "”")):
+        if len(text) > 1 and text.startswith(left) and text.endswith(right):
+            text = text[1:-1].strip()
+            break
     return text[:limit].strip()
 
 
@@ -1223,7 +1263,9 @@ class ImapStatementSource(StatementSource):
         if str(status).upper() != "OK" or not data:
             return []
         raw = data[0] or b""
-        return str(raw, "ascii", errors="ignore").split()
+        if isinstance(raw, str):  # pragma: no cover - защита от нестандартного сервера
+            raw = raw.encode("ascii", "ignore")
+        return raw.split()
 
     def _fetch_raw(self, connection: imaplib.IMAP4, number: bytes) -> bytes:
         try:

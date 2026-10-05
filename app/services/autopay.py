@@ -99,29 +99,47 @@ def _last_check(state: dict) -> datetime:
 
 
 # ------------------------------------------------------------------ источники
+def _sources_state_path() -> Path:
+    """Отдельный файл прогресса для источников выписки.
+
+    «state.json» держит время последней проверки и обработанные платежи,
+    а этот файл — докуда прочитан каждый файл выписки / какие письма разобраны.
+    """
+    return Path(settings.statement_state_file).with_suffix(".sources.json")
+
+
 def build_statement_sources() -> list[StatementSource]:
     """Собрать источники выписок из настроек. Пусто — если ничего не настроено."""
     try:
-        from app.payments.statements_sources import build_sources
+        from app.payments.statements_sources import CsvStatementSource, ImapStatementSource
     except ImportError:  # pragma: no cover - модуль появляется вместе с фичей
         logger.warning("Модуль источников выписок недоступен")
         return []
 
+    sources: list[StatementSource] = []
+
     csv_glob = settings.statement_csv_glob.strip()
-    imap = None
+    if csv_glob:
+        try:
+            sources.append(CsvStatementSource(csv_glob, state_file=_sources_state_path()))
+        except StatementError as exc:
+            logger.warning("CSV-источник выписки не настроен: %s", exc)
+
     if settings.bank_imap_host and settings.bank_imap_user and settings.bank_imap_password:
-        imap = {
-            "host": settings.bank_imap_host,
-            "port": settings.bank_imap_port,
-            "user": settings.bank_imap_user,
-            "password": settings.bank_imap_password,
-            "folder": settings.bank_imap_folder,
-        }
-    return build_sources(
-        csv_paths=csv_glob or None,
-        imap=imap,
-        state_file=str(_state_path().with_suffix(".sources.json")),
-    )
+        try:
+            sources.append(
+                ImapStatementSource(
+                    host=settings.bank_imap_host,
+                    user=settings.bank_imap_user,
+                    password=settings.bank_imap_password,
+                    port=settings.bank_imap_port,
+                    folder=settings.bank_imap_folder,
+                )
+            )
+        except StatementError as exc:
+            logger.warning("IMAP-источник выписки не настроен: %s", exc)
+
+    return sources
 
 
 # ------------------------------------------------------------------ сопоставление
