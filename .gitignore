@@ -1,0 +1,24 @@
+# секреты
+.env
+*.session
+
+# данные
+data/
+*.db
+*.sqlite3
+backups/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# ide / os
+.DS_Store
+.idea/
+.vscode/
