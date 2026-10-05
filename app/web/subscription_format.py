@@ -51,7 +51,15 @@ CLASH_UA_MARKERS = ("clash", "mihomo", "stash", "clashmeta", "clash-verge")
 #: Признаки sing-box-клиентов в User-Agent.
 SINGBOX_UA_MARKERS = ("sing-box", "singbox", "hiddify", "sfa", "sfi", "karing", "sing")
 #: Явные значения ``?format=`` — приоритетнее User-Agent.
-FORMAT_BY_REQUEST = {"clash": "clash", "singbox": "singbox", "base64": "base64"}
+FORMAT_BY_REQUEST = {
+    "clash": "clash",
+    "singbox": "singbox",
+    "base64": "base64",
+    # удобные алиасы для ручной проверки в браузере
+    "sing-box": "singbox",
+    "sing_box": "singbox",
+    "yaml": "clash",
+}
 
 #: Комментарий в начале Clash-файла: YAML-комментарии safe_dump не сохраняет,
 #: поэтому шапку добавляем текстом.
