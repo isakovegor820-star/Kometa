@@ -1,0 +1,86 @@
+# =============================================================================
+#  Kometa — docker compose: бот + (по желанию) панель 3x-ui
+# =============================================================================
+#  Обычный запуск (только бот):
+#      cp .env.example .env      # и заполнить
+#      docker compose up -d
+#      docker compose logs -f bot
+#
+#  С панелью 3x-ui в контейнере (профиль panel):
+#      docker compose --profile panel up -d
+#      ВНИМАНИЕ: панель использует network_mode: host — её порты и порты
+#      инбаундов открываются напрямую. Не запускай её одновременно с панелью,
+#      установленной скриптом scripts/install_panel.sh (будет конфликт портов).
+#
+#  Обновление:   git pull && docker compose up -d --build
+#  Остановка:    docker compose down
+# =============================================================================
+
+name: kometa
+
+services:
+  # ---------------------------------------------------------------------------
+  # Бот: long polling Telegram + HTTP-слой /sub/<token> на порту 8080.
+  # Входящие порты от Telegram не нужны — только исходящие соединения.
+  # ---------------------------------------------------------------------------
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kometa-bot:latest
+    container_name: kometa-bot
+    env_file:
+      - .env
+    environment:
+      # Часовой пояс для напоминаний и дат. Меняется здесь или через TZ в .env.
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      # База SQLite и прочие данные бота — на хосте, чтобы их было легко
+      # забэкапить (scripts/backup.sh) и посмотреть.
+      - ./data:/app/data
+    ports:
+      # Ссылка-подписка /sub/<token> должна быть доступна клиентам из интернета.
+      # Порт берётся из WEB_PORT в .env (по умолчанию 8080).
+      - "${WEB_PORT:-8080}:${WEB_PORT:-8080}"
+    restart: unless-stopped
+    healthcheck:
+      # Проверяем именно веб-слой: если он не отвечает, клиенты не обновят
+      # подписку, даже когда бот жив. URL — тот же порт, что слушает приложение.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys,urllib.request;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:${WEB_PORT:-8080}/health',timeout=5).status==200 else 1)"
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Панель 3x-ui — только для варианта «всё в Docker» (профиль panel).
+  # Если панель уже стоит нативно (scripts/install_panel.sh), этот сервис
+  # запускать НЕ нужно.
+  #   Данные панели: ./panel-data (там x-ui.db) — их видит scripts/backup.sh.
+  #   host network: панель сама открывает порт панели и порты инбаундов.
+  # ---------------------------------------------------------------------------
+  panel:
+    image: ghcr.io/mhsanaei/3x-ui:latest
+    container_name: kometa-panel
+    profiles: ["panel"]
+    network_mode: host
+    cap_add:
+      # Нужны встроенному fail2ban (iptables) для лимита IP на клиента.
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      XRAY_VMESS_AEAD_FORCED: "false"
+      XUI_ENABLE_FAIL2BAN: "true"
+    volumes:
+      - ./panel-data:/etc/x-ui/
+      - ./panel-cert:/root/cert/
+    restart: unless-stopped

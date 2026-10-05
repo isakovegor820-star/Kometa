@@ -123,8 +123,10 @@ check_internet() {
     if have curl; then
         curl -fsS --max-time 15 -o /dev/null "https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh" \
             || die "Нет доступа к raw.githubusercontent.com. Проверь сеть/DNS на сервере."
+        ok "Интернет есть, установщик 3x-ui доступен."
+    else
+        log "curl ещё не установлен — проверю доступ в интернет при установке пакетов (apt-get)."
     fi
-    ok "Интернет есть."
 }
 
 apt_install() { # apt_install <пакет...>
@@ -280,7 +282,7 @@ setup_firewall() {
     ufw --force enable >/dev/null 2>&1 || warn "ufw enable вернул ошибку — проверь: ufw status"
     ufw --force reload >/dev/null 2>&1 || true
     ok "Firewall включён. Текущие правила:"
-    ufw status numbered | sed 's/^/    /'
+    ufw status numbered 2>/dev/null | sed 's/^/    /' || true
 }
 
 # ---------------------------------------------------------------- итоги -------

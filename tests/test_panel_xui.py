@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import time
 import urllib.parse
@@ -817,6 +818,31 @@ async def test_close_closes_only_own_client():
     own_panel = XuiPanel(BASE, token=TOKEN)
     await own_panel.close()
     assert own_panel._client.is_closed  # noqa: SLF001
+
+
+async def test_xui_panel_follows_panel_client_contract():
+    """XuiPanel реализует контракт PanelClient: методы и сигнатуры совпадают."""
+    from app.panels.base import PanelClient
+
+    assert not inspect.isabstract(XuiPanel), "все абстрактные методы должны быть реализованы"
+    for method in (
+        "health",
+        "list_inbounds",
+        "create_user",
+        "get_user",
+        "find_user_by_email",
+        "update_user",
+        "delete_user",
+        "get_configs",
+        "close",
+    ):
+        expected = inspect.signature(getattr(PanelClient, method))
+        actual = inspect.signature(getattr(XuiPanel, method))
+        assert [
+            (p.name, p.kind, p.default) for p in expected.parameters.values()
+        ] == [
+            (p.name, p.kind, p.default) for p in actual.parameters.values()
+        ], f"сигнатура {method} разошлась с контрактом"
 
 
 async def test_constructor_requires_base_url():

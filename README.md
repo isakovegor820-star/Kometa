@@ -30,11 +30,21 @@ cp .env.example .env      # вписать BOT_TOKEN и ADMIN_IDS
 С `PANEL_TYPE=fake` бот полностью работает без VPN-сервера: создаёт «пользователей» в памяти,
 выдаёт тестовые конфиги и позволяет пройти весь путь «пробный доступ → оплата → продление».
 
+Запуск в фоне и остановка:
+
+```bash
+mkdir -p logs && (.venv/bin/python -m app.main > logs/bot.log 2>&1 &)   # запуск
+tail -f logs/bot.log                                                    # логи
+pkill -f "app.main"                                                     # остановка
+```
+
+Веб-слой подписки слушает `WEB_PORT` (по умолчанию 8090): `http://127.0.0.1:8090/health`.
+
 ## Проверка
 
 ```bash
-.venv/bin/python -m pytest -q          # все тесты
-.venv/bin/python -m pytest tests/test_subscriptions.py -q
+.venv/bin/python -m pytest -q          # весь набор (108 тестов)
+.venv/bin/python -m pytest tests/test_purchase_flow.py -q   # деньги: тариф → счёт → подтверждение
 ```
 
 ## Структура

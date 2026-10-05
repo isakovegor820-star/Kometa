@@ -1,0 +1,54 @@
+# Что НЕ отправлять в контекст сборки образа (docker build).
+# Цель — маленький образ и никаких секретов внутри.
+
+# --- секреты ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- данные и бэкапы (живут на хосте, монтируются томом) ---
+data/
+backups/
+panel-data/
+panel-cert/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# --- git и служебное ---
+.git
+.gitignore
+.gitattributes
+.github
+
+# --- python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- то, что в образе не нужно ---
+tests/
+docs/
+scripts/
+pytest.ini
+README.md
+ТЗ.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# --- редакторы и ОС ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
