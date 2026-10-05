@@ -14,8 +14,8 @@ from app.db.models import User
 from app.panels.base import PanelError
 from app.panels.registry import registry
 from app.payments.base import PaymentError, PaymentStatus
+from app.payments.payload import parse_order_id_from_payload
 from app.payments.registry import payments
-from app.payments.stars import parse_order_id_from_payload
 from app.services import events, notifications, orders, subscriptions
 
 logger = logging.getLogger(__name__)

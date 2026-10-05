@@ -13,7 +13,6 @@ from app.config import get_settings
 from app.db.models import Node
 from app.panels.base import PanelClient
 from app.panels.fake import FakePanel
-from app.panels.xui import XuiPanel
 
 
 class PanelRegistry:
@@ -77,6 +76,9 @@ class PanelRegistry:
     ) -> PanelClient:
         kind = (panel_type or "fake").lower()
         if kind == "xui":
+            # импорт внутри ветки: без реальной панели модуль не обязателен
+            from app.panels.xui import XuiPanel
+
             return XuiPanel(
                 base_url=base_url,
                 token=token,

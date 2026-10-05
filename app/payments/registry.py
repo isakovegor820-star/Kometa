@@ -6,9 +6,7 @@ from aiogram import Bot
 
 from app.config import get_settings
 from app.payments.base import PaymentProvider
-from app.payments.cryptobot import CryptoBotProvider
 from app.payments.manual import ManualProvider
-from app.payments.stars import StarsProvider
 
 
 class PaymentRegistry:
@@ -20,8 +18,12 @@ class PaymentRegistry:
         settings = get_settings()
         self._providers = {"manual": ManualProvider()}
         if settings.cryptobot_token:
+            from app.payments.cryptobot import CryptoBotProvider
+
             self._providers["crypto"] = CryptoBotProvider(token=settings.cryptobot_token)
         if settings.stars_enabled and settings.bot_token:
+            from app.payments.stars import StarsProvider
+
             self._providers["stars"] = StarsProvider(bot=bot)
 
     def get(self, code: str) -> PaymentProvider | None:

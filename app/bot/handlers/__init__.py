@@ -1,14 +1,16 @@
 """Сборка всех роутеров бота.
 
-ВАЖНО: порядок важен — админский роутер подключается последним, у него
-собственный catch-all, который не должен перехватывать пользовательские кнопки.
+Порядок ВАЖЕН:
+  1) пользовательские роутеры (start → trial → buy → subscription → referral);
+  2) админский роутер (у него собственный catch-all с фильтром IsAdmin);
+  3) пользовательский фолбэк — последним, чтобы не съедать чужие кнопки.
 """
 
 from __future__ import annotations
 
 from aiogram import Router
 
-from app.bot.handlers import admin, buy, referral, start, subscription, trial
+from app.bot.handlers import admin, buy, fallback, referral, start, subscription, trial
 
 
 def build_router() -> Router:
@@ -19,4 +21,5 @@ def build_router() -> Router:
     root.include_router(subscription.router)
     root.include_router(referral.router)
     root.include_router(admin.router)
+    root.include_router(fallback.router)
     return root
