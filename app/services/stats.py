@@ -8,7 +8,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, Subscription, User
+from app.config import get_settings
+from app.db.models import Order, Plan, Subscription, User
 
 
 @dataclass(slots=True)
@@ -38,6 +39,111 @@ class Stats:
             f"🧾 Ожидают подтверждения: <b>{self.pending_orders}</b>\n"
             f"📈 Конверсия в оплату: <b>{self.conversion:.1f}%</b>"
         )
+
+
+@dataclass(slots=True)
+class ChannelStats:
+    """Доходность одного канала приёма платежей."""
+
+    provider: str
+    title: str
+    orders: int
+    gross_rub: int
+    net_rub: int
+
+    @property
+    def fee_percent(self) -> float:
+        """Эффективная комиссия канала, % от оборота."""
+        if not self.gross_rub:
+            return 0.0
+        return (1 - self.net_rub / self.gross_rub) * 100
+
+
+PROVIDER_TITLES = {
+    "manual": "Перевод по СБП/карте",
+    "crypto": "Крипта (Crypto Pay)",
+    "stars": "Telegram Stars",
+    "wata": "Карта/СБП (WATA)",
+}
+
+
+async def channel_economics(session: AsyncSession, days: int = 30) -> list[ChannelStats]:
+    """Сколько денег реально доходит до нас по каждому каналу.
+
+    У звёзд «комиссия» не процент, а сама природа выплаты: Telegram платит
+    фиксированные $0.013 за звезду, поэтому считаем от цены тарифа в звёздах.
+    """
+    settings = get_settings()
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    paid_orders = list(
+        (
+            await session.scalars(
+                select(Order).where(Order.status == "paid", Order.paid_at.is_not(None), Order.paid_at >= since)
+            )
+        ).all()
+    )
+
+    plans: dict[int, Plan] = {}
+    buckets: dict[str, ChannelStats] = {}
+
+    for order in paid_orders:
+        plan = None
+        if order.plan_id:
+            if order.plan_id not in plans:
+                plan = await session.get(Plan, order.plan_id)
+                if plan is not None:
+                    plans[order.plan_id] = plan
+            plan = plans.get(order.plan_id)
+
+        bucket = buckets.get(order.provider)
+        if bucket is None:
+            bucket = ChannelStats(
+                provider=order.provider,
+                title=PROVIDER_TITLES.get(order.provider, order.provider),
+                orders=0,
+                gross_rub=0,
+                net_rub=0,
+            )
+            buckets[order.provider] = bucket
+
+        bucket.orders += 1
+        bucket.gross_rub += order.amount_rub
+        bucket.net_rub += _net_for_order(order, plan)
+
+    return sorted(buckets.values(), key=lambda item: item.net_rub, reverse=True)
+
+
+def _net_for_order(order, plan) -> int:  # noqa: ANN001 - Order, Plan | None
+    """Сколько остаётся с заказа после комиссий канала."""
+    settings = get_settings()
+    if order.provider == "stars":
+        stars = plan.price_stars if plan and plan.price_stars else 0
+        if not stars:
+            return 0
+        gross_usd = stars * settings.stars_payout_usd
+        net_rub = gross_usd * settings.usd_rub_rate
+        return int(round(net_rub * (1 - settings.fragment_withdrawal_percent / 100)))
+    if order.provider == "wata":
+        return int(round(order.amount_rub * (1 - settings.fee_percent_wata / 100)))
+    if order.provider == "crypto":
+        return int(round(order.amount_rub * (1 - settings.fee_percent_crypto / 100)))
+    return int(round(order.amount_rub * (1 - settings.fee_percent_manual / 100)))
+
+
+async def profit_summary(session: AsyncSession, days: int = 30) -> dict[str, float]:
+    """Оборот, «на руки» и прибыль с учётом постоянных расходов."""
+    settings = get_settings()
+    channels = await channel_economics(session, days)
+    gross = sum(channel.gross_rub for channel in channels)
+    net = sum(channel.net_rub for channel in channels)
+    costs = settings.monthly_costs_rub
+    return {
+        "gross": gross,
+        "net": net,
+        "costs": costs,
+        "profit": net - costs,
+        "margin_percent": (net - costs) / gross * 100 if gross else 0.0,
+    }
 
 
 async def collect(session: AsyncSession) -> Stats:

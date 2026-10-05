@@ -77,6 +77,20 @@ class Settings(BaseSettings):
     #: звёзды у перекупов бывают крадеными, и Telegram может списать их обратно.
     stars_watch_threshold: int = 1000
 
+    # --- Экономика приёма платежей (для отчёта о прибыли) ---
+    #: Комиссия канала в процентах от оборота (0 = без комиссии).
+    fee_percent_manual: float = 0.0
+    fee_percent_crypto: float = 0.0
+    fee_percent_wata: float = 3.5
+    #: Сколько процентов теряется при выводе звёзд через Fragment.
+    fragment_withdrawal_percent: float = 5.0
+    #: Сколько долларов Telegram платит разработчику за одну звезду.
+    stars_payout_usd: float = 0.013
+    #: Курс доллара для расчёта «звёздной» выручки.
+    usd_rub_rate: float = 92.0
+    #: Постоянные расходы в месяц (серверы, домен) — для расчёта прибыли.
+    monthly_costs_rub: float = 0.0
+
     # --- Автопроверка переводов по выписке банка ---
     #: Включить автоматическое подтверждение оплат по выписке.
     autopay_enabled: bool = False

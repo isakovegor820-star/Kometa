@@ -57,6 +57,39 @@
 <div class="card muted">Заявок нет — все оплаты обработаны ✅</div>
 {% endif %}
 
+<h2>Доходность каналов оплаты (30 дней)</h2>
+{% if channels %}
+<table>
+  <tr><th>Канал</th><th>Заказов</th><th>Оборот</th><th>Комиссия канала</th><th>На руки</th></tr>
+  {% for channel in channels %}
+  <tr>
+    <td>{{ channel.title }}</td>
+    <td>{{ channel.orders }}</td>
+    <td>{{ channel.gross_rub }} ₽</td>
+    <td class="muted">{{ '%.1f'|format(channel.fee_percent) }} %</td>
+    <td><b>{{ channel.net_rub }} ₽</b></td>
+  </tr>
+  {% endfor %}
+  <tr>
+    <td colspan="2"><b>Итого</b></td>
+    <td><b>{{ profit.gross }} ₽</b></td>
+    <td class="muted">расходы: {{ profit.costs }} ₽</td>
+    <td><b>{{ profit.net }} ₽</b></td>
+  </tr>
+</table>
+<div class="card" style="margin-top:12px">
+  Прибыль за 30 дней: <b>{{ profit.profit }} ₽</b>
+  {% if profit.gross %}<span class="muted">(маржа {{ '%.0f'|format(profit.margin_percent) }} %)</span>{% endif %}
+  {% if profit.profit < 0 %}<span class="pill err">работаем в минус</span>
+  {% else %}<span class="pill ok">в плюсе</span>{% endif %}
+  <div class="muted" style="margin-top:6px">
+    Расходы задаются в <code>MONTHLY_COSTS_RUB</code>, комиссии каналов — в <code>FEE_PERCENT_*</code>.
+  </div>
+</div>
+{% else %}
+<div class="card muted">Оплаченных заказов за 30 дней пока нет</div>
+{% endif %}
+
 <h2>Рассылка</h2>
 <div class="card">
   <form method="post" action="/admin/broadcast">

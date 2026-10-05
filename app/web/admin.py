@@ -109,6 +109,8 @@ async def dashboard(request: Request):
 
     async with SessionMaker() as session:
         snapshot = await stats.collect(session)
+        channels = await stats.channel_economics(session, days=30)
+        profit = await stats.profit_summary(session, days=30)
         pending = await orders_service.pending_orders(session, limit=8)
         rows = []
         for order in pending:
@@ -123,6 +125,8 @@ async def dashboard(request: Request):
         request,
         "dashboard.html",
         stats=snapshot,
+        channels=channels,
+        profit=profit,
         pending=rows,
         events=recent_events,
         panel_ok=await _panel_health(),
