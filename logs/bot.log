@@ -22,3 +22,5 @@ INFO:     Uvicorn running on http://0.0.0.0:8090 (Press CTRL+C to quit)
 2026-10-05 21:50:51,404 | INFO     | kometa | Бот запущен: @kometavpnservise_bot
 2026-10-05 21:50:51,749 | INFO     | aiogram.dispatcher | Start polling
 2026-10-05 21:50:51,924 | INFO     | aiogram.dispatcher | Run polling for bot @kometavpnservise_bot id=8958117679 - 'Kometa VPN'
+2026-10-05 21:52:50,819 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 19:54:50 UTC)" (scheduled at 2026-10-05 19:52:50.817251+00:00)
+2026-10-05 21:52:50,821 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 19:54:50 UTC)" executed successfully
