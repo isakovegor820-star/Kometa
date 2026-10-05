@@ -58,7 +58,6 @@ FORMAT_BY_REQUEST = {
     # удобные алиасы для ручной проверки в браузере
     "sing-box": "singbox",
     "sing_box": "singbox",
-    "yaml": "clash",
 }
 
 #: Комментарий в начале Clash-файла: YAML-комментарии safe_dump не сохраняет,
