@@ -15,12 +15,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.models import Order, Plan, Subscription, User
 from app.panels.base import PanelClient
+from app.payments.matching import allocate_signature
 from app.services import events, referral, subscriptions
 
 settings = get_settings()
 
 KIND_PURCHASE = "purchase"
 KIND_RENEW = "renew"
+
+
+async def _allocate_pay_kopecks(session: AsyncSession, base_rub: int) -> int:
+    """Подобрать уникальные копейки, чтобы платёж однозначно матчился с заказом.
+
+    Смотрим только на активные (pending) заказы с такой же базовой суммой:
+    двух заказов на 199.13 ₽ одновременно быть не должно.
+    """
+    taken_rows = await session.scalars(
+        select(Order.pay_kopecks).where(Order.status == "pending", Order.amount_rub == base_rub)
+    )
+    taken = {int(value or 0) for value in taken_rows}
+    return allocate_signature(taken)
 
 
 async def create_order(
@@ -40,6 +54,9 @@ async def create_order(
         plan_id=plan.id,
         kind=kind,
         amount_rub=plan.price_rub,
+        # Уникальные копейки нужны только для ручных переводов: по ним система
+        # сама узнаёт, какой заказ оплатили.
+        pay_kopecks=await _allocate_pay_kopecks(session, plan.price_rub) if provider == "manual" else 0,
         provider=provider,
         status="pending",
         external_id=f"ord-{uuid4().hex[:16]}",

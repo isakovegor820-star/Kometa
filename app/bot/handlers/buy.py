@@ -104,9 +104,11 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
             order.id,
             order.amount_rub,
             title,
-            # У Stars своя сетка цен и свой курс — берём цену из тарифа,
-            # а не пересчитываем из рублей.
+            # У Stars своя сетка цен — берём цену из тарифа;
+            # ручному переводу нужна точная сумма с уникальными копейками,
+            # по которым автоплатёж находит заказ.
             price_override=plan.price_stars or None,
+            exact_kopecks=order.pay_amount_kopecks,
         )
     except PaymentError as exc:
         logger.warning("Ошибка создания счёта: %s", exc)

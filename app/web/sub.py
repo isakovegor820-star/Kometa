@@ -44,10 +44,12 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
         (подтверждение оплаты, начисление дней, рассылка).
     """
     from app.web.admin import router as admin_router
+    from app.web.payments import router as payments_router
 
     app = FastAPI(title="Kometa subscription service", docs_url=None, redoc_url=None)
     app.state.bot = bot
     app.include_router(admin_router)
+    app.include_router(payments_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

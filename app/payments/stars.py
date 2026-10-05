@@ -114,6 +114,7 @@ class StarsProvider(PaymentProvider):
         title: str,
         *,
         price_override: int | None = None,
+        exact_kopecks: int | None = None,
     ) -> Invoice:
         """Создать ссылку на счёт в звёздах.
 

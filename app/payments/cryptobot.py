@@ -184,11 +184,12 @@ class CryptoBotProvider(PaymentProvider):
         title: str,
         *,
         price_override: int | None = None,
+        exact_kopecks: int | None = None,
     ) -> Invoice:
         """Создать счёт в USDT на сумму заказа.
 
-        ``price_override`` не используется: у крипты цена считается от рублей,
-        а не от «родных» единиц (звёзд), как у Telegram Stars.
+        ``price_override`` и ``exact_kopecks`` не используются: у крипты цена
+        считается от рублей, копеечные надбавки нужны только переводам.
         """
         amount = self.amount_in_asset(amount_rub)
         params: dict[str, Any] = {

@@ -20,3 +20,11 @@ INFO:     Uvicorn running on http://0.0.0.0:8090 (Press CTRL+C to quit)
 2026-10-05 21:35:28,401 | INFO     | kometa | Бот запущен: @kometavpnservise_bot
 2026-10-05 21:35:28,777 | INFO     | aiogram.dispatcher | Start polling
 2026-10-05 21:35:28,878 | INFO     | aiogram.dispatcher | Run polling for bot @kometavpnservise_bot id=8958117679 - 'Kometa VPN'
+2026-10-05 21:37:27,833 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 19:39:27 UTC)" (scheduled at 2026-10-05 19:37:27.831377+00:00)
+2026-10-05 21:37:27,833 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 19:39:27 UTC)" executed successfully
+2026-10-05 21:39:27,834 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 19:41:27 UTC)" (scheduled at 2026-10-05 19:39:27.831377+00:00)
+2026-10-05 21:39:27,835 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-05 19:41:27 UTC)" executed successfully
+2026-10-05 21:40:27,833 | INFO     | apscheduler.executors.default | Running job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-05 19:45:27 UTC)" (scheduled at 2026-10-05 19:40:27.831347+00:00)
+2026-10-05 21:40:27,841 | INFO     | apscheduler.executors.default | Running job "job_node_health (trigger: interval[0:05:00], next run at: 2026-10-05 19:45:27 UTC)" (scheduled at 2026-10-05 19:40:27.831402+00:00)
+2026-10-05 21:40:27,841 | INFO     | apscheduler.executors.default | Job "job_node_health (trigger: interval[0:05:00], next run at: 2026-10-05 19:45:27 UTC)" executed successfully
+2026-10-05 21:40:27,843 | INFO     | apscheduler.executors.default | Job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-05 19:45:27 UTC)" executed successfully

@@ -74,6 +74,26 @@ class Settings(BaseSettings):
     #: поэтому при курсе 1:1 сервис работал бы в убыток.
     stars_per_rub: float = 0.91
 
+    # --- Автопроверка переводов по выписке банка ---
+    #: Включить автоматическое подтверждение оплат по выписке.
+    autopay_enabled: bool = False
+    #: Как часто проверять выписку (минуты).
+    autopay_interval_minutes: int = 5
+    #: Допуск при сверке суммы (копейки): некоторые банки округляют.
+    autopay_tolerance_kopecks: int = 0
+    #: Файлы выписки (CSV/TXT), которые складывает банк или скрипт.
+    statement_csv_glob: str = "data/statements/*.csv"
+    #: Состояние обработки файлов (чтобы не подтвердить один платёж дважды).
+    statement_state_file: str = "data/statement_state.json"
+    #: Почтовые уведомления банка (IMAP).
+    bank_imap_host: str = ""
+    bank_imap_port: int = 993
+    bank_imap_user: str = ""
+    bank_imap_password: str = ""
+    bank_imap_folder: str = "INBOX"
+    #: Сообщать админам о поступлениях, которые не удалось сопоставить с заказом.
+    autopay_notify_unmatched: bool = True
+
     log_level: str = "INFO"
 
     # ------------------------------------------------------------------

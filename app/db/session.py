@@ -16,10 +16,33 @@ SessionMaker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSe
 
 
 async def init_db() -> None:
-    """Создаёт таблицы и наполняет справочник тарифов."""
+    """Создаёт таблицы, добавляет недостающие колонки и наполняет справочник тарифов."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _apply_light_migrations(conn)
     await seed_plans()
+
+
+#: Колонки, добавленные после первого релиза: (таблица, колонка, DDL).
+#: create_all не меняет существующие таблицы, поэтому дописываем вручную.
+_EXTRA_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("orders", "pay_kopecks", "INTEGER DEFAULT 0"),
+)
+
+
+async def _apply_light_migrations(conn) -> None:  # noqa: ANN001 - AsyncConnection
+    """Лёгкие миграции для SQLite: добавляет недостающие колонки.
+
+    Для PostgreSQL используем Alembic — здесь только чтобы существующая
+    база разработчика не отвалилась после обновления кода.
+    """
+    if conn.dialect.name != "sqlite":
+        return
+    for table, column, ddl in _EXTRA_COLUMNS:
+        result = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in result.fetchall()}
+        if existing and column not in existing:
+            await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 async def seed_plans() -> None:

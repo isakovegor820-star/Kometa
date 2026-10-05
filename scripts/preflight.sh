@@ -95,6 +95,27 @@ else
   [[ -z "$MANUAL_DETAILS" ]] && warn "Реквизиты для перевода не заданы — оплата по СБП не показывается (а это половина аудитории)"
 fi
 
+# --- автопроверка переводов
+AUTOPAY_ENABLED="$(env_value AUTOPAY_ENABLED || true)"
+CSV_GLOB="$(env_value STATEMENT_CSV_GLOB || true)"
+IMAP_USER="$(env_value BANK_IMAP_USER || true)"
+if [[ "$AUTOPAY_ENABLED" == "true" ]]; then
+  CSV_FILES=0
+  if [[ -n "$CSV_GLOB" ]]; then
+    # shellcheck disable=SC2086
+    CSV_FILES=$(find $(dirname "$CSV_GLOB") -maxdepth 1 -name "$(basename "$CSV_GLOB")" 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  if [[ "$CSV_FILES" -gt 0 ]]; then
+    ok "Автоплатёж включён: найдено файлов выписки — ${CSV_FILES}"
+  elif [[ -n "$IMAP_USER" ]]; then
+    ok "Автоплатёж включён: почта банка (${IMAP_USER})"
+  else
+    bad "AUTOPAY_ENABLED=true, но источники не настроены: нет файлов по STATEMENT_CSV_GLOB и пуст BANK_IMAP_USER"
+  fi
+else
+  warn "Автоплатёж выключен: переводы по СБП придётся подтверждать вручную (AUTOPAY_ENABLED=true включает автопроверку)"
+fi
+
 # --- админ-панель
 if [[ -z "$ADMIN_PANEL_PASSWORD" ]]; then
   warn "ADMIN_PANEL_PASSWORD не задан — веб-панель /admin выключена"

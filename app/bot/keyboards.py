@@ -71,8 +71,8 @@ def providers_kb(plan_id: int, providers: list[tuple[str, str]]) -> InlineKeyboa
 
 def manual_order_kb(order_id: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Я оплатил", callback_data=f"order:manual:{order_id}")
-    kb.button(text="⬅️ Отменить", callback_data=f"order:cancel:{order_id}")
+    kb.button(text="🆘 Оплатил, но доступа нет", callback_data=f"order:manual:{order_id}")
+    kb.button(text="⬅️ Отменить заказ", callback_data=f"order:cancel:{order_id}")
     kb.adjust(1)
     return kb.as_markup()
 

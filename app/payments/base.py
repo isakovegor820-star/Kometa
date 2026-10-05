@@ -56,6 +56,7 @@ class PaymentProvider(ABC):
         title: str,
         *,
         price_override: int | None = None,
+        exact_kopecks: int | None = None,
     ) -> Invoice:
         """Создать счёт для заказа.
 
@@ -63,6 +64,8 @@ class PaymentProvider(ABC):
             звёзды для Telegram Stars). Нужна там, где рублёвая цена не
             пересчитывается один-в-один: у Stars свой курс и своя сетка цен.
             Если не задана — провайдер считает сам от ``amount_rub``.
+        :param exact_kopecks: точная сумма в копейках (для переводов с
+            уникальной копеечной надбавкой, по которой автоплатёж находит заказ).
         """
 
     @abstractmethod

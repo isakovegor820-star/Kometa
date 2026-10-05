@@ -138,6 +138,9 @@ class Order(Base):
 
     kind: Mapped[str] = mapped_column(String(16), default="purchase")  # purchase|renew|trial
     amount_rub: Mapped[int] = mapped_column(Integer, default=0)
+    #: Уникальная надбавка в копейках (1…99) для автоматического сопоставления
+    #: перевода с заказом: 199 ₽ + 13 копеек = 199.13 ₽.
+    pay_kopecks: Mapped[int] = mapped_column(Integer, default=0)
     provider: Mapped[str] = mapped_column(String(16), default="manual")  # manual|crypto|stars
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|paid|canceled|expired
     external_id: Mapped[str | None] = mapped_column(String(128), unique=True, default=None)
@@ -150,6 +153,19 @@ class Order(Base):
     confirmed_by: Mapped[int | None] = mapped_column(BigInteger, default=None)
 
     user: Mapped[User] = relationship(back_populates="orders")
+
+    @property
+    def pay_amount_kopecks(self) -> int:
+        """Точная сумма к переводу в копейках (с учётом уникальной надбавки)."""
+        return self.amount_rub * 100 + (self.pay_kopecks or 0)
+
+    @property
+    def pay_amount_text(self) -> str:
+        """Сумма для показа пользователю: «199.13» или «199»."""
+        kopecks = self.pay_amount_kopecks
+        if kopecks % 100 == 0:
+            return str(kopecks // 100)
+        return f"{kopecks // 100}.{kopecks % 100:02d}"
 
 
 class Payment(Base):

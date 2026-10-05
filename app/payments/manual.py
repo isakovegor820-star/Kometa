@@ -1,7 +1,9 @@
-"""Ручная оплата: перевод по СБП/на карту и подтверждение администратором.
+"""Ручная оплата: перевод по СБП/на карту.
 
-Самый «всеядный» способ для РФ-аудитории: работает всегда, не зависит от
-эквайринга и крипты. Плата за это — ручное подтверждение.
+Платёж проверяется автоматически: заказу присваивается уникальная сумма
+(например, 199.13 ₽), система читает выписку банка и сама находит поступление
+(см. `app/services/autopay.py`). Подтверждение администратором остаётся как
+страховка — кнопка «Подтвердить» в боте и веб-панели никуда не девается.
 """
 
 from __future__ import annotations
@@ -27,12 +29,17 @@ class ManualProvider(PaymentProvider):
         title: str,
         *,
         price_override: int | None = None,
+        exact_kopecks: int | None = None,
     ) -> Invoice:
+        kopecks = exact_kopecks if exact_kopecks is not None else amount_rub * 100
+        total = f"{kopecks // 100}.{kopecks % 100:02d}" if kopecks % 100 else str(kopecks // 100)
+
         instructions = (
-            f"Переведи <b>{amount_rub} ₽</b> по реквизитам:\n\n"
+            f"💸 Переведи <b>ровно {total} ₽</b> (копейки важны — по ним система "
+            f"узнаёт твой платёж):\n\n"
             f"<code>{self.details or 'реквизиты не заполнены в .env'}</code>\n\n"
-            f"{self.note}\n"
-            f"Номер заказа: <b>#{order_id}</b>"
+            f"В комментарии укажи: <code>Kometa {order_id}</code>\n"
+            f"{self.note}"
         )
         return Invoice(
             provider=self.code,
@@ -42,5 +49,5 @@ class ManualProvider(PaymentProvider):
         )
 
     async def check_payment(self, external_id: str) -> PaymentCheck:
-        # Подтверждает человек (админ) в боте: см. handlers/admin.py
+        # Платёж подтверждает автоплатёж по выписке (autopay) либо админ вручную.
         return PaymentCheck(status=PaymentStatus.PENDING)

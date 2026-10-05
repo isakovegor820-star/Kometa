@@ -87,6 +87,23 @@ async def job_check_crypto(bot: Bot) -> None:
             await session.commit()
 
 
+async def job_autopay(bot: Bot) -> None:
+    """Автоподтверждение переводов по выписке банка."""
+    from app.services import autopay
+
+    if not settings.autopay_enabled:
+        return
+    async with SessionMaker() as session:
+        try:
+            result = await autopay.reconcile(session, registry.primary(), bot)
+        except Exception as exc:  # noqa: BLE001 - фоновая задача не должна падать молча
+            logger.exception("Автоплатёж упал: %s", exc)
+            return
+        await session.commit()
+        if result.fetched or result.confirmed or result.errors:
+            logger.info("Автоплатёж: %s", result.as_text())
+
+
 async def job_node_health(bot: Bot) -> None:
     """Следим за панелями и сообщаем админам об изменении состояния."""
     state: dict[str, bool] = job_node_health.__dict__.setdefault("state", {})
@@ -163,6 +180,13 @@ async def main() -> None:
     scheduler.add_job(job_reminders, "interval", hours=1, args=[bot], id="reminders")
     scheduler.add_job(job_expire_orders, "interval", minutes=5, id="expire_orders")
     scheduler.add_job(job_check_crypto, "interval", minutes=2, args=[bot], id="check_crypto")
+    scheduler.add_job(
+        job_autopay,
+        "interval",
+        minutes=settings.autopay_interval_minutes,
+        args=[bot],
+        id="autopay",
+    )
     scheduler.add_job(job_node_health, "interval", minutes=5, args=[bot], id="node_health")
     scheduler.start()
 
