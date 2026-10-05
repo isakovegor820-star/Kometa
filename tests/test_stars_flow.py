@@ -136,3 +136,49 @@ async def test_stars_prices_are_profitable(bot, dispatcher, session):
         assert plan.price_stars / plan.price_rub >= 0.84, (
             f"{plan.code}: {plan.price_stars} ⭐ за {plan.price_rub} ₽ — слишком дёшево"
         )
+
+
+async def test_large_stars_payment_alerts_admin(bot, dispatcher, session):
+    """Крупная покупка звёздами — сигнал админу: дешёвые звёзды бывают крадеными."""
+    user_id = 9201
+    await dispatcher.feed_update(bot, make_update("/start", user_id=user_id))
+    plans = await orders.list_plans(session)
+    annual = next(p for p in plans if p.code == "m12")
+
+    await dispatcher.feed_update(bot, make_update(callback_data=f"pay:{annual.id}:stars", user_id=user_id))
+    order = (await orders.pending_orders(session))[0]
+
+    await dispatcher.feed_update(
+        bot, make_stars_payment_update(order.id, annual.price_stars, user_id=user_id)
+    )
+
+    admin_alerts = [
+        request.text
+        for request in bot.session.by_name("SendMessage")
+        if getattr(request, "chat_id", None) == 1 and "Крупная оплата звёздами" in (request.text or "")
+    ]
+    assert admin_alerts, "админ не получил предупреждение о крупной оплате звёздами"
+    assert str(annual.price_stars) in admin_alerts[0]
+
+
+async def test_small_stars_payment_does_not_alert_admin(bot, dispatcher, session):
+    """Обычная покупка на месяц не должна спамить админа предупреждениями."""
+    user_id = 9202
+    await dispatcher.feed_update(bot, make_update("/start", user_id=user_id))
+    plans = await orders.list_plans(session)
+    monthly = next(p for p in plans if p.code == "m1")
+
+    await dispatcher.feed_update(bot, make_update(callback_data=f"pay:{monthly.id}:stars", user_id=user_id))
+    order = (await orders.pending_orders(session))[0]
+    bot.session.clear()
+
+    await dispatcher.feed_update(
+        bot, make_stars_payment_update(order.id, monthly.price_stars, user_id=user_id)
+    )
+
+    warnings = [
+        request.text
+        for request in bot.session.by_name("SendMessage")
+        if "Крупная оплата звёздами" in (request.text or "")
+    ]
+    assert not warnings

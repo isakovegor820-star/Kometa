@@ -282,7 +282,8 @@ async def on_pre_checkout(query: PreCheckoutQuery, session: AsyncSession) -> Non
 @router.message(F.successful_payment)
 async def on_stars_paid(message: Message, session: AsyncSession, user: User, bot: Bot) -> None:
     """Оплата Telegram Stars приходит апдейтом, а не вебхуком."""
-    order_id = parse_order_id_from_payload(message.successful_payment.invoice_payload)
+    payment = message.successful_payment
+    order_id = parse_order_id_from_payload(payment.invoice_payload)
     if not order_id:
         await message.answer("Оплата получена, но заказ не найден. Напиши в поддержку.")
         return
@@ -290,4 +291,31 @@ async def on_stars_paid(message: Message, session: AsyncSession, user: User, bot
     if order is None:
         await message.answer(texts.ORDER_NOT_FOUND)
         return
+
     await finalize_order(session, order, bot, user)
+
+    # Крупные покупки звёздами — под контроль: дешёвые звёзды у перекупов
+    # бывают добыты мошенническим путём, и Telegram может списать их с баланса
+    # уже после выдачи доступа.
+    if payment.total_amount >= settings.stars_watch_threshold:
+        await events.log_event(
+            session,
+            events.ORDER_PAID,
+            user_id=user.id,
+            payload={
+                "order_id": order.id,
+                "stars": payment.total_amount,
+                "flag": "large_stars_payment",
+                "charge_id": payment.telegram_payment_charge_id,
+            },
+        )
+        await notifications.notify_admins(
+            bot,
+            "⭐️ <b>Крупная оплата звёздами — проверь на мошенничество</b>\n"
+            f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>), "
+            f"аккаунт создан {user.created_at:%d.%m.%Y}\n"
+            f"Заказ #{order.id}: {payment.total_amount} ⭐ ({order.amount_rub} ₽)\n"
+            f"Charge ID: <code>{payment.telegram_payment_charge_id}</code>\n\n"
+            "Если звёзды окажутся крадеными, Telegram спишет их с баланса — "
+            "подписку придётся отключить вручную (/block).",
+        )
