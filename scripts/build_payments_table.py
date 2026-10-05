@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -53,30 +54,84 @@ FILL_NO = PatternFill("solid", fgColor="F8D7DA")
 FILL_GRAY = PatternFill("solid", fgColor="FFF3CD")
 FILL_UNKNOWN = PatternFill("solid", fgColor="EDEDED")
 
-NEGATIVE = ("нет", "запрещ", "не бер", "отказ", "prohibit", "не разреш")
-GRAY = ("сер", "неясн", "риск", "спорн", "молч")
-POSITIVE = ("да", "бер", "разреш", "работает", "allow", "yes")
+UNKNOWN = ("не подтверждено", "не применимо", "неизвестно", "нет данных")
+#: «серая зона» — только как слово: подстрока «сер» ловится в слове «сервис».
+GRAY_RE = re.compile(r"\bсер(ая|ой|ую|ые|ый|ым|о)\b|\bнеясн|\bспорн|\bмолч|\bне регламент")
+NEGATIVE = ("прямой запрет", "прямо запрещ", "запрещено", "запрещен", "отказ", "не подключа",
+            "prohibit", "не разреш", "нарушение правил")
+POSITIVE = ("разрешено", "принимает", "да:", "да,", "работает с vpn", "не запрещено",
+            "нет запрета", "allow", "обслужива")
 
 
 def classify(value: str) -> PatternFill:
+    """Цвет для колонки «VPN-политика»: берут / серая зона / запрет / неизвестно.
+
+    Порядок проверок важен: «не подтверждено» не должно попадать в «запрет»
+    из-за слова «нет», а «серая зона, прямого запрета нет» — в «запрет»
+    из-за отрицания.
+    """
     text = (value or "").strip().lower()
-    if not text or text in {"—", "-", "не подтверждено", "неизвестно"}:
+    if not text or text in {"—", "-"}:
         return FILL_UNKNOWN
+    if any(word in text for word in UNKNOWN):
+        return FILL_UNKNOWN
+    if GRAY_RE.search(text):
+        return FILL_GRAY
     if any(word in text for word in NEGATIVE):
         return FILL_NO
-    if any(word in text for word in GRAY):
-        return FILL_GRAY
     if any(word in text for word in POSITIVE):
         return FILL_YES
     return FILL_UNKNOWN
 
 
+#: Порядок чтения TSV. Предметные категории идут раньше обзорных: если сервис
+#: описан и в обзорном файле, и в профильном (например, ЮKassa — в «маркетплейсах»
+#: и в «российском эквайринге»), в таблицу попадает профильное описание.
+PRIORITY = [
+    "crypto.tsv",
+    "ru-acquiring.tsv",
+    "global-highrisk.tsv",
+    "telegram-digital.tsv",
+    "marketplaces.tsv",
+]
+
+RANK = {"высокая": 3, "средняя": 2, "низкая": 1}
+
+#: Разные категории называют один сервис по-разному и нумеруют строки
+#: по-своему (A07, 17, cryptopay), поэтому ключ уникальности — название сервиса,
+#: а не id. Здесь сводим составные названия к основному сервису.
+ALIASES = {
+    "crypto pay / cryptobot": "crypto pay",
+    "digiseller / plati.market": "plati.market",
+}
+
+
+def confidence_rank(row: list[str]) -> int:
+    return RANK.get(row[-1].strip().lower(), 0)
+
+
+def dedupe_key(raw_name: str) -> str:
+    """Ключ уникальности: название без домена в скобках, без лишних пробелов."""
+    text = re.sub(r"\(.*?\)", "", raw_name).strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    return ALIASES.get(text, text)
+
+
 def read_rows() -> list[list[str]]:
+    """Собрать строки из всех TSV, убрав дубли по названию сервиса.
+
+    Один и тот же сервис встречается в нескольких категориях (Crypto Pay,
+    FunPay, ЮKassa). При совпадении названия оставляем строку с более высокой
+    уверенностью, а при равной — из файла с более высоким приоритетом.
+    """
     rows: list[list[str]] = []
-    files = sorted(RESEARCH.glob("*.tsv"))
-    if not files:
+    seen: dict[str, tuple[str, int]] = {}
+    all_files = {path.name: path for path in RESEARCH.glob("*.tsv")}
+    ordered = [all_files.pop(name) for name in PRIORITY if name in all_files]
+    ordered += [all_files[name] for name in sorted(all_files)]
+    if not ordered:
         raise SystemExit(f"Не найдено ни одного TSV в {RESEARCH}")
-    for path in files:
+    for path in ordered:
         text = path.read_text(encoding="utf-8").strip().splitlines()
         if not text:
             continue
@@ -95,7 +150,18 @@ def read_rows() -> list[list[str]]:
                     file=sys.stderr,
                 )
                 continue
-            rows.append([cell.strip() for cell in cells])
+            row = [cell.strip() for cell in cells]
+            key = dedupe_key(row[1])
+            rank = confidence_rank(row)
+            previous = seen.get(key)
+            if previous is not None:
+                if rank <= previous[1]:
+                    print(f"· {path.name}:{line_no}: {row[1]} — дубль ({previous[0]}, уверенность выше) — пропускаю")
+                    continue
+                print(f"↑ {path.name}:{line_no}: {row[1]} заменяет строку из {previous[0]} (уверенность выше)")
+                rows = [r for r in rows if dedupe_key(r[1]) != key]
+            seen[key] = (path.name, rank)
+            rows.append(row)
     return rows
 
 
