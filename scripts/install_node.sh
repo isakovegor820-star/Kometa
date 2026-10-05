@@ -62,6 +62,11 @@ NODE_TOKEN_NAME="${NODE_TOKEN_NAME:-kometa-node}"
 # Порядок = приоритет: скрипт берёт первый, который прошёл проверку.
 SNI_CANDIDATES="${SNI_CANDIDATES:-www.microsoft.com dl.google.com www.samsung.com www.lovelive-anime.jp gateway.icloud.com www.bing.com yandex.ru www.ozon.ru}"
 
+# Режим «белых списков»: оператор пропускает только разрешённые домены, поэтому
+# маскироваться под зарубежный сайт бесполезно — берём домены из разрешённого
+# набора. Список у каждого оператора и региона свой: проверяй вручную.
+WHITELIST_SNI_CANDIDATES="${WHITELIST_SNI_CANDIDATES:-yandex.ru www.ozon.ru vk.com gosuslugi.ru www.sberbank.ru}"
+
 # ------------------------------------------------------------------- вывод ----
 if [[ -t 1 ]]; then
     C_RED=$'\033[0;31m'; C_GREEN=$'\033[0;32m'; C_YELLOW=$'\033[0;33m'
@@ -92,6 +97,8 @@ usage() {
   --reality-port N   порт VLESS+Reality (по умолчанию 443)
   --awg-port N       порт AmneziaWG, UDP (по умолчанию 51820)
   --sni DOMAIN       домен маскировки Reality (по умолчанию — автоподбор)
+  --whitelist        режим «белых списков»: маскироваться под разрешённый
+                     российский домен (yandex.ru, ozon.ru, vk.com, …)
   --no-reality       не создавать VLESS+Reality
   --no-awg           не создавать AmneziaWG
   --panel-url URL    адрес панели (по умолчанию PANEL_URL из .env)
@@ -590,6 +597,7 @@ main() {
             --reality-port) REALITY_PORT="${2:?}"; shift 2 ;;
             --awg-port)     AWG_PORT="${2:?}"; shift 2 ;;
             --sni)          SNI="${2:?}"; shift 2 ;;
+            --whitelist)    SNI_CANDIDATES="$WHITELIST_SNI_CANDIDATES"; shift ;;
             --no-reality)   DO_REALITY=0; shift ;;
             --no-awg)       DO_AWG=0; shift ;;
             --panel-url)    PANEL_URL="${2:?}"; shift 2 ;;
