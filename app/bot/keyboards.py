@@ -86,9 +86,12 @@ def crypto_order_kb(order_id: int, pay_url: str) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def stars_order_kb(order_id: int, pay_url: str) -> InlineKeyboardMarkup:
+def stars_order_kb(order_id: int, pay_url: str, reseller_url: str = "", stars: int = 0) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="⭐️ Оплатить звёздами", url=pay_url)
+    if reseller_url:
+        label = f"🛒 Купить {stars} ⭐" if stars else "🛒 Купить звёзды"
+        kb.button(text=label, url=reseller_url)
     kb.button(text="⬅️ Отменить", callback_data=f"order:cancel:{order_id}")
     kb.adjust(1)
     return kb.as_markup()

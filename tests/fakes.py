@@ -81,6 +81,20 @@ class FakeSession(BaseSession):
     def all_text(self) -> str:
         return " ".join(self.texts() + self.buttons())
 
+    def button_urls(self) -> list[str]:
+        """Ссылки из inline-кнопок (и SendMessage, и EditMessageText)."""
+        urls: list[str] = []
+        for request in self.requests:
+            markup = getattr(request, "reply_markup", None)
+            if markup is None:
+                continue
+            for row in getattr(markup, "inline_keyboard", None) or []:
+                for button in row:
+                    url = getattr(button, "url", None)
+                    if url:
+                        urls.append(str(url))
+        return urls
+
     def clear(self) -> None:
         self.requests.clear()
 

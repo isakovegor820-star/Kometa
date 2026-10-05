@@ -182,3 +182,42 @@ async def test_small_stars_payment_does_not_alert_admin(bot, dispatcher, session
         if "Крупная оплата звёздами" in (request.text or "")
     ]
     assert not warnings
+
+
+async def test_reseller_button_appears_when_configured(bot, dispatcher, session, monkeypatch):
+    """Если задан бот-посредник, клиент видит кнопку «Купить N ⭐» прямо в счёте."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "stars_reseller_url", "https://t.me/kupits_zvezdyy_bot")
+
+    user_id = 9301
+    await dispatcher.feed_update(bot, make_update("/start", user_id=user_id))
+    plans = await orders.list_plans(session)
+    monthly = next(p for p in plans if p.code == "m1")
+    bot.session.clear()
+
+    await dispatcher.feed_update(bot, make_update(callback_data=f"pay:{monthly.id}:stars", user_id=user_id))
+
+    buttons = bot.session.buttons()
+    assert any("Купить" in button and "⭐" in button for button in buttons)
+    assert "Не хватает звёзд" in bot.session.all_text()
+    assert "https://t.me/kupits_zvezdyy_bot" in bot.session.button_urls()
+
+
+async def test_reseller_button_hidden_when_not_configured(bot, dispatcher, session, monkeypatch):
+    from app.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "stars_reseller_url", "")
+
+    user_id = 9302
+    await dispatcher.feed_update(bot, make_update("/start", user_id=user_id))
+    plans = await orders.list_plans(session)
+    monthly = next(p for p in plans if p.code == "m1")
+    bot.session.clear()
+
+    await dispatcher.feed_update(bot, make_update(callback_data=f"pay:{monthly.id}:stars", user_id=user_id))
+
+    assert not any("Купить" in button for button in bot.session.buttons())
+    assert "Не хватает звёзд" not in bot.session.all_text()

@@ -1,24 +1,24 @@
-2026-10-05 21:59:24,565 | INFO     | kometa | База готова: sqlite+aiosqlite:////Users/egor/Downloads/VPN servise/data/kometa.db
-2026-10-05 21:59:24,569 | INFO     | kometa | Способы оплаты: stars
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Added job "job_expire_subscriptions" to job store "default"
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Added job "job_reminders" to job store "default"
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Added job "job_expire_orders" to job store "default"
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Added job "job_check_crypto" to job store "default"
-2026-10-05 21:59:24,570 | INFO     | apscheduler.scheduler | Added job "job_autopay" to job store "default"
-2026-10-05 21:59:24,571 | INFO     | apscheduler.scheduler | Added job "job_node_health" to job store "default"
-2026-10-05 21:59:24,571 | INFO     | apscheduler.scheduler | Scheduler started
-2026-10-05 21:59:24,593 | INFO     | kometa | Подписки: http://0.0.0.0:8090/sub/<token>
-2026-10-05 21:59:24,593 | INFO     | kometa | Админ-панель: http://0.0.0.0:8090/admin 
-INFO:     Started server process [91963]
+2026-10-05 22:02:48,527 | INFO     | kometa | База готова: sqlite+aiosqlite:////Users/egor/Downloads/VPN servise/data/kometa.db
+2026-10-05 22:02:48,532 | INFO     | kometa | Способы оплаты: stars
+2026-10-05 22:02:48,532 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 22:02:48,532 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 22:02:48,532 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 22:02:48,533 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 22:02:48,533 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 22:02:48,533 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-05 22:02:48,533 | INFO     | apscheduler.scheduler | Added job "job_expire_subscriptions" to job store "default"
+2026-10-05 22:02:48,533 | INFO     | apscheduler.scheduler | Added job "job_reminders" to job store "default"
+2026-10-05 22:02:48,533 | INFO     | apscheduler.scheduler | Added job "job_expire_orders" to job store "default"
+2026-10-05 22:02:48,533 | INFO     | apscheduler.scheduler | Added job "job_check_crypto" to job store "default"
+2026-10-05 22:02:48,533 | INFO     | apscheduler.scheduler | Added job "job_autopay" to job store "default"
+2026-10-05 22:02:48,533 | INFO     | apscheduler.scheduler | Added job "job_node_health" to job store "default"
+2026-10-05 22:02:48,533 | INFO     | apscheduler.scheduler | Scheduler started
+2026-10-05 22:02:48,568 | INFO     | kometa | Подписки: http://0.0.0.0:8090/sub/<token>
+2026-10-05 22:02:48,568 | INFO     | kometa | Админ-панель: http://0.0.0.0:8090/admin 
+INFO:     Started server process [92333]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8090 (Press CTRL+C to quit)
-2026-10-05 21:59:25,205 | INFO     | kometa | Бот запущен: @kometavpnservise_bot
-2026-10-05 21:59:25,537 | INFO     | aiogram.dispatcher | Start polling
-2026-10-05 21:59:25,757 | INFO     | aiogram.dispatcher | Run polling for bot @kometavpnservise_bot id=8958117679 - 'Kometa VPN'
+2026-10-05 22:02:49,152 | INFO     | kometa | Бот запущен: @kometavpnservise_bot
+2026-10-05 22:02:49,388 | INFO     | aiogram.dispatcher | Start polling
+2026-10-05 22:02:49,496 | INFO     | aiogram.dispatcher | Run polling for bot @kometavpnservise_bot id=8958117679 - 'Kometa VPN'

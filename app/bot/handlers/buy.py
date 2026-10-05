@@ -137,7 +137,14 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
         markup = keyboards.crypto_order_kb(order.id, invoice.pay_url or "")
     else:
         text = texts.ORDER_CREATED_STARS.format(order_id=order.id, amount=order.amount_rub)
-        markup = keyboards.stars_order_kb(order.id, invoice.pay_url or "")
+        if settings.stars_reseller_url:
+            text += texts.STARS_NO_BALANCE_HINT.format(stars=plan.price_stars)
+        markup = keyboards.stars_order_kb(
+            order.id,
+            invoice.pay_url or "",
+            reseller_url=settings.stars_reseller_url,
+            stars=plan.price_stars,
+        )
 
     await call.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
     await call.answer()
