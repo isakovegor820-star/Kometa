@@ -218,3 +218,99 @@ async def wata_webhook(request: Request) -> JSONResponse:
             )
 
     return JSONResponse({"ok": True})
+
+
+# ------------------------------------------------------------------- Platega
+@router.post("/platega/webhook")
+async def platega_webhook(request: Request) -> JSONResponse:
+    """Уведомления Platega.io: оплата или отмена.
+
+    Особенность: в колбэке **нет криптографической подписи** — только заголовки
+    ``X-MerchantId`` и ``X-Secret``. Доверять телу запроса нельзя: после проверки
+    заголовков перепроверяем транзакцию через API и выдаём доступ только если
+    Platega сама подтверждает статус CONFIRMED. Подделанный вебхук не даст
+    бесплатный доступ, даже если секрет утечёт.
+    """
+    from app.payments.base import PaymentStatus
+    from app.payments.registry import payments as payment_registry
+
+    try:
+        body = await request.json()
+    except Exception as exc:  # noqa: BLE001 - тело может быть не JSON
+        raise HTTPException(status_code=400, detail="invalid json") from exc
+
+    provider = next((p for p in payment_registry.available() if getattr(p, "merchant_id", None)), None)
+    if provider is None:
+        logger.warning("Пришёл вебхук Platega, но провайдер не настроен")
+        raise HTTPException(status_code=503, detail="platega is not configured")
+
+    if not provider.verify_callback(request.headers.get("X-MerchantId"), request.headers.get("X-Secret")):
+        logger.warning("Вебхук Platega с неверными заголовками — отклоняю")
+        raise HTTPException(status_code=403, detail="invalid credentials")
+
+    order_id, status, raw = provider.parse_callback(body)
+    transaction_id = str(raw.get("id") or "")
+
+    if status is not PaymentStatus.PAID:
+        logger.info("Platega: статус %s по заказу %s (оплаты нет)", status.value, order_id)
+        return JSONResponse({"ok": True, "status": status.value})
+
+    # --- перепроверка через API: тело вебхука не подписано
+    try:
+        check = await provider.check_payment(transaction_id)
+    except Exception as exc:  # noqa: BLE001 - сеть или API могли подвести
+        logger.error("Не смог перепроверить транзакцию Platega %s: %s", transaction_id, exc)
+        raise HTTPException(status_code=503, detail="cannot verify transaction") from exc
+
+    if check.status is not PaymentStatus.PAID:
+        logger.warning(
+            "Вебхук Platega утверждает оплату, а API говорит %s (транзакция %s) — доступ не выдаю",
+            check.status.value,
+            transaction_id,
+        )
+        return JSONResponse({"ok": True, "skipped": f"api says {check.status.value}"})
+
+    from sqlalchemy import select
+
+    from app.db.session import SessionMaker
+
+    bot: Bot | None = getattr(request.app.state, "bot", None)
+    async with SessionMaker() as session:
+        order = await session.get(Order, order_id) if order_id else None
+        if order is None and transaction_id:
+            # Platega может не вернуть payload в колбэке — тогда ищем заказ
+            # по id транзакции, который мы сами и сгенерировали.
+            order = await session.scalar(select(Order).where(Order.external_id == transaction_id))
+            if order is not None:
+                logger.info("Заказ #%s найден по id транзакции Platega", order.id)
+        if order is None:
+            logger.warning("Вебхук Platega: заказ не найден (payload=%s, id=%s)", order_id, transaction_id)
+            return JSONResponse({"ok": True, "skipped": "unknown order"})
+
+        user = await session.get(User, order.user_id)
+        sub, already = await orders_service.mark_paid(
+            session, order, registry.primary(), provider_payment_id=transaction_id
+        )
+        await events.log_event(
+            session,
+            events.ORDER_PAID,
+            user_id=order.user_id,
+            payload={
+                "order_id": order.id,
+                "auto": True,
+                "source": "platega_webhook",
+                "payment_method": raw.get("paymentMethod"),
+            },
+        )
+        await session.commit()
+
+        if bot is not None and user is not None and sub is not None and not already:
+            await _notify_paid(bot, user, sub)
+            await notifications.notify_admins(
+                bot,
+                f"💳 <b>Оплата через Platega</b>\nЗаказ #{order.id}, {order.amount_rub} ₽ "
+                f"(метод {raw.get('paymentMethod')})\n"
+                f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>)",
+            )
+
+    return JSONResponse({"ok": True})

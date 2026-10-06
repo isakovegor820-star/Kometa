@@ -55,6 +55,21 @@ class PaymentRegistry:
                 fail_redirect_url=settings.wata_fail_redirect_url,
                 public_key=settings.wata_public_key,
             )
+        if settings.platega_merchant_id and settings.platega_secret:
+            from app.payments.platega import PlategaProvider
+
+            # Каждый метод оплаты — отдельный провайдер, чтобы клиент выбирал
+            # «Карта МИР» или «СБП» в меню бота.
+            for method in settings.platega_method_list:
+                provider = PlategaProvider(
+                    merchant_id=settings.platega_merchant_id,
+                    secret=settings.platega_secret,
+                    payment_method=method,
+                    amount_unit=settings.platega_amount_unit,
+                    return_url=settings.platega_return_url,
+                    failed_url=settings.platega_failed_url,
+                )
+                providers[provider.code] = provider
         self._providers = providers
 
     def _ensure_ready(self) -> None:

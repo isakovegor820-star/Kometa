@@ -133,6 +133,18 @@ class Settings(BaseSettings):
     wata_success_redirect_url: str = ""
     wata_fail_redirect_url: str = ""
 
+    # --- Platega.io: карты МИР, СБП/QR, крипта ---
+    #: MerchantId и API-ключ из личного кабинета my.platega.io (Настройки).
+    platega_merchant_id: str = ""
+    platega_secret: str = ""
+    #: Какие методы показывать клиенту: 2 — СБП/QR, 10 — карты МИР, 12 — зарубежные карты.
+    platega_methods: str = "2,10"
+    #: Единицы суммы в API Platega: kopecks (по умолчанию) или rubles.
+    platega_amount_unit: str = "kopecks"
+    #: Куда вернуть плательщика после оплаты (необязательно).
+    platega_return_url: str = ""
+    platega_failed_url: str = ""
+
     log_level: str = "INFO"
 
     # ------------------------------------------------------------------
@@ -143,6 +155,11 @@ class Settings(BaseSettings):
     @property
     def inbound_id_list(self) -> list[int]:
         return [int(x) for x in self.panel_inbound_ids.replace(" ", "").split(",") if x.strip().isdigit()]
+
+    @property
+    def platega_method_list(self) -> list[int]:
+        """Методы оплаты Platega из строки «2,10,12» (2 — СБП, 10 — карты МИР)."""
+        return [int(x) for x in self.platega_methods.replace(" ", "").split(",") if x.strip().isdigit()]
 
     @property
     def resolved_db_url(self) -> str:
