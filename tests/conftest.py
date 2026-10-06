@@ -23,6 +23,9 @@ os.environ["TRIAL_GB"] = "10"
 os.environ["TRIAL_DEVICES"] = "1"
 os.environ["STARS_ENABLED"] = "true"
 os.environ["MANUAL_PAYMENT_DETAILS"] = "СБП: +7 900 000-00-00 (тест)"
+# Продажи в тестах открыты по умолчанию: боевой .env может держать их
+# закрытыми до готовности ноды, но это не должно ломать сценарии покупки.
+os.environ["SALES_ENABLED"] = "true"
 
 
 @pytest.fixture(autouse=True)
