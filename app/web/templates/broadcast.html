@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'broadcast' %}
+{% block title %}Рассылки — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Рассылки</h1>
+    <div class="sub">Одно сообщение — выбранной группе клиентов · время UTC</div>
+  </div>
+</div>
+
+{% if not bot_ready %}
+<div class="flash warn">{{ icon('alert') }}<div>
+  <b>Бот не подключён.</b> Запись в истории появится, но сообщения никому не уйдут — запусти бота и повтори.
+</div></div>
+{% endif %}
+
+{# --- сколько людей в каждой аудитории прямо сейчас --------------------- #}
+<div class="stats">
+  {% for code, label in audiences %}
+  <div class="stat">
+    <div class="k">{{ icon('users') }} {{ label }}</div>
+    <div class="v">{{ num(counts.get(code, 0)) }}</div>
+    <div class="d">получателей сейчас</div>
+  </div>
+  {% endfor %}
+</div>
+
+{# --- форма новой рассылки ---------------------------------------------- #}
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>{{ icon('megaphone') }} Новое сообщение</h2>
+    <div class="actions"><span class="xs dim">разметка Telegram: &lt;b&gt;жирный&lt;/b&gt;, &lt;a href&gt;ссылка&lt;/a&gt;</span></div>
+  </div>
+  <form method="post" action="/admin/broadcast"
+        data-confirm="Отправить сообщение выбранной аудитории? Остановить можно только те сообщения, что ещё не ушли.">
+    <div class="card-body">
+      <div class="field">
+        <label for="broadcast-text">Текст</label>
+        <textarea id="broadcast-text" name="text" required maxlength="{{ max_chars }}"
+                  placeholder="Что сказать клиентам: продление, новая локация, плановые работы…"></textarea>
+        <span class="hint">До {{ max_chars }} символов. Пиши по делу: рассылка уходит живым людям и отозвать её нельзя.</span>
+      </div>
+      <div class="form-grid mt-12">
+        <div class="field">
+          <label for="broadcast-audience">Аудитория</label>
+          <select id="broadcast-audience" name="audience">
+            {% for code, label in audiences %}
+            <option value="{{ code }}">{{ label }} — {{ num(counts.get(code, 0)) }}</option>
+            {% endfor %}
+          </select>
+          <span class="hint">Заблокированные не получают рассылку никогда.</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-foot">
+      <button class="btn btn-primary" type="submit">{{ icon('play') }} Отправить</button>
+      <span class="hint">Сообщения уходят по одному, с небольшой паузой. Кто заблокировал бота — попадёт в «не дошло».</span>
+    </div>
+  </form>
+</div>
+
+{# --- история ------------------------------------------------------------ #}
+<div class="card">
+  <div class="card-head">
+    <h2>История рассылок</h2>
+    <div class="actions"><span class="xs dim">последние {{ history|length }}</span></div>
+  </div>
+  {% if history %}
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Когда</th>
+          <th>Кто запустил</th>
+          <th>Аудитория</th>
+          <th>Текст</th>
+          <th>Статус</th>
+          <th class="num">Отправлено</th>
+          <th class="num">Не дошло</th>
+          <th class="actions"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in history %}
+        <tr>
+          <td class="id">#{{ row.id }}</td>
+          <td class="small dim nowrap">
+            {{ dt_short(row.created_at) }}
+            {% if row.finished_at %}<div class="xs dim">финиш {{ dt_short(row.finished_at) }}</div>{% endif %}
+          </td>
+          <td class="small">{{ row.created_by or '—' }}</td>
+          <td class="small">{{ audience_labels.get(row.audience, row.audience) }}</td>
+          <td><span class="trunc" title="{{ row.text }}">{{ row.text }}</span></td>
+          <td>
+            {% set badge = statuses.get(row.status, (row.status, 'neutral')) %}
+            <span class="badge badge-{{ badge[1] if badge[1] != 'neutral' else '' }}">{{ badge[0] }}</span>
+            {% if row.error %}<div class="xs" style="color:var(--err)">{{ row.error|truncate(120) }}</div>{% endif %}
+          </td>
+          <td class="num">
+            {{ num(row.sent) }}
+            {% if row.total %}<div class="xs dim">из {{ num(row.total) }}</div>{% endif %}
+          </td>
+          <td class="num">{{ num(row.failed) }}</td>
+          <td class="actions">
+            {% if row.status == 'running' %}
+            <form method="post" action="/admin/broadcast/{{ row.id }}/cancel" class="inline-form"
+                  data-confirm="Остановить рассылку #{{ row.id }}? Уже отправленные сообщения не отозвать.">
+              <button class="btn btn-sm btn-danger" type="submit" aria-label="Остановить рассылку {{ row.id }}">Остановить</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ icon('megaphone') }}
+    <div class="t">Рассылок ещё не было</div>
+    <div class="small">Здесь появятся все отправки: кто запустил, кому и с каким результатом.</div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-head"><h2>{{ icon('info') }} Как это работает</h2></div>
+  <div class="card-body">
+    <dl class="kv">
+      <dt>Аудитория</dt>
+      <dd class="small">выбор из готового списка: активные, истёкшие, на пробном доступе, все незаблокированные</dd>
+      <dt>Скорость</dt>
+      <dd class="small">сообщения уходят по одному с паузой — так Telegram не считает бота спамером</dd>
+      <dt>Кого не достанет</dt>
+      <dd class="small">тех, кто заблокировал бота или удалил чат: такие сообщения попадут в «не дошло»</dd>
+      <dt>Остановка</dt>
+      <dd class="small">кнопка «Остановить» действует на оставшиеся сообщения: очередь проверяется перед каждой отправкой</dd>
+    </dl>
+  </div>
+</div>
+
+{% endblock %}

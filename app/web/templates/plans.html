@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'plans' %}
+{% block title %}Тарифы — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Тарифы</h1>
+    <div class="sub">Сроки, цены и лимиты, которые клиент видит в боте и в счёте на оплату</div>
+  </div>
+  <div class="actions">
+    <span class="badge {{ 'badge-ok' if active_total else 'badge-err' }}">{{ active_total }} активных</span>
+  </div>
+</div>
+
+{% if not active_total %}
+<div class="flash err">{{ icon('alert') }}<div>
+  <b>Ни одного активного тарифа.</b> В боте клиенту нечего будет предложить — включи хотя бы один.
+</div></div>
+{% endif %}
+
+<div class="stats">
+  <div class="stat">
+    <div class="k">{{ icon('tag') }} Всего тарифов</div>
+    <div class="v">{{ num(plans|length) }}</div>
+    <div class="d">включая выключенные</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('check') }} Активных</div>
+    <div class="v">{{ num(active_total) }}</div>
+    <div class="d">видны клиенту при покупке</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('wallet') }} Дешевле всего</div>
+    <div class="v">{% if plans %}{{ money(plans|map(attribute='price_rub')|min) }}{% else %}—{% endif %}</div>
+    <div class="d">минимальная цена среди всех</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('users') }} Подписок на тарифах</div>
+    <div class="v">{{ num(usage.values()|sum) }}</div>
+    <div class="d">по действующим подпискам</div>
+  </div>
+</div>
+
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>Список тарифов</h2>
+    <div class="actions"><span class="xs dim">трафик 0 ГБ — без ограничения</span></div>
+  </div>
+  {% if plans %}
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Код</th>
+          <th>Название</th>
+          <th class="num">Дней</th>
+          <th class="num">Цена</th>
+          <th class="num">Звёзды</th>
+          <th class="num">Устройств</th>
+          <th class="num">Трафик</th>
+          <th class="num">Подписок</th>
+          <th class="num">Порядок</th>
+          <th>Статус</th>
+          <th class="actions">Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for plan in plans %}
+        <tr>
+          <td class="id"><code>{{ plan.code }}</code></td>
+          <td><b>{{ plan.title }}</b></td>
+          <td class="num">{{ num(plan.days) }}</td>
+          <td class="num"><b>{{ money(plan.price_rub) }}</b></td>
+          <td class="num">{% if plan.price_stars %}{{ num(plan.price_stars) }} ★{% else %}<span class="dim">—</span>{% endif %}</td>
+          <td class="num">{{ num(plan.devices_limit) }}</td>
+          <td class="num">{% if plan.traffic_limit_gb %}{{ num(plan.traffic_limit_gb) }} ГБ{% else %}∞{% endif %}</td>
+          <td class="num">{{ num(usage.get(plan.id, 0)) }}</td>
+          <td class="num">{{ num(plan.sort_order) }}</td>
+          <td>
+            {% if plan.is_active %}
+            <span class="badge badge-ok">включён</span>
+            {% else %}
+            <span class="badge">выключен</span>
+            {% endif %}
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <button class="btn btn-sm" type="button" data-open-dialog="plan-{{ plan.id }}"
+                      aria-label="Изменить тариф {{ plan.title }}">{{ icon('edit') }} Изменить</button>
+              <form method="post" action="/admin/plans/{{ plan.id }}/toggle" class="inline-form">
+                <button class="btn btn-sm {{ 'btn-ghost' if plan.is_active else 'btn-primary' }}" type="submit"
+                        aria-label="{{ 'Выключить' if plan.is_active else 'Включить' }} тариф {{ plan.title }}">
+                  {{ 'Выключить' if plan.is_active else 'Включить' }}
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ icon('tag') }}
+    <div class="t">Тарифов нет</div>
+    <div class="small">Тарифы создаются при первом запуске сервиса. Если список пуст — проверь, что база инициализирована.</div>
+  </div>
+  {% endif %}
+</div>
+
+{# --- где цены видны клиенту: чтобы правка не была правкой вслепую ----- #}
+<div class="card">
+  <div class="card-head"><h2>{{ icon('info') }} Где клиент видит эти цены</h2></div>
+  <div class="card-body">
+    <dl class="kv">
+      <dt>Бот · «Тарифы»</dt>
+      <dd class="small">срок и цена на кнопках покупки — берутся из этой таблицы, выключенные тарифы не показываются</dd>
+      <dt>Бот · «Моя подписка»</dt>
+      <dd class="small">цена продления и срок, который прибавится к текущей подписке</dd>
+      <dt>Счёт на оплату</dt>
+      <dd class="small">сумма в рублях: её сверяет автоподтверждение переводов, поэтому цена меняется только здесь</dd>
+      <dt>Telegram Stars</dt>
+      <dd class="small">
+        {% if stars_enabled %}цена в звёздах — из колонки «Звёзды»; если поставить 0, клиент заплатит звёздами по курсу рублёвой цены
+        {% else %}оплата звёздами выключена (<code>STARS_ENABLED=false</code>) — колонка «Звёзды» ни на что не влияет{% endif %}
+      </dd>
+      <dt>Пробный доступ</dt>
+      <dd class="small">{{ trial_days }} дн. · {{ trial_devices }} устройств{% if trial_gb %} · {{ trial_gb }} ГБ{% else %} · без ограничения трафика{% endif %} — задаётся настройками <code>TRIAL_*</code>, а не тарифами</dd>
+      <dt>Код тарифа</dt>
+      <dd class="small">менять нельзя: на него ссылаются заказы, бот и отчёты. Меняются название, срок, цены и лимиты</dd>
+    </dl>
+  </div>
+</div>
+
+{# --- формы правки: по модалке на тариф --------------------------------- #}
+{% for plan in plans %}
+<dialog class="modal" id="plan-{{ plan.id }}" data-backdrop-close>
+  <form method="post" action="/admin/plans/{{ plan.id }}">
+    <div class="card-head">
+      <h2>Тариф <code>{{ plan.code }}</code></h2>
+      <div class="actions">
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-close-dialog aria-label="Закрыть">{{ icon('x') }}</button>
+      </div>
+    </div>
+    <div class="card-body form-grid">
+      <div class="field span-2">
+        <label for="title-{{ plan.id }}">Название</label>
+        <input id="title-{{ plan.id }}" type="text" name="title" value="{{ plan.title }}" required maxlength="64">
+        <span class="hint">Это название клиент видит на кнопке и в счёте.</span>
+      </div>
+      <div class="field">
+        <label for="days-{{ plan.id }}">Дней</label>
+        <input id="days-{{ plan.id }}" type="number" name="days" value="{{ plan.days }}" min="1" max="3650" required style="width:100%">
+      </div>
+      <div class="field">
+        <label for="price-{{ plan.id }}">Цена, ₽</label>
+        <input id="price-{{ plan.id }}" type="number" name="price_rub" value="{{ plan.price_rub }}" min="0" max="100000" style="width:100%">
+      </div>
+      <div class="field">
+        <label for="stars-{{ plan.id }}">Цена в звёздах</label>
+        <input id="stars-{{ plan.id }}" type="number" name="price_stars" value="{{ plan.price_stars }}" min="0" max="100000" style="width:100%">
+        <span class="hint">0 — считать от рублёвой цены</span>
+      </div>
+      <div class="field">
+        <label for="devices-{{ plan.id }}">Устройств</label>
+        <input id="devices-{{ plan.id }}" type="number" name="devices_limit" value="{{ plan.devices_limit }}" min="1" max="50" style="width:100%">
+      </div>
+      <div class="field">
+        <label for="traffic-{{ plan.id }}">Трафик, ГБ</label>
+        <input id="traffic-{{ plan.id }}" type="number" name="traffic_limit_gb" value="{{ plan.traffic_limit_gb }}" min="0" max="10000" style="width:100%">
+        <span class="hint">0 — без ограничения</span>
+      </div>
+      <div class="field">
+        <label for="sort-{{ plan.id }}">Порядок сортировки</label>
+        <input id="sort-{{ plan.id }}" type="number" name="sort_order" value="{{ plan.sort_order }}" min="-9999" max="9999" style="width:100%">
+        <span class="hint">меньше — выше в списке</span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" type="button" data-close-dialog>Отмена</button>
+      <button class="btn btn-primary" type="submit">Сохранить</button>
+    </div>
+  </form>
+</dialog>
+{% endfor %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Модалки открываются вручную: admin.js умеет только закрывать <dialog>,
+   а без открытия форма правки осталась бы недоступной. */
+document.addEventListener("click", function (event) {
+  var trigger = event.target.closest("[data-open-dialog]");
+  if (!trigger) return;
+  var dialog = document.getElementById(trigger.getAttribute("data-open-dialog"));
+  if (dialog) dialog.showModal();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'audit' %}
+{% block title %}Журнал действий — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Журнал действий</h1>
+    <div class="sub">Кто и что менял в панели · время UTC · записей: {{ num(page_data.total) }}</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/admin/export/audit.csv?{{ query_string(current) }}">{{ icon('download') }} Выгрузить CSV</a>
+  </div>
+</div>
+
+<form class="toolbar" method="get" action="/admin/audit">
+  <select name="actor" aria-label="Кто действовал">
+    <option value="">Все сотрудники</option>
+    {% for actor in actors %}
+    <option value="{{ actor }}" {{ 'selected' if current.actor == actor else '' }}>{{ actor }}</option>
+    {% endfor %}
+  </select>
+  <select name="kind" aria-label="Действие">
+    <option value="">Все действия</option>
+    {% for code, label in actions.items() %}
+    <option value="{{ code }}" {{ 'selected' if current.kind == code else '' }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <input type="date" name="date_from" value="{{ current.date_from }}" aria-label="С даты" style="width:150px">
+  <input type="date" name="date_to" value="{{ current.date_to }}" aria-label="По дату" style="width:150px">
+  <select name="per_page" aria-label="Строк на странице">
+    {% for size in [25, 50, 100, 200] %}
+    <option value="{{ size }}" {{ 'selected' if page_data.per_page == size else '' }}>{{ size }} строк</option>
+    {% endfor %}
+  </select>
+  <button class="btn btn-primary" type="submit">{{ icon('search') }} Показать</button>
+  {% if current.actor or current.kind or current.date_from or current.date_to %}
+  <a class="btn btn-ghost" href="/admin/audit">Сбросить</a>
+  {% endif %}
+</form>
+
+{% if events %}
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Время</th>
+          <th>Кто</th>
+          <th>Действие</th>
+          <th>Клиент</th>
+          <th>IP</th>
+          <th>Подробности</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+        <tr data-row data-search="{{ event.actor_name or '' }} {{ event.kind }} {{ event.ip or '' }}">
+          <td class="small dim nowrap">{{ dt(event.created_at) }}</td>
+          <td>
+            <b>{{ event.actor_name or 'система' }}</b>
+            {% if event.actor_role %}
+            {% set role_class = {'owner': 'badge-accent', 'moderator': 'badge-info'}.get(event.actor_role, '') %}
+            <div class="xs mt-0"><span class="badge {{ role_class }}">{{ role_label(event.actor_role) }}</span></div>
+            {% endif %}
+          </td>
+          <td>
+            {{ event_label(event.kind) }}
+            <div class="xs dim"><code>{{ event.kind }}</code></div>
+          </td>
+          <td>
+            {% if event.user_id %}
+            {% set client = users.get(event.user_id) %}
+            <a href="/admin/users/{{ event.user_id }}">{{ client.display_name if client else '#' ~ event.user_id }}</a>
+            {% else %}<span class="dim">—</span>{% endif %}
+          </td>
+          <td class="small dim num">{{ event.ip or '—' }}</td>
+          <td>
+            {% if event.payload %}
+            {# payload — готовая строка JSON из audit.log_action: не разбираем, показываем как есть. #}
+            <code class="trunc" title="{{ event.payload }}">{{ event.payload }}</code>
+            {% else %}<span class="dim">—</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "_pagination.html" with context %}
+
+{% else %}
+<div class="card">
+  <div class="empty">
+    {{ icon('history') }}
+    <div class="t">
+      {% if current.actor or current.kind or current.date_from or current.date_to %}
+      По этим фильтрам записей нет
+      {% else %}
+      Журнал пока пуст
+      {% endif %}
+    </div>
+    <div class="small">
+      {% if current.actor or current.kind or current.date_from or current.date_to %}
+      Попробуй <a href="/admin/audit">сбросить фильтры</a> или расширить период.
+      {% else %}
+      Здесь появятся входы в панель, подтверждения оплат, возвраты, правки нод и алертов.
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

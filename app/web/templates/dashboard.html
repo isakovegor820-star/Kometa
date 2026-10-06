@@ -1,120 +1,307 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% set page = 'dashboard' %}
-{% set session_active = True %}
 {% block content %}
-<h1>Дашборд</h1>
 
-<div class="cards">
-  <div class="card"><div class="k">Пользователей</div><div class="v">{{ stats.users_total }}</div></div>
-  <div class="card"><div class="k">На пробном</div><div class="v">{{ stats.trials_active }}</div></div>
-  <div class="card"><div class="k">Активных платных</div><div class="v">{{ stats.active_paid }}</div></div>
-  <div class="card"><div class="k">Платили хотя бы раз</div><div class="v">{{ stats.paying_total }}</div></div>
-  <div class="card"><div class="k">Выручка сегодня</div><div class="v">{{ stats.revenue_today }} ₽</div></div>
-  <div class="card"><div class="k">Выручка 7 дней</div><div class="v">{{ stats.revenue_week }} ₽</div></div>
-  <div class="card"><div class="k">Выручка 30 дней</div><div class="v">{{ stats.revenue_month }} ₽</div></div>
-  <div class="card"><div class="k">Конверсия в оплату</div><div class="v">{{ '%.1f'|format(stats.conversion) }}%</div></div>
-</div>
-
-<h2>Состояние сервиса</h2>
-<div class="card">
-  Панель VPN:
-  {% if panel_ok %}<span class="pill ok">отвечает</span>
-  {% else %}<span class="pill err">недоступна</span> — проверь сервер и токен панели{% endif %}
-  &nbsp;·&nbsp; Автоплатёж:
-  {% if autopay_enabled %}<span class="pill ok">включён</span> — переводы подтверждаются сами
-  {% else %}<span class="pill warn">выключен</span> — переводы подтверждаются вручную{% endif %}
-  &nbsp;·&nbsp; Заявок в очереди: <b>{{ stats.pending_orders }}</b>
-  {% if autopay_enabled %}
-  <div style="margin-top:12px">
-    <form class="inline" method="post" action="/admin/autopay/run">
-      <button type="submit">🔄 Проверить выписку сейчас</button>
-      <span class="muted">обычно проверяется автоматически каждые несколько минут</span>
+<div class="page-head">
+  <div class="titles">
+    <h1>Дашборд</h1>
+    <div class="sub">Что происходит в сервисе сейчас · время UTC</div>
+  </div>
+  <div class="actions">
+    {% if autopay_enabled and 'orders.act' in caps %}
+    <form method="post" action="/admin/autopay/run" class="inline-form"
+          data-confirm="Проверить выписку и подтвердить найденные переводы?">
+      <button class="btn" type="submit">{{ icon('refresh') }} Проверить выписку сейчас</button>
     </form>
-  </div>
-  {% endif %}
-</div>
-
-<h2>Заявки на оплату</h2>
-{% if pending %}
-<table>
-  <tr><th>Заказ</th><th>Пользователь</th><th>Тариф</th><th>К переводу</th><th>Способ</th><th>Создан</th><th></th></tr>
-  {% for row in pending %}
-  <tr>
-    <td>#{{ row.order.id }}</td>
-    <td>{{ row.user.display_name if row.user else '—' }}<br><span class="muted">{{ row.user.tg_id if row.user else '' }}</span></td>
-    <td>{{ row.plan.title if row.plan else '—' }}</td>
-    <td><b>{{ row.order.pay_amount_text }} ₽</b>{% if row.order.pay_kopecks %}<br><span class="muted">копейки — для автосверки</span>{% endif %}</td>
-    <td>{{ row.order.provider }}</td>
-    <td class="muted">{{ row.order.created_at.strftime('%d.%m %H:%M') }}</td>
-    <td class="row-actions">
-      <form class="inline" method="post" action="/admin/orders/{{ row.order.id }}/confirm"><button type="submit">Подтвердить</button></form>
-      <form class="inline" method="post" action="/admin/orders/{{ row.order.id }}/reject"><button class="danger" type="submit">Отклонить</button></form>
-    </td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}
-<div class="card muted">Заявок нет — все оплаты обработаны ✅</div>
-{% endif %}
-
-<h2>Доходность каналов оплаты (30 дней)</h2>
-{% if channels %}
-<table>
-  <tr><th>Канал</th><th>Заказов</th><th>Оборот</th><th>Комиссия канала</th><th>На руки</th></tr>
-  {% for channel in channels %}
-  <tr>
-    <td>{{ channel.title }}</td>
-    <td>{{ channel.orders }}</td>
-    <td>{{ channel.gross_rub }} ₽</td>
-    <td class="muted">{{ '%.1f'|format(channel.fee_percent) }} %</td>
-    <td><b>{{ channel.net_rub }} ₽</b></td>
-  </tr>
-  {% endfor %}
-  <tr>
-    <td colspan="2"><b>Итого</b></td>
-    <td><b>{{ profit.gross }} ₽</b></td>
-    <td class="muted">расходы: {{ profit.costs }} ₽</td>
-    <td><b>{{ profit.net }} ₽</b></td>
-  </tr>
-</table>
-<div class="card" style="margin-top:12px">
-  Прибыль за 30 дней: <b>{{ profit.profit }} ₽</b>
-  {% if profit.gross %}<span class="muted">(маржа {{ '%.0f'|format(profit.margin_percent) }} %)</span>{% endif %}
-  {% if profit.profit < 0 %}<span class="pill err">работаем в минус</span>
-  {% else %}<span class="pill ok">в плюсе</span>{% endif %}
-  <div class="muted" style="margin-top:6px">
-    Расходы задаются в <code>MONTHLY_COSTS_RUB</code>, комиссии каналов — в <code>FEE_PERCENT_*</code>.
+    {% endif %}
+    <a class="btn btn-ghost" href="/admin/orders">{{ icon('inbox') }} Очередь{% if nav_counts.pending %} ({{ nav_counts.pending }}){% endif %}</a>
   </div>
 </div>
-{% else %}
-<div class="card muted">Оплаченных заказов за 30 дней пока нет</div>
+
+{% if not sales_enabled %}
+<div class="flash warn">{{ icon('alert') }}<div>
+  <b>Продажи выключены</b> — <code>SALES_ENABLED=false</code>. Новые оплаты не принимаются, пока не подтвердишь готовность ноды.
+</div></div>
+{% endif %}
+{% if not panel_ok %}
+<div class="flash err">{{ icon('alert') }}<div>
+  <b>Панель VPN не отвечает.</b> Клиенты не получат новые конфиги. Проверь адрес и токен панели в разделе «Ноды», затем нажми «Проверить ноды».
+</div></div>
 {% endif %}
 
-<h2>Рассылка</h2>
-<div class="card">
-  <form method="post" action="/admin/broadcast">
-    <textarea name="text" placeholder="Текст сообщения (HTML разрешён)"></textarea>
-    <div style="display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap:wrap">
-      <select name="audience">
-        <option value="active">Активные подписки</option>
-        <option value="expired">Истёкшие</option>
-        <option value="all">Все (кроме заблокированных)</option>
-      </select>
-      <button type="submit">Отправить</button>
-      <span class="muted">Отправка идёт в фоне, бот не зависает</span>
+{# --- алерты: то, что требует человека прямо сейчас --------------------- #}
+{% if alerts %}
+<div class="card" style="border-color:var(--warn-border)">
+  <div class="card-head">
+    <h2>{{ icon('bell') }} Требует внимания</h2>
+    <div class="actions">
+      <span class="badge badge-warn">{{ alert_counts.attention }} открыто</span>
+      <a class="btn btn-sm btn-ghost" href="/admin/alerts">Все алерты {{ icon('chevron-right') }}</a>
     </div>
-  </form>
+  </div>
+  {% for alert in alerts %}
+  <div class="alert-row sev-{{ alert.severity }}">
+    <div class="ico">{{ icon('alert' if alert.severity == 'err' else 'info') }}</div>
+    <div style="flex:1;min-width:0">
+      <div class="t">{{ alert.title }}</div>
+      {% if alert.message %}<div class="m">{{ alert.message|truncate(180) }}</div>{% endif %}
+      <div class="xs dim mt-8">первый раз {{ ago(alert.created_at) }}{% if alert.repeat_count > 1 %} · повторов: {{ alert.repeat_count }}{% endif %}</div>
+    </div>
+    <div class="when">{{ ago(alert.last_seen_at) }}</div>
+    {% if 'alerts.act' in caps %}
+    <form method="post" action="/admin/alerts/{{ alert.id }}/resolve" class="inline-form">
+      <button class="btn btn-sm" type="submit">Закрыть</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# --- цифры ------------------------------------------------------------- #}
+<div class="section">
+  <div class="stats">
+    <a class="stat is-link" href="/admin/users">
+      <div class="k">{{ icon('users') }} Клиентов всего</div>
+      <div class="v">{{ num(stats.users_total) }}</div>
+      <div class="d">+{{ new_users_today }} за сутки</div>
+    </a>
+    <a class="stat is-link" href="/admin/users?status=active">
+      <div class="k">{{ icon('check') }} Активных платных</div>
+      <div class="v">{{ num(stats.active_paid) }}</div>
+      <div class="d">на пробном: {{ stats.trials_active }}</div>
+    </a>
+    <a class="stat is-link" href="/admin/orders?status=pending">
+      <div class="k">{{ icon('inbox') }} Ждут подтверждения</div>
+      <div class="v {{ 'is-warn' if stats.pending_orders else '' }}">{{ num(stats.pending_orders) }}</div>
+      <div class="d">{{ 'нужно обработать' if stats.pending_orders else 'очередь пуста' }}</div>
+    </a>
+    <div class="stat">
+      <div class="k">{{ icon('wallet') }} Выручка сегодня</div>
+      <div class="v">{{ money(stats.revenue_today) }}</div>
+      <div class="d">вчера: {{ money(stats.revenue_yesterday) }}</div>
+    </div>
+    <div class="stat">
+      <div class="k">{{ icon('chart') }} За 7 дней</div>
+      <div class="v">{{ money(stats.revenue_week) }}</div>
+      <div class="d">за 30 дней: {{ money(stats.revenue_month) }}</div>
+    </div>
+    <div class="stat {{ 'is-err' if profit.profit < 0 else 'is-ok' }}">
+      <div class="k">{{ icon('bolt') }} Прибыль 30 дней</div>
+      <div class="v">{{ money(profit.profit) }}</div>
+      <div class="d">маржа {{ percent(profit.margin_percent, 0) }} · расходы {{ money(profit.costs) }}</div>
+    </div>
+    <div class="stat">
+      <div class="k">{{ icon('card') }} Средний чек</div>
+      <div class="v">{{ money(stats.avg_check_month) }}</div>
+      <div class="d">оплат за 30 дней: {{ stats.paid_orders_month }}</div>
+    </div>
+    <a class="stat is-link" href="/admin/refunds">
+      <div class="k">{{ icon('refund') }} Возвраты 30 дней</div>
+      <div class="v">{{ num(refunds.count) }}</div>
+      <div class="d">на {{ money(refunds.rub) }}</div>
+    </a>
+  </div>
 </div>
 
-<h2>Последние события</h2>
-<table>
-  <tr><th>Когда</th><th>Событие</th><th>Данные</th></tr>
-  {% for event in events %}
-  <tr>
-    <td class="muted">{{ event.created_at.strftime('%d.%m %H:%M') }}</td>
-    <td>{{ event.kind }}</td>
-    <td class="muted"><span class="trunc">{{ event.payload or '' }}</span></td>
-  </tr>
-  {% endfor %}
-</table>
+<div class="grid-2 mt-24" style="align-items:start">
+  <div>
+    {# --- график выручки ------------------------------------------------ #}
+    <div class="card">
+      <div class="card-head">
+        <h2>Выручка по дням</h2>
+        <div class="actions"><span class="xs dim">14 дней, ₽</span></div>
+      </div>
+      <div class="card-body">
+        {% if revenue_days %}
+        {% set peak = revenue_days|map(attribute='rub')|max %}
+        {% set peak = peak if peak > 0 else 1 %}
+        <svg class="chart" viewBox="0 0 720 168" preserveAspectRatio="none" role="img"
+             aria-label="Выручка по дням за две недели">
+          {% for line in [0, 1, 2, 3] %}
+          {% set y = 8 + line * 42 %}
+          <line class="grid-line" x1="0" y1="{{ y }}" x2="720" y2="{{ y }}"/>
+          <text class="axis" x="4" y="{{ y - 4 }}">{{ num((peak * (3 - line) / 3)|round|int) }}</text>
+          {% endfor %}
+          {% set step = 720 / (revenue_days|length) %}
+          {% for point in revenue_days %}
+            {% set h = (point.rub / peak * 134)|round(1) %}
+            {% set x = loop.index0 * step + step * 0.18 %}
+            {% set w = step * 0.64 %}
+            <rect class="bar" x="{{ x|round(1) }}" y="{{ (142 - h)|round(1) }}" width="{{ w|round(1) }}" height="{{ h if h > 0 else 1 }}" rx="3">
+              <title>{{ point.day.strftime('%d.%m') }}: {{ money(point.rub) }} · заказов {{ point.orders }}</title>
+            </rect>
+            {% if loop.index0 % 2 == 0 %}
+            <text class="axis" x="{{ (x + w / 2)|round(1) }}" y="162" text-anchor="middle">{{ point.day.strftime('%d.%m') }}</text>
+            {% endif %}
+          {% endfor %}
+        </svg>
+        {% else %}
+        <div class="empty">
+          {{ icon('chart') }}
+          <div class="t">Пока нет оплат за две недели</div>
+          <div class="small">Как только появятся первые платежи, здесь будет динамика по дням.</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# --- очередь оплат -------------------------------------------------- #}
+    <div class="card">
+      <div class="card-head">
+        <h2>Заявки на оплату</h2>
+        <div class="actions">
+          <span class="badge {{ 'badge-warn' if pending else 'badge-ok' }}">{{ stats.pending_orders }} в очереди</span>
+          <a class="btn btn-sm" href="/admin/orders">Открыть очередь</a>
+        </div>
+      </div>
+      {% if pending %}
+      <div class="table-scroll">
+        <table class="data">
+          <thead>
+            <tr><th>Заказ</th><th>Клиент</th><th>Тариф</th><th class="right">К переводу</th><th>Способ</th><th>Создан</th><th class="actions"></th></tr>
+          </thead>
+          <tbody>
+            {% for row in pending %}
+            <tr data-row>
+              <td class="id">#{{ row.order.id }}</td>
+              <td>
+                <div class="who-cell">
+                  <span class="avatar">{{ initials(row.user.display_name if row.user else '—') }}</span>
+                  <span style="min-width:0">
+                    <a class="nm" href="/admin/users/{{ row.order.user_id }}">{{ row.user.display_name if row.user else '—' }}</a>
+                    <span class="meta">{{ row.user.tg_id if row.user else '' }}</span>
+                  </span>
+                </div>
+              </td>
+              <td>{{ row.plan.title if row.plan else '—' }}</td>
+              <td class="right"><b>{{ row.order.pay_amount_text }} ₽</b>
+                {% if row.order.pay_kopecks %}<div class="xs dim">копейки — для автосверки</div>{% endif %}
+              </td>
+              <td class="small muted">{{ provider_label(row.order.provider) }}</td>
+              <td class="small dim nowrap">{{ ago(row.order.created_at) }}</td>
+              <td class="actions">
+                {% if 'orders.act' in caps %}
+                <div class="row-actions">
+                  <form method="post" action="/admin/orders/{{ row.order.id }}/confirm" class="inline-form">
+                    <button class="btn btn-sm btn-primary" type="submit">Подтвердить</button>
+                  </form>
+                  <form method="post" action="/admin/orders/{{ row.order.id }}/reject" class="inline-form"
+                        data-confirm="Отклонить заказ #{{ row.order.id }}?">
+                    <button class="btn btn-sm btn-danger" type="submit">Отклонить</button>
+                  </form>
+                </div>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty">
+        {{ icon('check') }}
+        <div class="t">Очередь пуста</div>
+        <div class="small">Все оплаты обработаны. Новые заявки появятся здесь автоматически.</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    {# --- состояние сервиса --------------------------------------------- #}
+    <div class="card">
+      <div class="card-head"><h2>Состояние сервиса</h2></div>
+      <div class="card-body">
+        <dl class="kv">
+          <dt>Панель VPN</dt>
+          <dd>{% if panel_ok %}<span class="badge badge-ok">отвечает</span>{% else %}<span class="badge badge-err">недоступна</span>{% endif %}</dd>
+          <dt>Автоплатёж</dt>
+          <dd>{% if autopay_enabled %}<span class="badge badge-ok">включён</span>{% else %}<span class="badge badge-warn">выключен — подтверждаем вручную</span>{% endif %}</dd>
+          <dt>Продажи</dt>
+          <dd>{% if sales_enabled %}<span class="badge badge-ok">открыты</span>{% else %}<span class="badge badge-warn">закрыты</span>{% endif %}</dd>
+          <dt>Ноды</dt>
+          <dd>{{ nodes|length }} в системе · {{ nodes|selectattr('is_active')|list|length }} включено</dd>
+        </dl>
+      </div>
+      {% if nodes %}
+      <div class="table-scroll">
+        <table class="data">
+          <thead><tr><th>Нода</th><th>Проверка</th><th class="actions"></th></tr></thead>
+          <tbody>
+            {% for node in nodes %}
+            <tr>
+              <td>
+                <b>{{ node.title }}</b>
+                <div class="xs dim"><code>{{ node.code }}</code>{% if node.host %} · {{ node.host }}{% endif %}</div>
+              </td>
+              <td class="small">
+                {% if not node.is_active %}<span class="badge">выключена</span>
+                {% elif node.last_check_at is none %}<span class="badge">не проверялась</span>
+                {% elif node.last_check_ok %}<span class="badge badge-ok">отвечает</span>
+                {% else %}<span class="badge badge-err">нет ответа</span>{% endif %}
+                {% if node.last_check_at %}<div class="xs dim">{{ ago(node.last_check_at) }}</div>{% endif %}
+              </td>
+              <td class="actions">
+                <a class="btn btn-sm btn-ghost" href="/admin/nodes">Открыть</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+      {% if 'nodes.act' in caps %}
+      <div class="card-foot">
+        <form method="post" action="/admin/nodes/check" class="inline-form">
+          <button class="btn btn-sm" type="submit">{{ icon('refresh') }} Проверить ноды</button>
+        </form>
+        <form method="post" action="/admin/sync" class="inline-form"
+              data-confirm="Раздать всех клиентов на все активные ноды?">
+          <button class="btn btn-sm btn-ghost" type="submit">Синхронизировать клиентов</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+
+    {# --- что делала команда -------------------------------------------- #}
+    <div class="card">
+      <div class="card-head">
+        <h2>Действия команды</h2>
+        {% if 'audit.view' in caps %}
+        <div class="actions"><a class="btn btn-sm btn-ghost" href="/admin/audit">Журнал</a></div>
+        {% endif %}
+      </div>
+      {% if actions %}
+      <ul class="timeline" style="padding:12px 16px 12px 38px">
+        {% for action in actions %}
+        <li class="{{ 'accent' if 'refund' in action.kind else 'ok' }}">
+          <span class="when">{{ dt_short(action.created_at) }}</span> ·
+          <b>{{ action.actor_name or 'система' }}</b> — {{ event_label(action.kind)|lower }}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="empty small">Действий пока не было</div>
+      {% endif %}
+    </div>
+
+    {# --- журнал событий ------------------------------------------------- #}
+    <div class="card">
+      <div class="card-head"><h2>Последние события</h2></div>
+      <ul class="timeline" style="padding:12px 16px 12px 38px">
+        {% for event in events %}
+        <li class="{{ 'err' if event.kind in ('error', 'panel_error') else '' }}">
+          <span class="when">{{ dt_short(event.created_at) }}</span> · {{ event_label(event.kind) }}
+          {% if event.user_id %}<a class="xs" href="/admin/users/{{ event.user_id }}">клиент #{{ event.user_id }}</a>{% endif %}
+        </li>
+        {% else %}
+        <li class="dim">Событий пока нет</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+
 {% endblock %}

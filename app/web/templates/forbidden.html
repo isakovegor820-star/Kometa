@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'forbidden' %}
+{% block content %}
+<div class="card">
+  <div class="empty">
+    {{ icon('shield') }}
+    <div class="t">Недостаточно прав</div>
+    <div class="small" style="max-width:520px;margin:0 auto">
+      Роль <b>{{ role_label(admin.role) }}</b> не может выполнить это действие
+      {% if capability %}(<code>{{ capability }}</code>){% endif %}.
+      Такие операции доступны владельцу и модератору — попроси их подтвердить
+      действие или попроси владельца выдать другую роль в разделе
+      <a href="/admin/team">Команда и роли</a>.
+    </div>
+    <div class="mt-16">
+      <a class="btn" href="/admin">На дашборд</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

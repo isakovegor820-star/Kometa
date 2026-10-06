@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'alerts' %}
+{% set tabs_map = dict(tabs) %}
+{% block title %}Алерты — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Алерты</h1>
+    <div class="sub">
+      {% if summary.attention %}
+      Требуют человека: {{ summary.attention }}
+      {%- else %}
+      Всё спокойно — критичных и предупреждающих алертов нет
+      {%- endif %}
+      · критичных: {{ summary.open_err }} · внимание: {{ summary.open_warn }}
+      · информационных: {{ summary.open_info }} · в работе: {{ summary.ack }}
+    </div>
+  </div>
+</div>
+
+<div class="segmented mb-12">
+  {% for code, label in tabs %}
+  {# Ссылки собираем вручную: вкладка «Все» не должна терять своё значение. #}
+  <a href="/admin/alerts?status={{ code }}" class="{{ 'active' if status == code else '' }}">
+    {{ label }}<span class="count">{{ num(counts.get(code, 0)) }}</span>
+  </a>
+  {% endfor %}
+</div>
+
+{% if items %}
+<div class="card">
+  <div class="card-head">
+    <h2>{{ tabs_map.get(status, 'Алерты') }}</h2>
+    <div class="actions"><span class="xs dim">Всего: {{ num(page_data.total) }}</span></div>
+  </div>
+
+  {% for alert in items %}
+  <div class="alert-row sev-{{ alert.severity }} {{ 'is-resolved' if alert.status == 'resolved' else '' }}">
+    <div class="ico">
+      {{ icon('check' if alert.status == 'resolved' else ('alert' if alert.severity == 'err' else 'info')) }}
+    </div>
+    <div style="flex:1;min-width:0">
+      <div class="t">{{ alert.title }}</div>
+      {% if alert.message %}<div class="m">{{ alert.message|truncate(240) }}</div>{% endif %}
+      <div class="xs dim mt-8">
+        <span class="badge badge-{{ alert.severity }}">{{ severity_label(alert.severity) }}</span>
+        <code>{{ alert.kind }}</code>
+        · первый раз {{ ago(alert.created_at) }}
+        {% if alert.repeat_count > 1 %} · повторов: {{ alert.repeat_count }}{% endif %}
+        {% if alert.fingerprint %} · <code class="trunc-sm" title="ключ дедупликации">{{ alert.fingerprint }}</code>{% endif %}
+        {% if alert.user_id %}
+        · клиент
+        {% if users.get(alert.user_id) %}
+        <a href="/admin/users/{{ alert.user_id }}">{{ users.get(alert.user_id).display_name }}</a>
+        {% else %}<a href="/admin/users/{{ alert.user_id }}">#{{ alert.user_id }}</a>{% endif %}
+        {% endif %}
+      </div>
+      {% if alert.status == 'resolved' and (alert.resolved_by or alert.resolve_note) %}
+      <div class="xs dim mt-8">
+        Закрыл: {{ alert.resolved_by or '—' }}{% if alert.resolved_at %} · {{ dt_short(alert.resolved_at) }}{% endif %}
+        {%- if alert.resolve_note %} · {{ alert.resolve_note }}{% endif %}
+      </div>
+      {% elif alert.status == 'ack' %}
+      <div class="xs dim mt-8">В работе у {{ alert.resolved_by or '—' }} — проблема ещё не закрыта</div>
+      {% endif %}
+    </div>
+    <div class="when">{{ ago(alert.last_seen_at) }}</div>
+    {% if can_alerts_act and alert.status != 'resolved' %}
+    <div class="row-actions">
+      {% if alert.status != 'ack' %}
+      <form method="post" action="/admin/alerts/{{ alert.id }}/ack" class="inline-form">
+        <button class="btn btn-sm" type="submit">Взять в работу</button>
+      </form>
+      {% endif %}
+      {# Отдельный путь с пояснением: закрытие без причины потом нечем объяснить. #}
+      <form method="post" action="/admin/alerts/{{ alert.id }}/resolve-note" class="inline-form">
+        <input type="text" name="note" placeholder="почему закрываем" style="width:180px"
+               aria-label="Комментарий к закрытию алерта {{ alert.id }}">
+        <button class="btn btn-sm btn-primary" type="submit">Закрыть</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+{% include "_pagination.html" with context %}
+
+{% else %}
+<div class="card">
+  <div class="empty">
+    {{ icon('check' if status in ('open', 'ack') else 'bell') }}
+    <div class="t">
+      {% if status in ('open', 'ack') %}Открытых алертов нет{% else %}Здесь пока пусто{% endif %}
+    </div>
+    <div class="small">
+      {% if status in ('open', 'ack') %}
+      Проверки нод и поступления без заказа появятся тут сами. История — на вкладке «Все».
+      {% else %}
+      <a href="/admin/alerts?status=all">Посмотреть все алерты</a> или вернуться к открытым.
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

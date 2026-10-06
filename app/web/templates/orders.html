@@ -1,49 +1,190 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% set page = 'orders' %}
-{% set session_active = True %}
+{% block title %}Очередь заказов — Kometa{% endblock %}
 {% block content %}
-<h1>Заказы</h1>
 
-<div class="card" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
-  <a href="/admin/orders?status=pending" class="pill {{ 'ok' if current_status == 'pending' else '' }}">Ожидают ({{ stats.pending_orders }})</a>
-  <a href="/admin/orders?status=paid" class="pill {{ 'ok' if current_status == 'paid' else '' }}">Оплаченные</a>
-  <a href="/admin/orders?status=canceled" class="pill {{ 'ok' if current_status == 'canceled' else '' }}">Отклонённые</a>
-  <a href="/admin/orders?status=expired" class="pill {{ 'ok' if current_status == 'expired' else '' }}">Просроченные</a>
-  <a href="/admin/orders?status=all" class="pill {{ 'ok' if current_status == 'all' else '' }}">Все</a>
-  <span class="muted">Выручка за 30 дней: <b>{{ stats.revenue_month }} ₽</b></span>
+<div class="page-head">
+  <div class="titles">
+    <h1>Очередь заказов</h1>
+    <div class="sub">
+      Показано {{ page_data.first_index }}–{{ page_data.last_index }} из {{ num(page_data.total) }}
+      · на сумму {{ money(filter_total_rub) }}
+    </div>
+  </div>
+  <div class="actions">
+    {% if 'finance.export' in caps %}
+    <a class="btn" href="/admin/export/orders.csv?{{ query_string(current) }}">{{ icon('download') }} CSV</a>
+    {% endif %}
+    {% if 'orders.act' in caps %}
+    <form method="post" action="/admin/orders/expire-stale" class="inline-form"
+          data-confirm="Закрыть все заявки с истёкшим сроком?">
+      <button class="btn" type="submit">Закрыть просроченные</button>
+    </form>
+    {% endif %}
+  </div>
 </div>
 
-{% if rows %}
-<table>
-  <tr><th>#</th><th>Пользователь</th><th>Тариф</th><th>К переводу</th><th>Способ</th><th>Статус</th><th>Создан</th><th>Оплачен</th><th></th></tr>
-  {% for row in rows %}
-  <tr>
-    <td>{{ row.order.id }}</td>
-    <td>
-      {{ row.user.display_name if row.user else '—' }}
-      {% if row.user %}<br><span class="muted">{{ row.user.tg_id }}</span>{% endif %}
-    </td>
-    <td>{{ row.plan.title if row.plan else '—' }}</td>
-    <td><b>{{ row.order.pay_amount_text }} ₽</b></td>
-    <td>{{ row.order.provider }}</td>
-    <td>
-      {% if row.order.status == 'paid' %}<span class="pill ok">оплачен</span>
-      {% elif row.order.status == 'pending' %}<span class="pill warn">ожидает</span>
-      {% elif row.order.status == 'canceled' %}<span class="pill err">отклонён</span>
-      {% else %}<span class="pill">{{ row.order.status }}</span>{% endif %}
-    </td>
-    <td class="muted">{{ row.order.created_at.strftime('%d.%m %H:%M') }}</td>
-    <td class="muted">{{ row.order.paid_at.strftime('%d.%m %H:%M') if row.order.paid_at else '—' }}</td>
-    <td class="row-actions">
-      {% if row.order.status == 'pending' %}
-      <form class="inline" method="post" action="/admin/orders/{{ row.order.id }}/confirm"><button type="submit">Подтвердить</button></form>
-      <form class="inline" method="post" action="/admin/orders/{{ row.order.id }}/reject"><button class="danger" type="submit">Отклонить</button></form>
-      {% endif %}
-    </td>
-  </tr>
+<div class="segmented mb-12">
+  {% for code, label in tabs %}
+    <a href="/admin/orders?{{ query_string(current, status=code, page=1) }}"
+       class="{{ 'active' if status == code else '' }}">
+      {{ label }}<span class="count">{{ num(counts.get(code, 0)) }}</span>
+    </a>
   {% endfor %}
-</table>
+</div>
+
+<form class="toolbar" method="get" action="/admin/orders" data-bulk-scope-form>
+  <input type="hidden" name="status" value="{{ status }}">
+  <div class="grow">
+    <label class="visually-hidden" for="q">Поиск</label>
+    <input type="search" id="q" name="q" value="{{ current.q }}"
+           placeholder="Поиск: № заказа, сумма или копейки (199.13), клиент, tg_id, промокод">
+  </div>
+  <select name="provider" aria-label="Способ оплаты">
+    <option value="">Все способы</option>
+    {% for code in providers %}
+    <option value="{{ code }}" {{ 'selected' if current.provider == code else '' }}>{{ provider_label(code) }}</option>
+    {% endfor %}
+  </select>
+  <select name="kind" aria-label="Тип заказа">
+    <option value="">Все типы</option>
+    <option value="purchase" {{ 'selected' if current.kind == 'purchase' else '' }}>Покупка</option>
+    <option value="renew" {{ 'selected' if current.kind == 'renew' else '' }}>Продление</option>
+  </select>
+  <input type="date" name="date_from" value="{{ current.date_from }}" aria-label="С даты" style="width:150px">
+  <input type="date" name="date_to" value="{{ current.date_to }}" aria-label="По дату" style="width:150px">
+  <select name="sort" aria-label="Сортировка">
+    <option value="new" {{ 'selected' if current.sort in ('', 'new') else '' }}>Сначала новые</option>
+    <option value="old" {{ 'selected' if current.sort == 'old' else '' }}>Сначала старые</option>
+    <option value="amount" {{ 'selected' if current.sort == 'amount' else '' }}>По сумме</option>
+  </select>
+  <select name="per_page" aria-label="Строк на странице">
+    {% for size in [25, 50, 100, 200] %}
+    <option value="{{ size }}" {{ 'selected' if page_data.per_page == size else '' }}>{{ size }} строк</option>
+    {% endfor %}
+  </select>
+  <button class="btn btn-primary" type="submit">{{ icon('search') }} Найти</button>
+  {% if current.q or current.provider or current.kind or current.date_from or current.date_to %}
+  <a class="btn btn-ghost" href="/admin/orders?status={{ status }}">Сбросить</a>
+  {% endif %}
+</form>
+
+{% if rows %}
+<div class="table-wrap" data-bulk-scope>
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr>
+          {% if 'orders.act' in caps %}<th class="check"><input type="checkbox" class="checkbox" data-check-all aria-label="Выбрать все"></th>{% endif %}
+          <th>Заказ</th>
+          <th>Клиент</th>
+          <th>Тариф</th>
+          <th class="right">Сумма</th>
+          <th>Способ</th>
+          <th>Статус</th>
+          <th>Создан</th>
+          <th>Оплачен</th>
+          <th class="actions">Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        {% set order = row.order %}
+        <tr data-row data-search="{{ order.id }} {{ row.user.display_name if row.user else '' }} {{ row.user.tg_id if row.user else '' }} {{ order.external_id }} {{ order.promo_code or '' }} {{ order.pay_amount_text }}">
+          {% if 'orders.act' in caps %}
+          <td class="check"><input type="checkbox" class="checkbox" data-row-check value="{{ order.id }}" aria-label="Выбрать заказ {{ order.id }}"></td>
+          {% endif %}
+          <td class="id">#{{ order.id }}<div class="xs dim">{{ kind_label(order.kind) }}</div></td>
+          <td>
+            {% if row.user %}
+            <div class="who-cell">
+              <span class="avatar">{{ initials(row.user.display_name) }}</span>
+              <span style="min-width:0">
+                <a class="nm" href="/admin/users/{{ row.user.id }}">{{ row.user.display_name }}</a>
+                <span class="meta">{{ row.user.tg_id }}{% if row.user.is_blocked %} · заблокирован{% endif %}</span>
+              </span>
+            </div>
+            {% else %}<span class="dim">—</span>{% endif %}
+          </td>
+          <td>
+            {{ row.plan.title if row.plan else '—' }}
+            {% if order.discount_rub %}<div class="xs"><span class="tag tag-accent">−{{ order.discount_rub }} ₽</span> {{ order.promo_code }}</div>{% endif %}
+          </td>
+          <td class="right">
+            <b>{{ order.pay_amount_text }} ₽</b>
+            {% if order.base_amount_rub and order.base_amount_rub != order.amount_rub %}
+            <div class="xs dim"><s>{{ order.base_amount_rub }} ₽</s></div>
+            {% endif %}
+          </td>
+          <td class="small muted">{{ provider_label(order.provider) }}</td>
+          <td>
+            {% set badge = ORDER_STATUS.get(order.status, (order.status, 'neutral')) %}
+            <span class="badge badge-{{ badge[1] if badge[1] != 'neutral' else '' }}">{{ badge[0] }}</span>
+          </td>
+          <td class="small dim nowrap">{{ dt_short(order.created_at) }}</td>
+          <td class="small dim nowrap">{{ dt_short(order.paid_at) if order.paid_at else '—' }}</td>
+          <td class="actions">
+            <div class="row-actions">
+              {% if order.status == 'pending' and 'orders.act' in caps %}
+              <form method="post" action="/admin/orders/{{ order.id }}/confirm" class="inline-form">
+                <button class="btn btn-sm btn-primary" type="submit">Подтвердить</button>
+              </form>
+              <form method="post" action="/admin/orders/{{ order.id }}/reject" class="inline-form">
+                <button class="btn btn-sm btn-danger" type="submit" name="reason" value="отклонён в очереди">Отклонить</button>
+              </form>
+              {% elif order.status == 'paid' and 'orders.refund' in caps %}
+              <form method="post" action="/admin/orders/{{ order.id }}/refund" class="inline-form"
+                    data-confirm="Оформить возврат {{ order.amount_rub }} ₽ по заказу #{{ order.id }}? Доступ будет отключён.">
+                <button class="btn btn-sm btn-danger" type="submit">Вернуть деньги</button>
+              </form>
+              {% else %}
+              <a class="btn btn-sm btn-ghost" href="/admin/users/{{ order.user_id }}">Карточка</a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if 'orders.act' in caps %}
+  <form class="bulkbar" data-bulkbar method="post" action="/admin/orders/bulk" data-bulk-form>
+    <span>Выбрано: <span class="count" data-bulk-count>0</span></span>
+    <span class="muted xs">Действие применится к выбранным заказам</span>
+    <span class="spacer"></span>
+    <button class="btn btn-sm btn-light" type="submit" name="action" value="confirm">Подтвердить</button>
+    <button class="btn btn-sm btn-light" type="submit" name="action" value="reject">Отклонить</button>
+    {% if 'orders.refund' in caps %}
+    <button class="btn btn-sm btn-light" type="submit" name="action" value="refund"
+            data-confirm="Оформить возврат по выбранным заказам? Доступ будет отключён у тех, у кого нет других оплат.">Вернуть деньги</button>
+    {% endif %}
+  </form>
+  {% endif %}
+</div>
+
+{% include "_pagination.html" with context %}
 {% else %}
-<div class="card muted">Заказов в этом статусе нет</div>
+<div class="card">
+  <div class="empty">
+    {{ icon('inbox') }}
+    <div class="t">
+      {% if current.q or current.provider or current.kind or current.date_from or current.date_to %}
+        Ничего не нашлось
+      {% else %}
+        Заказов в этом статусе нет
+      {% endif %}
+    </div>
+    <div class="small">
+      {% if current.q or current.provider or current.kind or current.date_from or current.date_to %}
+        Попробуй изменить фильтры или <a href="/admin/orders?status={{ status }}">сбросить их</a>.
+      {% else %}
+        Список обновляется сам: новые заявки появятся здесь сразу после создания.
+      {% endif %}
+    </div>
+  </div>
+</div>
 {% endif %}
+
 {% endblock %}

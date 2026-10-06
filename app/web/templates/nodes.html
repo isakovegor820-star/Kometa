@@ -1,38 +1,303 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% set page = 'nodes' %}
-{% set session_active = True %}
+{% block title %}Ноды — Kometa{% endblock %}
 {% block content %}
-<h1>Ноды и панель</h1>
 
-<div class="cards">
-  <div class="card"><div class="k">Активных подписок</div><div class="v">{{ active }}</div></div>
-  <div class="card"><div class="k">Пользователей всего</div><div class="v">{{ total_users }}</div></div>
-  <div class="card"><div class="k">Тип панели</div><div class="v" style="font-size:16px">{{ panels[0].name if panels else '—' }}</div></div>
+<div class="page-head">
+  <div class="titles">
+    <h1>Ноды и панели</h1>
+    <div class="sub">
+      {{ nodes|length }} в системе · {{ nodes_active }} включено
+      · основная панель и страны · время UTC
+      {%- if last_check_at %} · проверялись {{ ago(last_check_at) }}{% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    {% if can_nodes_act %}
+    <form method="post" action="/admin/nodes/check" class="inline-form">
+      <button class="btn btn-primary" type="submit">{{ icon('refresh') }} Проверить ноды</button>
+    </form>
+    {% endif %}
+  </div>
 </div>
 
-{% for panel in panels %}
-<h2>{{ panel.name }}</h2>
+<div class="stats mb-12">
+  <div class="stat">
+    <div class="k">{{ icon('server') }} Нод в системе</div>
+    <div class="v">{{ num(nodes|length) }}</div>
+    <div class="d">включено: {{ nodes_active }}</div>
+  </div>
+  <div class="stat {{ 'is-ok' if nodes_active and nodes_alive == nodes_active else ('is-warn' if nodes_active and not nodes_alive else '') }}">
+    <div class="k">{{ icon('check') }} Отвечают</div>
+    <div class="v">{{ num(nodes_alive) }}</div>
+    <div class="d">по последней проверке</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('bolt') }} Панелей в подписке</div>
+    <div class="v">{{ num(panels|length) }}</div>
+    <div class="d">основная + активные ноды</div>
+  </div>
+</div>
+
+{% if nodes %}
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Нода</th>
+          <th>Сервер</th>
+          <th>Панель</th>
+          <th>Токен</th>
+          <th>Инбаунды</th>
+          <th class="right">Приоритет</th>
+          <th>Состояние</th>
+          {% if can_nodes_act %}<th class="actions">Действия</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for node in nodes %}
+        <tr data-row>
+          <td>
+            <b>{{ node.title }}</b>
+            <div class="xs dim"><code>{{ node.code }}</code>{% if node.country %} · {{ node.country }}{% endif %}</div>
+          </td>
+          <td class="small muted">{{ node.host or '—' }}</td>
+          <td>
+            <code class="trunc" title="{{ node.panel_url }}">{{ node.panel_url or '—' }}</code>
+            <div class="xs dim">{{ node.panel_type }}</div>
+          </td>
+          <td>
+            {% if not node.panel_token %}
+            <span class="badge badge-warn">не задан</span>
+            {% elif can_nodes_secrets %}
+            {# Токен — секрет панели: показываем целиком только тем, кому можно. #}
+            <span class="copy-chip">
+              <span class="v" title="{{ node.panel_token }}">{{ node.panel_token }}</span>
+              <button type="button" data-copy="{{ node.panel_token }}" title="Скопировать токен" aria-label="Скопировать токен">{{ icon('copy') }}</button>
+            </span>
+            {% else %}
+            <span class="badge badge-mono" title="Токен скрыт: нужен доступ к секретам">{{ mask_secret(node.panel_token) }}</span>
+            {% endif %}
+          </td>
+          <td class="small">{{ node.inbound_ids or '—' }}</td>
+          <td class="right small num">{{ node.priority }}</td>
+          <td>
+            {% if not node.is_active %}
+            <span class="badge">выключена</span>
+            {% elif node.last_check_at is none %}
+            <span class="badge">не проверялась</span>
+            {% elif node.last_check_ok %}
+            <span class="badge badge-ok">отвечает</span>
+            {% else %}
+            <span class="badge badge-err">нет ответа</span>
+            {% endif %}
+            {% if node.last_check_at %}<div class="xs dim">{{ ago(node.last_check_at) }}</div>{% endif %}
+          </td>
+          {% if can_nodes_act %}
+          <td class="actions">
+            <div class="row-actions">
+              <a class="btn btn-sm btn-ghost btn-icon" href="/admin/nodes?edit={{ node.code }}"
+                 title="Изменить ноду" aria-label="Изменить ноду {{ node.title }}">{{ icon('edit') }}</a>
+              <form method="post" action="/admin/nodes/{{ node.id }}/toggle" class="inline-form">
+                <button class="btn btn-sm btn-ghost btn-icon" type="submit"
+                        title="{{ 'Выключить ноду' if node.is_active else 'Включить ноду' }}"
+                        aria-label="{{ 'Выключить ноду' if node.is_active else 'Включить ноду' }} {{ node.title }}">
+                  {{ icon('x' if node.is_active else 'play') }}
+                </button>
+              </form>
+              <form method="post" action="/admin/nodes/{{ node.id }}/delete" class="inline-form"
+                    data-confirm="Удалить ноду «{{ node.title }}»? Клиенты перестанут получать её локацию, конфиги на сервере останутся.">
+                <button class="btn btn-sm btn-danger btn-icon" type="submit"
+                        title="Удалить ноду" aria-label="Удалить ноду {{ node.title }}">{{ icon('trash') }}</button>
+              </form>
+            </div>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
 <div class="card">
-  {% if panel.ok %}<span class="pill ok">панель отвечает</span>
-  {% else %}<span class="pill err">нет ответа</span>{% endif %}
-  {% if panel.error %}<div class="muted" style="margin-top:8px">{{ panel.error }}</div>{% endif %}
-  {% if panel.inbounds %}
-  <table style="margin-top:12px">
-    <tr><th>ID</th><th>Название</th><th>Протокол</th><th>Порт</th><th>Транспорт</th><th>Безопасность</th></tr>
-    {% for inbound in panel.inbounds %}
-    <tr>
-      <td>{{ inbound.id }}</td>
-      <td>{{ inbound.remark }}</td>
-      <td>{{ inbound.protocol }}</td>
-      <td>{{ inbound.port }}</td>
-      <td>{{ inbound.network or '—' }}</td>
-      <td>{{ inbound.security or '—' }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}
-  <div class="muted" style="margin-top:8px">Инбаунды не найдены — установи панель и создай Reality/AmneziaWG (см. docs/ЗАПУСК.md)</div>
-  {% endif %}
+  <div class="empty">
+    {{ icon('server') }}
+    <div class="t">Отдельных нод пока нет</div>
+    <div class="small">
+      Сервис работает на основной панели из <code>.env</code>. Добавь страну формой ниже —
+      после сохранения её локация появится в ссылке-подписке.
+    </div>
+  </div>
 </div>
-{% endfor %}
+{% endif %}
+
+{% if can_nodes_act %}
+<div class="card">
+  <div class="card-head">
+    <h2>{{ 'Изменить ноду' if edit_node else 'Добавить ноду' }}</h2>
+    {% if edit_node %}
+    <div class="actions"><a class="btn btn-sm btn-ghost" href="/admin/nodes">Отмена</a></div>
+    {% endif %}
+  </div>
+  <form method="post" action="/admin/nodes">
+    <div class="card-body">
+      <div class="form-grid">
+        <div class="field">
+          <label for="code">Код</label>
+          <input type="text" id="code" name="code" value="{{ edit_node.code if edit_node else '' }}"
+                 placeholder="jp" maxlength="32" required>
+          <div class="hint">Латиницей, коротко. По коду нода ищется в реестре — у существующей его не меняй.</div>
+        </div>
+        <div class="field">
+          <label for="title">Название</label>
+          <input type="text" id="title" name="title" value="{{ edit_node.title if edit_node else '' }}"
+                 placeholder="🇯🇵 Япония" maxlength="64" required>
+          <div class="hint">Его увидит клиент в приложении — пиши по-человечески.</div>
+        </div>
+        <div class="field">
+          <label for="country">Страна</label>
+          <input type="text" id="country" name="country" value="{{ edit_node.country if edit_node else '' }}"
+                 placeholder="JP" maxlength="8">
+        </div>
+        <div class="field">
+          <label for="host">Адрес сервера</label>
+          <input type="text" id="host" name="host" value="{{ edit_node.host if edit_node else '' }}"
+                 placeholder="203.0.113.99" maxlength="128">
+          <div class="hint">Для справки: по этому адресу владелец заходит на сервер.</div>
+        </div>
+        <div class="field">
+          <label for="panel_type">Тип панели</label>
+          <select id="panel_type" name="panel_type">
+            <option value="xui" {{ 'selected' if not edit_node or edit_node.panel_type == 'xui' else '' }}>3x-ui</option>
+            <option value="fake" {{ 'selected' if edit_node and edit_node.panel_type == 'fake' else '' }}>Заглушка (разработка)</option>
+          </select>
+        </div>
+        <div class="field span-2">
+          <label for="panel_url">Адрес панели</label>
+          <input type="text" id="panel_url" name="panel_url" value="{{ edit_node.panel_url if edit_node else '' }}"
+                 placeholder="http://203.0.113.99:2053/panel" maxlength="255">
+          <div class="hint">Вместе с путём, как открывается в браузере. Для типа «заглушка» можно оставить пустым.</div>
+        </div>
+        <div class="field span-2">
+          <label for="panel_token">API-токен панели</label>
+          <input type="password" id="panel_token" name="panel_token" value="" autocomplete="new-password"
+                 placeholder="{{ 'оставь пустым — токен не изменится' if edit_node else 'токен из x-ui setting -getApiToken' }}"
+                 maxlength="255">
+          <div class="hint">Пустое поле — «не менять»: правка названия не затирает доступ к панели.</div>
+        </div>
+        <div class="field">
+          <label for="inbound_ids">ID инбаундов</label>
+          <input type="text" id="inbound_ids" name="inbound_ids" value="{{ edit_node.inbound_ids if edit_node else '' }}"
+                 placeholder="1,2" maxlength="64">
+          <div class="hint">Через запятую: Reality и AmneziaWG, из них собирается конфиг.</div>
+        </div>
+        <div class="field">
+          <label for="priority">Приоритет</label>
+          <input type="number" id="priority" name="priority" value="{{ edit_node.priority if edit_node else 100 }}"
+                 min="0" max="9999">
+          <div class="hint">Меньше число — раньше локация в подписке.</div>
+        </div>
+        <div class="field">
+          <span class="label">Состояние</span>
+          <div class="check-row">
+            {# Скрытый ноль + чекбокс: без него снятая галочка не отправляла бы поле. #}
+            <input type="hidden" name="is_active" value="0">
+            <label>
+              <input type="checkbox" name="is_active" value="1"
+                     {{ 'checked' if not edit_node or edit_node.is_active else '' }}>
+              Включена — клиенты получают эту локацию
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-foot">
+      <button class="btn btn-primary" type="submit">{{ icon('check') }} {{ 'Сохранить' if edit_node else 'Добавить ноду' }}</button>
+      <span class="xs dim">После сохранения клиенты выдаются и на этой ноде, а ссылка-подписка начинает отдавать её локацию.</span>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="section">
+  <div class="section-head">
+    <h2>Панели в подписке</h2>
+    <div class="sub">Инбаунды, из которых собирается конфиг клиента</div>
+  </div>
+
+  {% for panel in panels %}
+  <div class="card">
+    <div class="card-head">
+      <h2>{{ panel.title }}</h2>
+      <div class="actions">
+        <span class="badge badge-mono">{{ panel.code }}</span>
+        {% if panel.node and not panel.node.is_active %}<span class="badge">выключена</span>{% endif %}
+        {% if panel.error %}
+        <span class="badge badge-warn">нет данных</span>
+        {% elif panel.inbounds %}
+        <span class="badge badge-ok">{{ panel.inbounds|length }} инбаунда</span>
+        {% else %}
+        <span class="badge badge-warn">инбаундов нет</span>
+        {% endif %}
+      </div>
+    </div>
+    {% if panel.url %}
+    <div class="card-body xs dim"><code class="trunc" title="{{ panel.url }}">{{ panel.url }}</code></div>
+    {% endif %}
+    {% if panel.inbounds %}
+    <div class="table-scroll">
+      <table class="data">
+        <thead>
+          <tr><th>ID</th><th>Название</th><th>Протокол</th><th class="right">Порт</th><th>Транспорт</th><th>Безопасность</th></tr>
+        </thead>
+        <tbody>
+          {% for inbound in panel.inbounds %}
+          <tr>
+            <td class="id">{{ inbound.id }}</td>
+            <td><b>{{ inbound.remark }}</b></td>
+            <td class="small muted">{{ inbound.protocol }}</td>
+            <td class="right small num">{{ inbound.port }}</td>
+            <td class="small muted">{{ inbound.network or '—' }}</td>
+            <td class="small muted">{{ inbound.security or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty">
+      {{ icon('server') }}
+      <div class="t">Инбаунды не видны</div>
+      <div class="small">Проверь адрес и токен панели, затем нажми «Проверить ноды». Без инбаундов клиенты не получат конфиг.</div>
+    </div>
+    {% endif %}
+    {% if panel.error %}<div class="card-foot">{{ icon('alert') }} {{ panel.error }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <div class="card-head"><h2>Что дальше</h2></div>
+  <div class="card-body">
+    <dl class="kv">
+      <dt>1. Панель</dt>
+      <dd>Поставь 3x-ui на новый сервер так же, как на основной (см. <code>docs/ЗАПУСК.md</code>).</dd>
+      <dt>2. Токен</dt>
+      <dd>
+        <span class="copy-chip">
+          <span class="v">x-ui setting -getApiToken</span>
+          <button type="button" data-copy="x-ui setting -getApiToken" title="Скопировать команду" aria-label="Скопировать команду">{{ icon('copy') }}</button>
+        </span>
+      </dd>
+      <dt>3. Инбаунды</dt>
+      <dd>Создай Reality и AmneziaWG, запомни их ID — они пойдут в поле «ID инбаундов».</dd>
+      <dt>4. Нода</dt>
+      <dd>Заполни форму выше и сохрани. Затем нажми «Проверить ноды»: в списке появится отметка «отвечает».</dd>
+    </dl>
+  </div>
+</div>
+
 {% endblock %}

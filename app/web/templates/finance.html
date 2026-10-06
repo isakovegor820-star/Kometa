@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'finance' %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Финансы и отчёты</h1>
+    <div class="sub">Период: {{ since }} — сегодня · постоянные расходы {{ money(monthly_costs) }} в месяц</div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="/admin/export/orders.csv?status=all">{{ icon('download') }} Заказы (CSV)</a>
+    <a class="btn" href="/admin/export/users.csv">{{ icon('download') }} Клиенты (CSV)</a>
+    {% if 'audit.view' in caps %}
+    <a class="btn" href="/admin/export/audit.csv">{{ icon('download') }} Журнал (CSV)</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="segmented mb-12">
+  {% for option in periods %}
+  <a href="/admin/finance?days={{ option }}" class="{{ 'active' if period == option else '' }}">{{ option }} дней</a>
+  {% endfor %}
+</div>
+
+<div class="stats">
+  <div class="stat">
+    <div class="k">{{ icon('wallet') }} Оборот</div>
+    <div class="v">{{ money(profit.gross) }}</div>
+    <div class="d">оплачено заказов: {{ stats.paid_orders_month }}</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('card') }} На руки после комиссий</div>
+    <div class="v">{{ money(profit.net) }}</div>
+    <div class="d">комиссии каналов: {{ money(profit.gross - profit.net) }}</div>
+  </div>
+  <div class="stat {{ 'is-err' if profit.profit < 0 else 'is-ok' }}">
+    <div class="k">{{ icon('bolt') }} Прибыль</div>
+    <div class="v">{{ money(profit.profit) }}</div>
+    <div class="d">после расходов {{ money(profit.costs) }} · маржа {{ percent(profit.margin_percent, 0) }}</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('chart') }} Средний чек</div>
+    <div class="v">{{ money(stats.avg_check_month) }}</div>
+    <div class="d">конверсия в оплату {{ percent(stats.conversion) }}</div>
+  </div>
+  <a class="stat is-link" href="/admin/refunds">
+    <div class="k">{{ icon('refund') }} Возвраты</div>
+    <div class="v">{{ num(refunds.count) }}</div>
+    <div class="d">{{ money(refunds.rub) }} · {{ percent(refund_share) }} оборота</div>
+  </a>
+</div>
+
+<div class="grid-2 mt-24" style="align-items:start">
+  <div class="card">
+    <div class="card-head">
+      <h2>Выручка по дням</h2>
+      <div class="actions"><span class="xs dim">{{ period }} дней, ₽</span></div>
+    </div>
+    <div class="card-body">
+      {% if by_day %}
+      {% set peak = by_day|map(attribute='rub')|max %}
+      {% set peak = peak if peak > 0 else 1 %}
+      <svg class="chart" viewBox="0 0 720 168" preserveAspectRatio="none" role="img" aria-label="Выручка по дням">
+        {% for line in [0, 1, 2, 3] %}
+        {% set y = 8 + line * 42 %}
+        <line class="grid-line" x1="0" y1="{{ y }}" x2="720" y2="{{ y }}"/>
+        <text class="axis" x="4" y="{{ y - 4 }}">{{ num((peak * (3 - line) / 3)|round|int) }}</text>
+        {% endfor %}
+        {% set step = 720 / (by_day|length) %}
+        {% for point in by_day %}
+          {% set h = (point.rub / peak * 134)|round(1) %}
+          {% set x = loop.index0 * step + step * 0.18 %}
+          <rect class="bar" x="{{ x|round(1) }}" y="{{ (142 - h)|round(1) }}" width="{{ (step * 0.64)|round(1) }}"
+                height="{{ h if h > 0 else 1 }}" rx="2">
+            <title>{{ point.day.strftime('%d.%m') }}: {{ money(point.rub) }} · заказов {{ point.orders }}</title>
+          </rect>
+          {% if by_day|length <= 16 or loop.index0 % 3 == 0 %}
+          <text class="axis" x="{{ (x + step * 0.32)|round(1) }}" y="162" text-anchor="middle">{{ point.day.strftime('%d.%m') }}</text>
+          {% endif %}
+        {% endfor %}
+      </svg>
+      {% else %}
+      <div class="empty small">{{ icon('chart') }}<div class="t">Оплат за период нет</div></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>Доходность каналов</h2></div>
+    {% if channels %}
+    <div class="table-scroll">
+      <table class="data">
+        <thead><tr><th>Канал</th><th class="right">Заказов</th><th class="right">Оборот</th><th class="right">Комиссия</th><th class="right">На руки</th></tr></thead>
+        <tbody>
+          {% for channel in channels %}
+          <tr>
+            <td>{{ channel.title }}</td>
+            <td class="right">{{ channel.orders }}</td>
+            <td class="right">{{ money(channel.gross_rub) }}</td>
+            <td class="right dim">{{ percent(channel.fee_percent) }}</td>
+            <td class="right"><b>{{ money(channel.net_rub) }}</b></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>Итого</td>
+            <td class="right">{{ stats.paid_orders_month }}</td>
+            <td class="right">{{ money(profit.gross) }}</td>
+            {% set fees = profit.gross - profit.net %}
+            <td class="right dim">{{ ('−' ~ money(fees)) if fees > 0 else '—' }}</td>
+            <td class="right">{{ money(profit.net) }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <div class="card-foot">
+      <span>Комиссии каналов задаются в <code>FEE_PERCENT_*</code>, постоянные расходы — в <code>MONTHLY_COSTS_RUB</code>.</span>
+    </div>
+    {% else %}
+    <div class="empty small">{{ icon('card') }}<div class="t">Оплат за период не было</div></div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mt-12">
+  <div class="card-head">
+    <h2>Выручка по тарифам</h2>
+    <div class="actions"><span class="xs dim">за {{ period }} дней</span></div>
+  </div>
+  {% if by_plan %}
+  <div class="table-scroll">
+    <table class="data">
+      <thead><tr><th>Тариф</th><th class="right">Оплат</th><th class="right">Оборот</th><th class="right">На руки</th><th class="right">Доля</th></tr></thead>
+      <tbody>
+        {% for plan in by_plan %}
+        <tr>
+          <td>{{ plan.title }}</td>
+          <td class="right">{{ plan.orders }}</td>
+          <td class="right">{{ money(plan.gross_rub) }}</td>
+          <td class="right"><b>{{ money(plan.net_rub) }}</b></td>
+          <td class="right dim">{{ percent((plan.gross_rub / profit.gross * 100) if profit.gross else 0) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty small">Данных по тарифам пока нет</div>
+  {% endif %}
+</div>
+
+{% endblock %}

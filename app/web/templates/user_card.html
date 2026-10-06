@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'users' %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>
+      <span class="avatar" style="width:34px;height:34px;font-size:13px">{{ initials(user.display_name) }}</span>
+      {{ user.display_name }}
+      {% if user.is_blocked %}<span class="badge badge-err">заблокирован</span>{% endif %}
+    </h1>
+    <div class="sub">
+      <code>{{ user.tg_id }}</code>
+      {% if user.username %} · <a href="https://t.me/{{ user.username }}" target="_blank" rel="noopener">@{{ user.username }}</a>{% endif %}
+      · клиент #{{ user.id }} · с {{ dt_day(user.created_at) }}
+      {% for tag in tags %} · <span class="tag tag-accent">{{ tag }}</span>{% endfor %}
+    </div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/admin/users">← К списку</a>
+  </div>
+</div>
+
+<div class="grid-2" style="align-items:start">
+  <div>
+    {# ---------------------------------------------------------- подписка #}
+    <div class="card">
+      <div class="card-head">
+        <h2>{{ icon('key') }} Подписка</h2>
+        <div class="actions">
+          {% if sub %}
+            {% set badge = SUBSCRIPTION_STATUS.get(sub.status, (sub.status, 'neutral')) %}
+            <span class="badge badge-{{ badge[1] if badge[1] != 'neutral' else '' }}">{{ badge[0] }}</span>
+          {% else %}
+            <span class="badge">нет подписки</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card-body">
+        {% if sub %}
+        <dl class="kv">
+          <dt>Действует до</dt>
+          <dd>{{ dt(sub.expires_at) }} <span class="muted">({{ days_word(sub.days_left) }})</span></dd>
+          <dt>Тариф</dt>
+          <dd>{{ plan.title if plan else 'выдан вручную' }}</dd>
+          <dt>Устройств</dt>
+          <dd>{{ sub.devices_limit }}</dd>
+          <dt>Лимит трафика</dt>
+          <dd>{% if sub.traffic_limit_gb %}{{ sub.traffic_limit_gb }} ГБ{% else %}безлимит{% endif %}</dd>
+          <dt>Накоплено дней</dt>
+          <dd>{{ user.bonus_days_balance or 0 }} <span class="muted">(применится к следующей оплате)</span></dd>
+          <dt>UUID в панели</dt>
+          <dd><code class="trunc trunc-sm">{{ sub.panel_user_uuid or '—' }}</code></dd>
+          <dt>Ссылка-подписка</dt>
+          <dd>
+            <span class="copy-chip">
+              <span class="v" title="{{ link }}">{{ link }}</span>
+              <button type="button" data-copy="{{ link }}" title="Скопировать" aria-label="Скопировать ссылку">{{ icon('copy') }}</button>
+            </span>
+          </dd>
+        </dl>
+        {% else %}
+        <div class="empty small">Подписки ещё не было: клиент либо не запускал бота, либо не активировал пробный доступ.</div>
+        {% endif %}
+      </div>
+
+      {% if 'users.act' in caps %}
+      <div class="card-foot">
+        <form method="post" action="/admin/users/{{ user.id }}/grant" class="inline-form">
+          <input type="number" name="days" value="7" min="1" max="3650" style="width:80px" aria-label="Начислить дней">
+          <input type="text" name="reason" placeholder="причина (компенсация)" style="width:180px" aria-label="Причина">
+          <button class="btn btn-primary btn-sm" type="submit">Начислить</button>
+        </form>
+        <form method="post" action="/admin/users/{{ user.id }}/write-off" class="inline-form"
+              data-confirm="Списать дни? Доступ сократится и в панели, и в ссылке-подписке.">
+          <input type="number" name="days" value="1" min="1" max="3650" style="width:72px" aria-label="Списать дней">
+          <input type="text" name="reason" placeholder="причина" style="width:140px" aria-label="Причина">
+          <button class="btn btn-danger btn-sm" type="submit">Списать</button>
+        </form>
+      </div>
+      {% if plans %}
+      <div class="card-foot">
+        <form method="post" action="/admin/users/{{ user.id }}/extend-plan" class="inline-form"
+              data-confirm="Выдать тариф без оплаты?">
+          <select name="plan_id" aria-label="Тариф">
+            {% for item in plans %}
+            <option value="{{ item.id }}">{{ item.title }} — {{ item.days }} дн. ({{ money(item.price_rub) }})</option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-sm" type="submit">Выдать тариф без оплаты</button>
+        </form>
+      </div>
+      {% endif %}
+      {% endif %}
+    </div>
+
+    {# ------------------------------------------------------------ заказы #}
+    <div class="card">
+      <div class="card-head">
+        <h2>Заказы ({{ orders|length }})</h2>
+        <div class="actions">
+          <span class="badge badge-ok">оплачено {{ money(paid_total) }}</span>
+          {% if refunded_total %}<span class="badge badge-err">возвращено {{ money(refunded_total) }}</span>{% endif %}
+        </div>
+      </div>
+      {% if orders %}
+      <div class="table-scroll">
+        <table class="data">
+          <thead><tr><th>№</th><th>Тариф</th><th class="right">Сумма</th><th>Способ</th><th>Статус</th><th>Создан</th><th class="actions"></th></tr></thead>
+          <tbody>
+            {% for row in orders %}
+            {% set order = row.order %}
+            <tr>
+              <td class="id">#{{ order.id }}</td>
+              <td>{{ row.plan.title if row.plan else '—' }}<div class="xs dim">{{ kind_label(order.kind) }}</div></td>
+              <td class="right"><b>{{ money(order.amount_rub) }}</b>
+                {% if order.discount_rub %}<div class="xs"><span class="tag tag-accent">−{{ order.discount_rub }} ₽</span></div>{% endif %}
+              </td>
+              <td class="small muted">{{ provider_label(order.provider) }}</td>
+              <td>
+                {% set badge = ORDER_STATUS.get(order.status, (order.status, 'neutral')) %}
+                <span class="badge badge-{{ badge[1] if badge[1] != 'neutral' else '' }}">{{ badge[0] }}</span>
+                {% if order.refunded_at %}<div class="xs dim">{{ dt_day(order.refunded_at) }} · {{ order.refunded_by }}</div>{% endif %}
+              </td>
+              <td class="small dim nowrap">{{ dt_short(order.created_at) }}</td>
+              <td class="actions">
+                {% if order.status == 'pending' and 'orders.act' in caps %}
+                <form method="post" action="/admin/orders/{{ order.id }}/confirm" class="inline-form">
+                  <button class="btn btn-sm btn-primary" type="submit">Подтвердить</button>
+                </form>
+                {% elif order.status == 'paid' and 'orders.refund' in caps %}
+                <form method="post" action="/admin/orders/{{ order.id }}/refund" class="inline-form"
+                      data-confirm="Вернуть {{ order.amount_rub }} ₽ по заказу #{{ order.id }}?">
+                  <button class="btn btn-sm btn-danger" type="submit">Возврат</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty small">Заказов ещё не было</div>
+      {% endif %}
+    </div>
+
+    {# ---------------------------------------------------------- действия #}
+    {% if 'users.act' in caps %}
+    <div class="card">
+      <div class="card-head"><h2>{{ icon('shield') }} Доступ и блокировка</h2></div>
+      <div class="card-body">
+        <div class="row-actions">
+          {% if sub %}
+            {% if sub.status == 'blocked' %}
+            <form method="post" action="/admin/users/{{ user.id }}/restore" class="inline-form">
+              <button class="btn btn-primary" type="submit">Вернуть доступ</button>
+            </form>
+            {% else %}
+            <form method="post" action="/admin/users/{{ user.id }}/revoke" class="inline-form"
+                  data-confirm="Отозвать доступ? Аккаунт в боте останется активным, но подключаться клиент не сможет.">
+              <input type="text" name="reason" placeholder="причина: шеринг, спор" style="width:220px">
+              <button class="btn btn-danger" type="submit">Отозвать доступ</button>
+            </form>
+            {% endif %}
+          {% endif %}
+
+          {% if user.is_blocked %}
+          <form method="post" action="/admin/users/{{ user.id }}/block" class="inline-form">
+            <input type="hidden" name="block" value="0">
+            <button class="btn" type="submit">Разблокировать аккаунт</button>
+          </form>
+          {% else %}
+          <form method="post" action="/admin/users/{{ user.id }}/block" class="inline-form"
+                data-confirm="Заблокировать аккаунт? Клиент потеряет доступ и не сможет писать боту.">
+            <input type="hidden" name="block" value="1">
+            <input type="text" name="reason" placeholder="причина блокировки" style="width:220px">
+            <button class="btn btn-danger" type="submit">Заблокировать аккаунт</button>
+          </form>
+          {% endif %}
+        </div>
+        <p class="hint mt-12">
+          «Отозвать доступ» выключает клиента в панели, но аккаунт в боте остаётся активным.
+          «Заблокировать» дополнительно закрывает боту переписку с клиентом.
+        </p>
+      </div>
+    </div>
+    {% endif %}
+
+    {# ----------------------------------------------------------- события #}
+    <div class="card">
+      <div class="card-head"><h2>История клиента</h2></div>
+      <ul class="timeline" style="padding:14px 16px 14px 38px">
+        {% for event in events %}
+        <li class="{{ 'err' if event.kind in ('error', 'panel_error') else ('accent' if event.kind.startswith('admin.') else '') }}">
+          <span class="when">{{ dt_short(event.created_at) }}</span>
+          · {{ event_label(event.kind) }}
+          {% if event.actor_name %}<span class="xs dim">— {{ event.actor_name }}</span>{% endif %}
+          {% if event.payload %}<div class="xs dim"><code class="trunc">{{ event.payload }}</code></div>{% endif %}
+        </li>
+        {% else %}
+        <li class="dim">Событий пока нет</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <div>
+    {# -------------------------------------------------------------- метки #}
+    {% if 'users.act' in caps %}
+    <div class="card">
+      <div class="card-head"><h2>Метки</h2></div>
+      <div class="card-body">
+        <form method="post" action="/admin/users/{{ user.id }}/tags">
+          <div class="field">
+            <label for="tags">Метки через запятую</label>
+            <input type="text" id="tags" name="tags" value="{{ user.tags }}"
+                   placeholder="шеринг, vip, конфликт">
+            <span class="hint">Видны в списке клиентов и в поиске по метке.</span>
+          </div>
+          <button class="btn mt-12" type="submit">Сохранить метки</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    {# ------------------------------------------------------------ заметки #}
+    <div class="card">
+      <div class="card-head">
+        <h2>{{ icon('note') }} Заметки</h2>
+        <div class="actions"><span class="xs dim">{{ notes|length }}</span></div>
+      </div>
+      <div class="card-body">
+        <form method="post" action="/admin/users/{{ user.id }}/notes">
+          <div class="field">
+            <label for="note">Новая заметка</label>
+            <textarea id="note" name="text" placeholder="Что важно знать о клиенте: суть обращения, договорённость, детали"
+                      style="min-height:78px"></textarea>
+          </div>
+          <button class="btn btn-primary btn-sm mt-8" type="submit">Добавить</button>
+        </form>
+      </div>
+      {% if notes %}
+      <ul class="timeline" style="padding:12px 16px 12px 38px;border-top:1px solid var(--border)">
+        {% for note in notes %}
+        <li class="accent">
+          <span class="when">{{ dt_short(note.created_at) }}</span> · <b>{{ note.author }}</b>
+          <span class="xs dim">({{ role_label(note.author_role) }})</span>
+          <div class="small" style="white-space:pre-wrap">{{ note.text }}</div>
+          {% if note.author == admin.name or 'team.manage' in caps %}
+          <form method="post" action="/admin/users/{{ user.id }}/notes/{{ note.id }}/delete" class="inline-form mt-8"
+                data-confirm="Удалить заметку?">
+            <button class="btn btn-ghost btn-sm link-danger" type="submit">Удалить</button>
+          </form>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="empty small" style="padding:18px">Заметок пока нет — контекст обращений будет виден всей смене.</div>
+      {% endif %}
+    </div>
+
+    {# ------------------------------------------------------------ сводка #}
+    <div class="card">
+      <div class="card-head"><h2>Сводка</h2></div>
+      <div class="card-body">
+        <dl class="kv">
+          <dt>Оплачено всего</dt><dd><b>{{ money(paid_total) }}</b></dd>
+          <dt>Возвращено</dt><dd>{{ money(refunded_total) }}</dd>
+          <dt>Заказов</dt><dd>{{ orders|length }}</dd>
+          <dt>Промокод клиента</dt><dd>{{ user.promo_code or '—' }}</dd>
+          <dt>Свой реф. код</dt><dd><code>{{ user.referral_code }}</code></dd>
+          <dt>Пригласил</dt><dd>{{ invited }} <span class="muted">(оплатили {{ invited_paid }})</span></dd>
+          <dt>Пришёл по ссылке</dt>
+          <dd>{% if referrer %}<a href="/admin/users/{{ referrer.id }}">{{ referrer.display_name }}</a>{% else %}сам{% endif %}</dd>
+        </dl>
+      </div>
+    </div>
+
+    {# ----------------------------------------------------- сообщение #}
+    <div class="card">
+      <div class="card-head"><h2>{{ icon('megaphone') }} Сообщение клиенту</h2></div>
+      <div class="card-body">
+        <form method="post" action="/admin/users/{{ user.id }}/message">
+          <div class="field">
+            <label for="msg">Личное сообщение от поддержки</label>
+            <textarea id="msg" name="text" placeholder="Например: проверили, доступ активен — перезапусти приложение и обнови подписку." style="min-height:74px"></textarea>
+            <span class="hint">Уйдёт в Telegram от имени бота.</span>
+          </div>
+          <button class="btn mt-8" type="submit">Отправить</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

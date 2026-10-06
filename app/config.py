@@ -27,6 +27,33 @@ class Settings(BaseSettings):
     admin_ids: str = ""
     channel_url: str = ""
     support_username: str = ""
+    #: Юзернейм бота — подставляется в юридические документы (@name).
+    bot_username: str = ""
+    #: Почта поддержки (необязательно): банк просит контакт, группу не принимает.
+    support_email: str = ""
+
+    # --- Юридические документы (политика и соглашение) ---
+    #: Исполнитель: ФИО самозанятого или наименование ИП/ООО. Пусто = плейсхолдер,
+    #: документы с плейсхолдером банк не принимает — заполнить до отправки.
+    legal_operator_name: str = ""
+    legal_operator_inn: str = ""
+    #: Дата актуальной редакции документов, ДД.ММ.ГГГГ.
+    legal_updated_at: str = "06.10.2026"
+    #: Постоянные ссылки на опубликованные документы (Telegra.ph или сайт).
+    #: Пока пусто — бот показывает полный текст документа прямо в чате.
+    privacy_url: str = ""
+    terms_url: str = ""
+    #: Ссылка на опубликованный прайс (страница «Цены и тарифы»).
+    pricing_url: str = ""
+    #: Сколько локаций и какие — фраза целиком, попадает в документы и в цены.
+    locations_note: str = "несколько локаций с переключением в один тап"
+    #: Имя профиля в приложении клиента (заголовок ``profile-title`` подписки).
+    #: Кириллицу часть клиентов не читает из заголовка — отдаём её в base64.
+    subscription_title: str = "Kometa"
+    #: Как называть локации внутри подписки (фрагмент после ``#`` в конфигах).
+    #: Панель отдаёт служебные имена вида ``DE-REALITY-firefox-u123-10GB📊`` —
+    #: в приложении это выглядит мусором. Пусто — оставляем имена панели.
+    location_title: str = ""
 
     # --- База ---
     db_url: str = ""
@@ -44,6 +71,11 @@ class Settings(BaseSettings):
     web_host: str = "0.0.0.0"
     web_port: int = 8080
     public_base_url: str = "http://127.0.0.1:8080"
+    #: TLS веб-слоя: пути к сертификату и ключу. Оба пусты — работаем по http.
+    #: Нужно потому, что Happ и v2rayNG отказываются добавлять подписку по
+    #: незащищённой схеме («Небезопасная схема HTTP запрещена»).
+    web_ssl_cert: str = ""
+    web_ssl_key: str = ""
 
     # --- Админ-панель (/admin) ---
     #: Пароль для входа. Пусто = панель выключена (безопасное поведение по умолчанию).
@@ -58,14 +90,32 @@ class Settings(BaseSettings):
     #: Список IP через запятую, которым панель доступна дополнительно
     #: (например, домашний IP владельца). Работает при ADMIN_LOCAL_ONLY=true.
     admin_allowed_ips: str = ""
+    #: Доверять заголовку X-Forwarded-For. Включать только когда панель стоит
+    #: за своим реверс-прокси: иначе IP подделывается одним заголовком и
+    #: ограничение «только localhost» перестаёт работать.
+    admin_trust_proxy: bool = False
 
     # --- Продукт ---
     trial_days: int = 3
-    trial_gb: int = 10
+    #: Сколько ГБ входит в пробный доступ. 0 = безлимит (так и продаём).
+    trial_gb: int = 0
     trial_devices: int = 1
-    referral_bonus_days_referrer: int = 7
-    referral_bonus_days_invited: int = 3
     order_ttl_minutes: int = 30
+
+    # --- Реферальная программа ---
+    #: Сколько дней получает пригласивший после первой оплаты друга.
+    referral_bonus_days_referrer: int = 30
+    #: Сколько дней получает приглашённый вместе со скидкой.
+    referral_bonus_days_invited: int = 3
+    #: Скидка приглашённому на первую оплату, проценты.
+    referral_discount_percent: int = 50
+    #: Потолок скидки в рублях (0 = без потолка). Например, 300 ₽ —
+    #: чтобы годовой тариф не отдавать вдвое дешевле.
+    referral_discount_max_rub: int = 0
+    #: Защита от накрутки: сколько наград одному человеку в календарный месяц.
+    referral_max_rewards_per_month: int = 10
+    #: Сколько раз реферальный промокод может сработать (0 = без ограничения).
+    promo_referral_uses_limit: int = 50
 
     # --- Платежи ---
     manual_payment_details: str = ""
@@ -88,8 +138,14 @@ class Settings(BaseSettings):
 
     # --- Экономика приёма платежей (для отчёта о прибыли) ---
     #: Комиссия канала в процентах от оборота (0 = без комиссии).
+    #: Прямой перевод на карту/по СБП без эквайринга — комиссии нет.
     fee_percent_manual: float = 0.0
-    fee_percent_crypto: float = 0.0
+    #: СБП через банк-партнёра (НСПК): QR-код или оплата по ссылке из
+    #: банковского приложения — 8 % по условиям партнёра от 06.10.2026.
+    #: Ставка зависит от объёма оборотов и пересматривается по мере роста.
+    fee_percent_sbp: float = 8.0
+    #: Криптоплатежи: 5 % — ставка партнёра от 06.10.2026.
+    fee_percent_crypto: float = 5.0
     fee_percent_wata: float = 3.5
     #: Сколько процентов теряется при выводе звёзд через Fragment.
     fragment_withdrawal_percent: float = 5.0
@@ -111,6 +167,16 @@ class Settings(BaseSettings):
     statement_csv_glob: str = "data/statements/*.csv"
     #: Состояние обработки файлов (чтобы не подтвердить один платёж дважды).
     statement_state_file: str = "data/statement_state.json"
+
+    # --- Контроль клиентов (сторож аномалий) ---
+    #: Суточная проверка клиентов панели с отчётом админам в Telegram.
+    watch_enabled: bool = True
+    #: Сколько ГБ за сутки считать аномалией и показывать в отчёте.
+    watch_daily_gb: int = 100
+    #: Снимок трафика: по нему считаем суточную разницу.
+    watch_snapshot_file: str = "data/watch_snapshot.json"
+    #: Клиенты, которые не считаются аномалией (свои устройства), через запятую.
+    watch_ignore: str = ""
     #: Почтовые уведомления банка (IMAP).
     bank_imap_host: str = ""
     bank_imap_port: int = 993
@@ -145,11 +211,16 @@ class Settings(BaseSettings):
     platega_return_url: str = ""
     platega_failed_url: str = ""
 
+    #: Пробный доступ открыт? Живёт ОТДЕЛЬНО от продаж: можно пустить людей
+    #: на 3 дня бесплатно, пока оплата ещё не подключена (SALES_ENABLED=false).
+    trial_enabled: bool = True
     #: Продажи открыты? Выключить, пока нода не готова: бот не будет
     #: принимать деньги за услугу, которую пока не может выдать.
     sales_enabled: bool = True
     #: Что показывать клиенту, когда продажи закрыты.
     sales_closed_note: str = "Сервис готовится к запуску — продажи откроются совсем скоро."
+    #: Что показывать, когда закрыт именно пробный доступ.
+    trial_closed_note: str = "Пробный доступ откроется совсем скоро — следи за каналом."
 
     log_level: str = "INFO"
 
@@ -166,6 +237,20 @@ class Settings(BaseSettings):
     def platega_method_list(self) -> list[int]:
         """Методы оплаты Platega из строки «2,10,12» (2 — СБП, 10 — карты МИР)."""
         return [int(x) for x in self.platega_methods.replace(" ", "").split(",") if x.strip().isdigit()]
+
+    @property
+    def support_contact(self) -> str:
+        """Контакт поддержки для документов и кнопок: @юзернейм и/или почта.
+
+        Группа в качестве поддержки не подходит — банк-партнёр принимает
+        юзернейм, почту или тикет-систему, но не общий чат.
+        """
+        parts: list[str] = []
+        if self.support_username:
+            parts.append("@" + self.support_username.lstrip("@"))
+        if self.support_email:
+            parts.append(self.support_email)
+        return " или ".join(parts)
 
     @property
     def resolved_db_url(self) -> str:

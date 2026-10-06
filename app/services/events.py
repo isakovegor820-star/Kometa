@@ -19,7 +19,21 @@ ORDER_CANCELED = "order_canceled"
 ORDER_REFUNDED = "order_refunded"
 SUBSCRIPTION_EXPIRED = "subscription_expired"
 SUBSCRIPTION_EXTENDED = "subscription_extended"
+#: Доступ отозван вручную (возврат денег, подозрение на шеринг).
+SUBSCRIPTION_REVOKED = "subscription_revoked"
+#: Доступ вернули после отзыва или блокировки.
+SUBSCRIPTION_RESTORED = "subscription_restored"
 REFERRAL_REWARDED = "referral_rewarded"
+#: По реферальной ссылке пришёл новый человек.
+REFERRAL_JOINED = "referral_joined"
+#: Награда не потерялась, а легла в накопительный баланс дней.
+REFERRAL_BONUS_ACCRUED = "referral_bonus_accrued"
+#: Накопленные дни применились к новой подписке.
+BONUS_DAYS_APPLIED = "bonus_days_applied"
+#: Промокод применён к заказу (скидка уже в цене).
+PROMO_APPLIED = "promo_applied"
+#: Заказ со скидкой оплачен — скидка использована.
+PROMO_REDEEMED = "promo_redeemed"
 PANEL_ERROR = "panel_error"
 ERROR = "error"
 

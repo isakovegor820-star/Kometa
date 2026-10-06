@@ -11,7 +11,7 @@ from __future__ import annotations
 import base64
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
@@ -26,11 +26,55 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _profile_title(value: str) -> str:
+    """Значение заголовка ``profile-title`` (имя профиля в приложении).
+
+    Клиенты понимают и обычный текст, и формат ``base64:<строка>``. Кириллицу
+    надёжнее отдавать в base64: часть клиентов не декодирует заголовок в UTF-8
+    и показывает вместо имени адрес сервера.
+    """
+    title = (value or "").strip()
+    if not title:
+        return "Kometa"
+    if title.isascii():
+        return title
+    return "base64:" + base64.b64encode(title.encode("utf-8")).decode()
+
+
+#: Срок дальше этого числа лет считаем «бессрочным»: клиентам отдаём expire=0,
+#: иначе приложение показывает дату из далёкого будущего вместо «бессрочно».
+FOREVER_YEARS = 10
+
+
+def _expire_timestamp(expires_at: datetime | None) -> int:
+    """Метка окончания подписки для заголовка ``subscription-userinfo``.
+
+    ``0`` в этом заголовке означает «не истекает». Бессрочные подписки храним с
+    далёкой датой (чтобы их не трогали фоновые задачи истечения), а клиентам
+    всё равно отдаём ``0`` — иначе Happ показывает «Истекает: 01.01.2099».
+    """
+    if expires_at is None:
+        return 0
+    moment = expires_at.replace(tzinfo=timezone.utc)
+    if moment - datetime.now(timezone.utc) > timedelta(days=365 * FOREVER_YEARS):
+        return 0
+    return int(moment.timestamp())
+
+
+def _rename(configs: list[str], title: str) -> list[str]:
+    """Подменить служебное имя локации на человеческое («🇯🇵 Япония»)."""
+    try:
+        from app.web.subscription_format import rename_locations
+    except ImportError:  # pragma: no cover - модуль форматов необязателен
+        return configs
+    return rename_locations(configs, title)
+
+
 def _subscription_headers(sub: Subscription, used_bytes: int = 0) -> dict[str, str]:
     total = sub.traffic_limit_gb * 1024**3 if sub.traffic_limit_gb else 0
-    expire_ts = int(sub.expires_at.replace(tzinfo=timezone.utc).timestamp()) if sub.expires_at else 0
+    expire_ts = _expire_timestamp(sub.expires_at)
     return {
-        "profile-title": "Kometa",
+        "profile-title": _profile_title(settings.subscription_title),
         "profile-update-interval": "12",
         "profile-web-page-url": settings.public_base_url,
         "subscription-userinfo": f"upload=0; download={used_bytes}; total={total}; expire={expire_ts}",
@@ -89,11 +133,17 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
     :param bot: экземпляр бота — нужен админке, чтобы писать пользователям
         (подтверждение оплаты, начисление дней, рассылка).
     """
+    from fastapi.staticfiles import StaticFiles
+
     from app.web.admin import router as admin_router
     from app.web.payments import router as payments_router
+    from app.web.templating import STATIC_DIR
 
     app = FastAPI(title="Kometa subscription service", docs_url=None, redoc_url=None)
     app.state.bot = bot
+    # Статика панели (CSS/JS) отдаётся только вместе с /admin: никаких CDN,
+    # панель обязана работать на localhost без интернета.
+    app.mount("/admin/static", StaticFiles(directory=str(STATIC_DIR)), name="admin-static")
     app.include_router(admin_router)
     app.include_router(payments_router)
 
@@ -105,7 +155,7 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
     async def status_page(request: Request) -> Response:
         """Публичная страница состояния сервиса.
 
-        Зачем: во время сбоев и ограничений клиент должен уметь проверить,
+        Зачем: во время сбоев клиент должен уметь проверить,
         работает ли сервис, не заходя в Telegram. Показываем только страны и
         состояние — никаких адресов нод и токенов.
         """
@@ -147,11 +197,98 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
  <ul>{rows}</ul>
  <p class="muted" style="margin-top:16px">Обновлено: {snapshot['checked_at']} UTC</p>
  <footer class="muted">
-   Если мобильный интернет не работает, попробуй Wi-Fi — при ограничениях у операторов
-   проводной интернет обычно продолжает работать.<br>
-   Вопросы — в поддержку из бота. <a href="?format=json">JSON</a>
+   Страница обновляется автоматически — её можно открыть в любой момент.<br>
+   Вопросы и помощь: {settings.support_contact or 'поддержка в боте'}.
+   <a href="?format=json">JSON</a>
  </footer>
 </div></main></body></html>"""
+        return HTMLResponse(html)
+
+    @app.get("/connect/{token}", response_class=HTMLResponse)
+    async def connect_page(token: str, request: Request, app: str = "") -> Response:
+        """Страница подключения: одно нажатие — профиль уже в приложении.
+
+        Зачем отдельная страница, а не кнопка с диплинком: Telegram запрещает
+        нестандартные схемы (``happ://``, ``v2rayng://``, ``hiddify://``) в
+        inline-кнопках — он отвечает «Unsupported URL protocol» и клавиатура
+        не отправляется вообще. Поэтому кнопка в боте ведёт сюда (обычный
+        https), а страница уже открывает приложение по схеме. Бонус: здесь
+        видно ссылку целиком, если приложение не установлено.
+        """
+        from urllib.parse import quote
+
+        from app.db.session import SessionMaker
+
+        async with SessionMaker() as session:  # type: AsyncSession
+            sub = await subs_service.get_subscription_by_token(session, token)
+            if sub is None:
+                raise HTTPException(status_code=404, detail="subscription not found")
+            if sub.status == "blocked":
+                raise HTTPException(status_code=403, detail="subscription blocked")
+
+        sub_url = subs_service.subscription_link(token)
+        title = (settings.subscription_title or "Kometa").strip() or "Kometa"
+        fragment = quote(title, safe="")
+        encoded = quote(sub_url, safe="")
+
+        apps = [
+            ("happ", "🟢 Happ", f"happ://add/{sub_url}#{fragment}"),
+            ("v2rayng", "🔵 v2rayNG", f"v2rayng://install-sub/?url={encoded}%23{fragment}"),
+            ("hiddify", "🟣 Hiddify", f"hiddify://import/{sub_url}#{fragment}"),
+        ]
+        chosen = (app or "").strip().lower()
+        cards = "".join(
+            f"<a class='btn{' primary' if key == chosen else ''}' href=\"{url}\" "
+            f"id='btn-{key}'>{label}</a>"
+            for key, label, url in apps
+        )
+        # Автопопытка открыть приложение: пользователь уже нажал кнопку в
+        # Telegram, поэтому браузер обычно разрешает переход по схеме.
+        auto = next((url for key, _, url in apps if key == chosen), "")
+        auto_script = (
+            f"<script>setTimeout(function(){{location.href='{auto}';}}, 400);</script>" if auto else ""
+        )
+
+        html = f"""<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Kometa — подключение</title>
+<style>
+ body{{margin:0;background:#0f1117;color:#e8eaf0;font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}}
+ main{{max-width:520px;margin:6vh auto;padding:20px}}
+ .card{{background:#171a23;border:1px solid #2a2f3f;border-radius:14px;padding:22px}}
+ h1{{font-size:20px;margin:0 0 6px}}
+ .btn{{display:block;padding:14px 16px;margin:10px 0;border-radius:12px;text-align:center;
+      background:#1e2330;border:1px solid #2f3547;color:#e8eaf0;text-decoration:none;font-weight:600}}
+ .btn.primary{{background:#1b3a5c;border-color:#2f6ea8}}
+ input{{width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2f3547;
+       background:#12151d;color:#cfd6e6;font-size:14px;margin:8px 0}}
+ .copy{{width:100%;padding:12px;border-radius:10px;border:0;background:#2f6ea8;color:#fff;font-weight:600;font-size:15px}}
+ .muted{{color:#98a0b3}} .small{{font-size:13px}}
+ .ok{{background:#16301f!important;border-color:#2c6b45!important}}
+</style></head>
+<body><main><div class="card">
+ <h1>🔌 Подключение Kometa</h1>
+ <p class="muted small">Нажми название приложения — профиль добавится сам, останется включить VPN.</p>
+ {cards}
+ <p class="muted small" style="margin-top:18px">Если приложение не открылось — скопируй ссылку и вставь её в клиенте вручную:</p>
+ <input id="sub" value="{sub_url}" readonly onclick="this.select()">
+ <button class="copy" id="copy" onclick="copySub()">📋 Скопировать ссылку</button>
+ <p class="muted small" style="margin-top:14px">Ссылка постоянная: при продлении её менять не нужно.
+  Приложение скачать: Happ, v2rayNG, Hiddify — любое на выбор.</p>
+</div></main>
+<script>
+function copySub(){{
+  var el=document.getElementById('sub');
+  el.select(); el.setSelectionRange(0, 99999);
+  var done=false;
+  try{{ done=document.execCommand('copy'); }}catch(e){{}}
+  if(navigator.clipboard && !done){{ navigator.clipboard.writeText(el.value); done=true; }}
+  var b=document.getElementById('copy');
+  if(done){{ b.textContent='✅ Скопировано'; b.className='copy ok'; }}
+}}
+</script>{auto_script}</body></html>"""
         return HTMLResponse(html)
 
     @app.get("/sub/{token}")
@@ -167,19 +304,38 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
 
             configs: list[str] = []
             used_bytes = 0
+            renamed_per_panel = False
             for panel in await registry.all_panels(session):
                 if not sub.panel_user_uuid:
                     continue
                 try:
-                    configs.extend(await panel.get_configs(sub.panel_user_uuid))
+                    panel_configs = await panel.get_configs(sub.panel_user_uuid)
+                except PanelError as exc:
+                    logger.warning("Панель %s не отдала конфиги: %s", panel.name, exc)
+                    continue
+
+                # Имя локации у каждой страны своё: у основной панели — из
+                # LOCATION_TITLE, у ноды — её название из админки («🇯🇵 Япония»).
+                title = getattr(panel, "location_title", "") or ""
+                if title:
+                    panel_configs, renamed_per_panel = _rename(panel_configs, title), True
+                configs.extend(panel_configs)
+
+                try:
                     panel_user = await panel.get_user(sub.panel_user_uuid)
                     if panel_user is not None:
                         used_bytes += panel_user.used_bytes or 0
                 except PanelError as exc:
-                    logger.warning("Панель %s не отдала конфиги: %s", panel.name, exc)
+                    logger.warning("Панель %s не отдала статистику: %s", panel.name, exc)
 
             if not configs:
                 raise HTTPException(status_code=503, detail="no configs available")
+
+        # Имена локаций: панель отдаёт служебные («DE-REALITY-firefox-u123-10GB📊»),
+        # в приложении это выглядит мусором — подменяем на человеческое имя страны.
+        if settings.location_title and not renamed_per_panel:
+            # Запасной путь: у панелей нет своих имён (одна страна, старые настройки).
+            configs = _rename(configs, settings.location_title)
 
         body = "\n".join(configs)
         headers = _subscription_headers(sub, used_bytes)

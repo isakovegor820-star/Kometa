@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'referrals' %}
+{% block title %}Рефералы и промокоды — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Рефералы и промокоды</h1>
+    <div class="sub">Кого привели по ссылкам, сколько это стоило и какие скидки действуют · время UTC</div>
+  </div>
+  <div class="actions">
+    {% if can_act %}<a class="btn btn-primary" href="#new-promo">{{ icon('plus') }} Промокод</a>{% endif %}
+  </div>
+</div>
+
+{# --- сводка: цифры программы ------------------------------------------- #}
+<div class="stats">
+  <div class="stat">
+    <div class="k">{{ icon('users') }} Пришли по ссылкам</div>
+    <div class="v">{{ num(ref_stats.invited) }}</div>
+    <div class="d">за всё время</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('check') }} Из них оплатили</div>
+    <div class="v">{{ num(ref_stats.paid) }}</div>
+    <div class="d">конверсия {{ ref_stats.conversion }}%</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('gift') }} Начислено дней</div>
+    <div class="v">{{ num(ref_stats.days_rewarded) }}</div>
+    <div class="d">в запасе {{ num(ref_stats.days_in_balance) }}</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('tag') }} Скидок активировано</div>
+    <div class="v">{{ num(code_stats.used) }}</div>
+    <div class="d">на {{ money(code_stats.discount_total) }}</div>
+  </div>
+</div>
+
+{# --- правила программы: чтобы цифры выше читались в контексте ---------- #}
+<div class="card mt-16">
+  <div class="card-head"><h2>{{ icon('gift') }} Как работает программа</h2></div>
+  <div class="card-body">
+    <dl class="kv">
+      <dt>Скидка другу</dt>
+      <dd>−{{ discount_percent }} % на первую оплату{% if discount_max_rub %} (не больше {{ money(discount_max_rub) }}){% endif %}</dd>
+      <dt>Награда пригласившему</dt>
+      <dd>+{{ bonus_referrer_days }} дн. после первой оплаты друга</dd>
+      <dt>Бонус приглашённому</dt>
+      <dd>+{{ bonus_invited_days }} дн. сверху к подписке</dd>
+      <dt>Лимит накрутки</dt>
+      <dd>не больше {{ rewards_per_month }} награда в календарный месяц одному человеку</dd>
+    </dl>
+    <div class="hint mt-8">
+      Если у пригласившего ещё нет подписки, дни не сгорают: они ждут в запасе и применяются при первой оплате.
+    </div>
+  </div>
+</div>
+
+{# --- создание промокода ------------------------------------------------ #}
+{% if can_act %}
+<div class="card" id="new-promo">
+  <div class="card-head">
+    <h2>{{ icon('plus') }} Новый промокод</h2>
+    <div class="actions"><span class="xs dim">для акции, компенсации или договорённости</span></div>
+  </div>
+  <form method="post" action="/admin/referrals/promo">
+    <div class="card-body form-grid">
+      <div class="field">
+        <label for="promo-code">Код</label>
+        <input id="promo-code" type="text" name="code" placeholder="LAUNCH50" required maxlength="32" autocomplete="off">
+        <span class="hint">Приведём к верхнему регистру, пробелы уберём.</span>
+      </div>
+      <div class="field">
+        <label for="promo-percent">Скидка, %</label>
+        <input id="promo-percent" type="number" name="percent" value="50" min="1" max="100">
+      </div>
+      <div class="field">
+        <label for="promo-uses">Активаций</label>
+        <input id="promo-uses" type="number" name="uses" value="0" min="0">
+        <span class="hint">0 — без ограничения</span>
+      </div>
+      <div class="field">
+        <label for="promo-days">Действует, дней</label>
+        <input id="promo-days" type="number" name="days" value="0" min="0">
+        <span class="hint">0 — бессрочно</span>
+      </div>
+      <div class="field">
+        <label for="promo-max">Потолок скидки, ₽</label>
+        <input id="promo-max" type="number" name="max_discount" value="0" min="0">
+        <span class="hint">0 — без потолка</span>
+      </div>
+      <div class="field">
+        <span class="label">Условия</span>
+        {# Скрытый ноль + чекбокс: снятая галочка приходит явным «нет», а не пустотой. #}
+        <div class="check-row">
+          <input type="hidden" name="first_only" value="0">
+          <label><input type="checkbox" class="checkbox" name="first_only" value="1" checked> только на первую оплату</label>
+        </div>
+        <span class="hint">Выключи, если код должен работать и на продление.</span>
+      </div>
+    </div>
+    <div class="card-foot">
+      <button class="btn btn-primary" type="submit">{{ icon('plus') }} Создать промокод</button>
+      <span class="hint">Одна скидка на клиента за всю жизнь аккаунта — повторно код не сработает.</span>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+{# --- список промокодов ------------------------------------------------- #}
+<div class="card">
+  <div class="card-head">
+    <h2>Промокоды</h2>
+    <div class="actions">
+      <span class="xs dim">всего {{ num(code_stats.codes) }} · активных {{ num(code_stats.active) }}</span>
+    </div>
+  </div>
+  {% if codes %}
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Код</th>
+          <th>Вид</th>
+          <th>Скидка</th>
+          <th class="num">Активаций</th>
+          <th class="num">Осталось</th>
+          <th>Действует до</th>
+          <th>Кто применил</th>
+          <th class="actions"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in codes %}
+        <tr>
+          <td>
+            <code>{{ row.code }}</code>
+            {% if row.note %}<div class="xs dim trunc trunc-sm" title="{{ row.note }}">{{ row.note }}</div>{% endif %}
+          </td>
+          <td>
+            {% if row.kind == 'referral' %}
+            <span class="badge badge-accent">реферальный</span>
+            {% else %}
+            <span class="badge">обычный</span>
+            {% endif %}
+          </td>
+          <td>
+            −{{ row.percent }} %
+            {% if row.max_discount_rub %}<div class="xs dim">не больше {{ money(row.max_discount_rub) }}</div>{% endif %}
+            {% if not row.first_only %}<div class="xs dim">на любую оплату</div>{% endif %}
+          </td>
+          <td class="num">{{ num(row.uses_count) }}</td>
+          <td class="num">{% if row.uses_left is none %}∞{% else %}{{ num(row.uses_left) }}{% endif %}</td>
+          <td class="small dim nowrap">{% if row.expires_at %}{{ dt_day(row.expires_at) }}{% else %}бессрочно{% endif %}</td>
+          <td class="small">
+            {% set applied = redemptions.get(row.id, []) %}
+            {% if applied %}
+              {% for item in applied %}
+              <div>
+                {% if item.user %}<a href="/admin/users/{{ item.user.id }}">{{ item.user.display_name }}</a>{% else %}клиент #{{ item.row.user_id }}{% endif %}
+                <span class="xs dim">
+                  {{ dt_day(item.row.created_at) }}
+                  {%- if item.row.discount_rub %} · −{{ item.row.discount_rub }} ₽{% endif %}
+                  {%- if not item.row.confirmed_at %} · ждёт оплаты{% endif %}
+                </span>
+              </div>
+              {% endfor %}
+              {% if row.uses_count > applied|length %}
+              <div class="xs dim">и ещё {{ row.uses_count - applied|length }}</div>
+              {% endif %}
+            {% else %}
+            <span class="dim">—</span>
+            {% endif %}
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              {% if row.is_active %}
+              <span class="badge badge-ok">активен</span>
+              {% else %}
+              <span class="badge">выключен</span>
+              {% endif %}
+              {% if can_act %}
+              <form method="post" action="/admin/referrals/promo/{{ row.id }}/toggle" class="inline-form">
+                <button class="btn btn-sm {{ 'btn-ghost' if row.is_active else 'btn-primary' }}" type="submit"
+                        aria-label="{{ 'Выключить' if row.is_active else 'Включить' }} промокод {{ row.code }}">
+                  {{ 'Выключить' if row.is_active else 'Включить' }}
+                </button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ icon('tag') }}
+    <div class="t">Промокодов пока нет</div>
+    <div class="small">Персональные коды пригласивших появятся здесь сами, как только кто-то приведёт друга.</div>
+  </div>
+  {% endif %}
+</div>
+
+{# --- топ пригласивших -------------------------------------------------- #}
+<div class="card">
+  <div class="card-head">
+    <h2>Топ пригласивших</h2>
+    <div class="actions"><span class="xs dim">первые {{ tops|length }} по числу оплат</span></div>
+  </div>
+  {% if tops %}
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr><th>Клиент</th><th>Код</th><th class="num">Привёл</th><th class="num">Оплатили</th><th class="num">Дней в запасе</th><th class="actions"></th></tr>
+      </thead>
+      <tbody>
+        {% for user, invited, paid in tops %}
+        <tr>
+          <td>
+            <div class="who-cell">
+              <span class="avatar">{{ initials(user.display_name) }}</span>
+              <span style="min-width:0">
+                <a class="nm" href="/admin/users/{{ user.id }}">{{ user.display_name }}</a>
+                <span class="meta">{{ user.tg_id }}{% if user.is_blocked %} · заблокирован{% endif %}</span>
+              </span>
+            </div>
+          </td>
+          <td><code class="xs">{{ user.referral_code }}</code></td>
+          <td class="num">{{ num(invited) }}</td>
+          <td class="num">{{ num(paid) }}</td>
+          <td class="num">{{ num(user.bonus_days_balance or 0) }}</td>
+          <td class="actions"><a class="btn btn-sm btn-ghost" href="/admin/users/{{ user.id }}">Карточка</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ icon('users') }}
+    <div class="t">Пока никого не приглашали</div>
+    <div class="small">Топ появится, когда клиенты начнут делиться ссылкой из раздела «Пригласить друга».</div>
+  </div>
+  {% endif %}
+</div>
+
+{# --- последние приглашения --------------------------------------------- #}
+<div class="card">
+  <div class="card-head">
+    <h2>Последние приглашения</h2>
+    <div class="actions"><span class="xs dim">последние {{ invitations|length }}</span></div>
+  </div>
+  {% if invitations %}
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr><th>Когда</th><th>Кто пригласил</th><th>Пришёл</th><th>Статус</th><th>Награда</th></tr>
+      </thead>
+      <tbody>
+        {% for item in invitations %}
+        <tr>
+          <td class="small dim nowrap">{{ dt_short(item.ref.created_at) }}</td>
+          <td>
+            {% if item.referrer %}
+            <a href="/admin/users/{{ item.referrer.id }}">{{ item.referrer.display_name }}</a>
+            {% else %}<span class="dim">—</span>{% endif %}
+          </td>
+          <td>
+            <a href="/admin/users/{{ item.invited.id }}">{{ item.invited.display_name }}</a>
+            <span class="xs dim">{{ item.invited.tg_id }}</span>
+          </td>
+          <td>
+            {% if item.ref.paid_order_id %}
+            <span class="badge badge-ok">оплатил</span>
+            {% else %}
+            <span class="badge">ждём оплату</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.ref.bonus_days_referrer %}
+            <span class="tag tag-accent">+{{ item.ref.bonus_days_referrer }} дн.</span>
+            {% else %}
+            <span class="dim">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ icon('gift') }}
+    <div class="t">Приглашений пока нет</div>
+    <div class="small">Как только кто-то придёт по ссылке друга, приглашение появится здесь.</div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

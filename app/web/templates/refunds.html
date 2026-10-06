@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'refunds' %}
+{# orders.py не передаёт current: без него общий блок пагинации не соберёт ссылки. #}
+{% set current = {} %}
+{% block title %}Возвраты — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Возвраты</h1>
+    <div class="sub">Оплаченные заказы, по которым можно вернуть деньги · время UTC</div>
+  </div>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/admin/orders?status=paid">{{ icon('inbox') }} Оплаченные заказы</a>
+  </div>
+</div>
+
+<div class="stats mb-12">
+  <div class="stat">
+    <div class="k">{{ icon('refund') }} Возвратов за 30 дней</div>
+    <div class="v">{{ num(summary.count) }}</div>
+    <div class="d">{{ summary.count|string + ' ' + plural(summary.count, 'заказ', 'заказа', 'заказов') if summary.count else 'возвратов не было' }}</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('wallet') }} Сумма возвратов</div>
+    <div class="v">{{ money(summary.rub) }}</div>
+    <div class="d">за последние 30 дней</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('card') }} Средний возврат</div>
+    <div class="v">{{ money(summary.rub // summary.count) if summary.count else '—' }}</div>
+    <div class="d">возврат отключает доступ по заказу</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <h2>К возврату</h2>
+    <div class="actions"><span class="badge">{{ num(page_data.total) }} оплаченных</span></div>
+  </div>
+
+  {% if rows %}
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Заказ</th>
+          <th>Клиент</th>
+          <th>Тариф</th>
+          <th>Оплачен</th>
+          <th class="right">Сумма</th>
+          <th>Способ</th>
+          <th class="actions">Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        {% set order = row.order %}
+        <tr data-row>
+          <td class="id">#{{ order.id }}</td>
+          <td>
+            {% if row.user %}
+            <div class="who-cell">
+              <span class="avatar">{{ initials(row.user.display_name) }}</span>
+              <span style="min-width:0">
+                <a class="nm" href="/admin/users/{{ row.user.id }}">{{ row.user.display_name }}</a>
+                <span class="meta">{{ row.user.tg_id }}</span>
+              </span>
+            </div>
+            {% else %}<span class="dim">—</span>{% endif %}
+          </td>
+          <td class="small">{{ row.plan.title if row.plan else '—' }}</td>
+          <td class="small dim nowrap">{{ dt_short(order.paid_at) if order.paid_at else '—' }}</td>
+          <td class="right"><b>{{ money(order.amount_rub) }}</b></td>
+          <td class="small muted">{{ provider_label(order.provider) }}</td>
+          <td class="actions">
+            {# Причину пишем в заказ: по ней потом видно, почему деньги вернули. #}
+            <form method="post" action="/admin/orders/{{ order.id }}/refund" class="inline-form"
+                  data-confirm="Оформить возврат {{ order.amount_rub }} ₽ по заказу #{{ order.id }}? Доступ по этому заказу будет отключён.">
+              <input type="text" name="note" placeholder="причина возврата" style="width:200px"
+                     aria-label="Причина возврата по заказу {{ order.id }}">
+              <button class="btn btn-sm btn-danger" type="submit">Вернуть деньги</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% include "_pagination.html" with context %}
+
+  {% else %}
+  <div class="empty">
+    {{ icon('check') }}
+    <div class="t">Возвращать нечего</div>
+    <div class="small">Оплаченных заказов нет. Как только появятся оплаты, они окажутся здесь.</div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <h2>История возвратов</h2>
+    <div class="actions"><span class="xs dim">последние 50</span></div>
+  </div>
+
+  {% if refund_rows %}
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Возврат</th>
+          <th>Заказ</th>
+          <th>Клиент</th>
+          <th class="right">Сумма</th>
+          <th>Оформил</th>
+          <th>Причина</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in refund_rows %}
+        {% set order = row.order %}
+        <tr data-row>
+          <td class="small dim nowrap">{{ dt(order.refunded_at) if order.refunded_at else '—' }}</td>
+          <td class="id">#{{ order.id }}</td>
+          <td>
+            {% if row.user %}
+            <a href="/admin/users/{{ row.user.id }}">{{ row.user.display_name }}</a>
+            {% else %}<span class="dim">—</span>{% endif %}
+          </td>
+          <td class="right"><b>{{ money(order.amount_rub) }}</b></td>
+          <td class="small">{{ order.refunded_by or '—' }}</td>
+          <td class="small muted">
+            {% if order.refund_note %}<span title="{{ order.refund_note }}">{{ order.refund_note|truncate(80) }}</span>
+            {% else %}<span class="dim">без причины</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ icon('history') }}
+    <div class="t">Возвратов ещё не было</div>
+    <div class="small">Каждый возврат попадёт сюда: дата, кто оформил, причина и сумма.</div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -1,86 +1,116 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Kometa — админ-панель</title>
-<style>
-  :root {
-    --bg: #0f1117; --panel: #171a23; --panel-2: #1e2230; --line: #2a2f3f;
-    --text: #e8eaf0; --muted: #98a0b3; --accent: #6ea8fe; --ok: #45c07d;
-    --warn: #f0b054; --err: #ef6b6b;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  header {
-    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-    padding: 14px 22px; background: var(--panel); border-bottom: 1px solid var(--line);
-  }
-  .logo { font-weight: 700; letter-spacing: .4px; }
-  nav { display: flex; gap: 14px; flex-wrap: wrap; }
-  nav a { color: var(--muted); padding: 4px 0; }
-  nav a.active { color: var(--text); border-bottom: 2px solid var(--accent); }
-  main { max-width: 1180px; margin: 0 auto; padding: 22px; }
-  h1 { font-size: 22px; margin: 0 0 16px; }
-  h2 { font-size: 17px; margin: 26px 0 10px; color: var(--muted); font-weight: 600; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
-  .card .k { color: var(--muted); font-size: 13px; }
-  .card .v { font-size: 22px; font-weight: 700; margin-top: 4px; }
-  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 12px; overflow: hidden; }
-  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; font-size: 13px; background: var(--panel-2); }
-  tr:last-child td { border-bottom: none; }
-  .muted { color: var(--muted); }
-  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
-  .pill.ok { color: var(--ok); border-color: #24503a; }
-  .pill.warn { color: var(--warn); border-color: #4d3c22; }
-  .pill.err { color: var(--err); border-color: #55292c; }
-  form.inline { display: inline-flex; gap: 6px; align-items: center; }
-  input[type=text], input[type=password], input[type=number], textarea, select {
-    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
-    border-radius: 8px; padding: 7px 10px; font: inherit;
-  }
-  input[type=number] { width: 78px; }
-  textarea { width: 100%; min-height: 90px; }
-  button {
-    background: var(--accent); color: #0b0d12; border: 0; border-radius: 8px;
-    padding: 7px 13px; font: inherit; font-weight: 600; cursor: pointer;
-  }
-  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
-  button.danger { background: transparent; color: var(--err); border: 1px solid #55292c; font-weight: 500; }
-  .flash { padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 14px; }
-  .flash.ok { background: #16301f; color: #a7e6c1; }
-  .flash.err { background: #33191c; color: #f3b6b6; }
-  .login { max-width: 380px; margin: 12vh auto; }
-  code { background: var(--panel-2); padding: 2px 6px; border-radius: 6px; font-size: 13px; }
-  .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .trunc { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
-</style>
+<meta name="color-scheme" content="light dark">
+<title>{% block title %}{{ page_title|default('Админ-панель') }} — Kometa{% endblock %}</title>
+{# Тема применяется до первой отрисовки, иначе экран мигает белым. #}
+<script>
+(function(){try{var t=localStorage.getItem("kometa-admin-theme");if(t==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}})();
+</script>
+<link rel="stylesheet" href="/admin/static/admin.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232563eb'/><path d='M9 21l7-12 7 12' stroke='white' stroke-width='2.4' fill='none' stroke-linejoin='round'/></svg>">
 </head>
 <body>
-<header>
-  <div class="logo">🛰 Kometa</div>
+{% from "_icons.html" import icon %}
+<a class="skip-link" href="#main">К содержимому</a>
+<div class="app">
+
   {% if session_active %}
-  <nav>
-    <a href="/admin" class="{{ 'active' if page == 'dashboard' else '' }}">Дашборд</a>
-    <a href="/admin/orders" class="{{ 'active' if page == 'orders' else '' }}">Заказы</a>
-    <a href="/admin/users" class="{{ 'active' if page == 'users' else '' }}">Пользователи</a>
-    <a href="/admin/nodes" class="{{ 'active' if page == 'nodes' else '' }}">Ноды</a>
-  </nav>
-  <div style="margin-left:auto"><a href="/admin/logout">Выйти</a></div>
+  {% set caps = caps|default([]) %}
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-mark">K</span>
+      <span>Kometa<small>админ-панель</small></span>
+    </div>
+
+    <nav class="nav" aria-label="Разделы">
+      {% macro navlink(href, key, name, label, count=0, badge='') -%}
+      <a href="{{ href }}" class="{{ 'active' if page == key else '' }}"
+         {{ 'aria-current=page' if page == key else '' }}>
+        {{ icon(name) }}<span>{{ label }}</span>
+        {% if count %}<span class="count">{{ count }}</span>{% elif badge %}<span class="count" style="background:var(--warn)">{{ badge }}</span>{% endif %}
+      </a>
+      {%- endmacro %}
+
+      <div class="nav-group">
+        {{ navlink('/admin', 'dashboard', 'grid', 'Дашборд') }}
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Операции</div>
+        {% if 'orders.view' in caps %}
+        {{ navlink('/admin/orders', 'orders', 'inbox', 'Очередь заказов', nav_counts.pending if nav_counts else 0) }}
+        {% endif %}
+        {% if 'users.view' in caps %}{{ navlink('/admin/users', 'users', 'users', 'Пользователи') }}{% endif %}
+        {% if 'orders.refund' in caps %}{{ navlink('/admin/refunds', 'refunds', 'refund', 'Возвраты') }}{% endif %}
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Деньги</div>
+        {% if 'finance.view' in caps %}{{ navlink('/admin/finance', 'finance', 'chart', 'Финансы и отчёты') }}{% endif %}
+        {% if 'plans.manage' in caps %}{{ navlink('/admin/plans', 'plans', 'tag', 'Тарифы') }}{% endif %}
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Инфраструктура</div>
+        {% if 'nodes.view' in caps %}{{ navlink('/admin/nodes', 'nodes', 'server', 'Ноды') }}{% endif %}
+        {% if 'alerts.view' in caps %}
+        {{ navlink('/admin/alerts', 'alerts', 'bell', 'Алерты', nav_counts.alerts if nav_counts else 0) }}
+        {% endif %}
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Рост</div>
+        {% if 'growth.view' in caps %}{{ navlink('/admin/referrals', 'referrals', 'gift', 'Рефералы и промокоды') }}{% endif %}
+        {% if 'broadcast.send' in caps %}{{ navlink('/admin/broadcast', 'broadcast', 'megaphone', 'Рассылки') }}{% endif %}
+      </div>
+      {% if 'audit.view' in caps or 'team.manage' in caps %}
+      <div class="nav-group">
+        <div class="nav-title">Система</div>
+        {% if 'audit.view' in caps %}{{ navlink('/admin/audit', 'audit', 'history', 'Журнал действий') }}{% endif %}
+        {% if 'team.manage' in caps %}{{ navlink('/admin/team', 'team', 'shield', 'Команда и роли') }}{% endif %}
+      </div>
+      {% endif %}
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="who">
+        <span class="avatar">{{ (admin.name if admin else 'A')[:1]|upper }}</span>
+        <span style="min-width:0">
+          <span class="nm strong" style="display:block;overflow:hidden;text-overflow:ellipsis">{{ admin.name if admin else 'админ' }}</span>
+          <span class="xs dim">{{ admin.role_label if admin else '' }}</span>
+        </span>
+        <a class="btn btn-ghost btn-icon btn-sm" href="/admin/logout" style="margin-left:auto"
+           title="Выйти" aria-label="Выйти">{{ icon('logout') }}</a>
+      </div>
+    </div>
+  </aside>
   {% endif %}
-</header>
-<main>
-  {% if message %}<div class="flash ok">{{ message }}</div>{% endif %}
-  {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
-  {% block content %}{% endblock %}
-</main>
+
+  <div class="main">
+    {% if session_active %}
+    <header class="topbar">
+      <button class="btn btn-ghost btn-icon sidebar-toggle" data-nav-toggle type="button" aria-label="Меню">{{ icon('menu') }}</button>
+      <div class="crumbs">
+        <span class="dim">Kometa</span>
+        <span class="dim">/</span>
+        <b>{{ page_title|default('Обзор') }}</b>
+      </div>
+      <div class="spacer"></div>
+      {% block topbar_search %}{% endblock %}
+      <button class="btn btn-ghost btn-icon" data-theme-toggle type="button" aria-label="Тема">
+        <span data-theme-icon>☾</span>
+      </button>
+    </header>
+    {% endif %}
+
+    <main class="content" id="main">
+      {% if message %}<div class="flash ok" role="status">{{ icon('check') }}<div>{{ message }}</div></div>{% endif %}
+      {% if error %}<div class="flash err" role="alert">{{ icon('alert') }}<div>{{ error }}</div></div>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+<script src="/admin/static/admin.js" defer></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

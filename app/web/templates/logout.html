@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'logout' %}
+{% block content %}
+<div class="card" style="max-width:460px">
+  <div class="card-head"><h2>Выйти из панели?</h2></div>
+  <div class="card-body">
+    <p class="muted small">
+      Выход завершает сессию на 12 часов. Журнал действий сохранится, но
+      продолжить работу получится только после нового входа.
+    </p>
+  </div>
+  <div class="card-foot">
+    <form method="post" action="/admin/logout" class="inline-form">
+      <button class="btn btn-primary" type="submit">{{ icon('logout') }} Выйти</button>
+    </form>
+    <a class="btn btn-ghost" href="/admin">Остаться</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,534 @@
+"""Инфраструктура: ноды, алерты и журнал действий.
+
+Зачем одним модулем: это три взгляда на одно и то же — «что у нас работает»
+(ноды), «что сломалось» (алерты) и «кто что менял» (журнал). Во время
+инцидента модератор ходит по ним по кругу, поэтому страницы собраны рядом.
+
+Правило модуля то же, что и во всей панели: сначала `require(...)`, потом
+работа, потом `audit.log_action(...)` и только затем `commit`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import HTMLResponse, Response
+from sqlalchemy import func, select
+
+from app.db.models import Alert, Event, Node, User
+from app.db.session import SessionMaker
+from app.panels.base import Inbound, PanelClient
+from app.panels.registry import registry
+from app.services import alerts as alerts_service
+from app.services import audit
+from app.web import ui
+from app.web.admin.common import filters, flash_redirect, make_page, page, parse_page, require
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+#: Вкладки алертов. «Открытые» по смыслу сервиса включают и взятые в работу —
+#: иначе взятый алерт исчезает с глаз, а вместе с ним и проблема.
+ALERT_TABS: tuple[tuple[str, str], ...] = (
+    ("open", "Открытые"),
+    ("ack", "В работе"),
+    ("resolved", "Закрытые"),
+    ("all", "Все"),
+)
+
+ALERT_FILTER_KEYS = ("status",)
+AUDIT_FILTER_KEYS = ("actor", "kind", "date_from", "date_to")
+
+#: Типы панелей, которые умеет собирать реестр. Опечатка в форме иначе
+#: превратилась бы в «панель», к которой некуда подключаться.
+PANEL_TYPES = ("xui", "fake")
+
+#: Кэш инбаундов: панель — чужой сервер, и ждать её на каждый рендер нельзя.
+#: Держим короткий таймаут и помним результат минуту; кнопка «Проверить ноды»
+#: кэш сбрасывает, поэтому после явной проверки данные свежие.
+INBOUNDS_TTL = 60.0
+INBOUNDS_TIMEOUT = 1.2
+#: code+url → (момент замера, инбаунды, ошибка). URL в ключе — чтобы после
+#: правки адреса панели не показывать инбаунды старого сервера.
+_inbounds_cache: dict[str, tuple[float, list[Inbound], str]] = {}
+
+
+def _parse_date(value: str, *, end: bool = False) -> datetime | None:
+    """Дата из формы (YYYY-MM-DD) → момент времени UTC.
+
+    Для «по» берём конец дня — та же причина, что в очереди заказов: фильтр
+    «с 1 по 1 октября» иначе показывает пусто.
+    """
+    if not value:
+        return None
+    try:
+        day = datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    moment = datetime.combine(day, datetime.max.time() if end else datetime.min.time())
+    return moment.replace(tzinfo=timezone.utc)
+
+
+# ------------------------------------------------------------------- ноды
+def _clean_ids(raw: str) -> str:
+    """«1, 2 3» → «1,2,3»: реестр панелей разбирает строку по запятым."""
+    parts = [chunk.strip() for chunk in (raw or "").replace(" ", ",").split(",")]
+    return ",".join(part for part in parts if part)[:64]
+
+
+async def _load_inbounds(panel: PanelClient) -> list[Inbound]:
+    """Инбаунды панели с жёстким таймаутом: страница не ждёт сеть бесконечно."""
+    return list(await asyncio.wait_for(panel.list_inbounds(), timeout=INBOUNDS_TIMEOUT))
+
+
+async def _panel_views(panels: list[PanelClient], nodes: list[Node]) -> list[dict]:
+    """Карточки панелей для страницы нод: подпись, адрес и список инбаундов.
+
+    Инбаунды нужны, чтобы модератор видел, из чего собирается подписка
+    («DE-Reality» или пусто). Берём их из короткого кэша, а если кэша нет —
+    одним параллельным запросом с таймаутом: одна медленная нода не должна
+    задерживать отрисовку остальных.
+    """
+    now = time.monotonic()
+    views: list[dict] = []
+    pending: list[tuple[str, PanelClient, dict]] = []
+
+    for index, panel in enumerate(panels):
+        # Реестр отдаёт основную панель первой, дальше — активные ноды по
+        # priority: тем же порядком подписываем карточки названиями из БД.
+        node = nodes[index - 1] if 0 < index <= len(nodes) else None
+        code = node.code if node is not None else "primary"
+        title = (node.title if node is not None else "") or getattr(panel, "location_title", "") or "Основная панель"
+        url = (node.panel_url if node is not None else "") or getattr(panel, "base_url", "")
+        key = f"{code}|{url}"
+        entry: dict = {
+            "code": code, "title": title, "url": url, "node": node,
+            "inbounds": [], "error": "", "fresh": False,
+        }
+        views.append(entry)
+
+        cached = _inbounds_cache.get(key)
+        if cached and now - cached[0] < INBOUNDS_TTL:
+            entry["inbounds"], entry["error"], entry["fresh"] = cached[1], cached[2], True
+            continue
+        pending.append((key, panel, entry))
+
+    if pending:
+        results = await asyncio.gather(
+            *(_load_inbounds(panel) for _, panel, _ in pending), return_exceptions=True
+        )
+        for (key, _panel, entry), result in zip(pending, results):
+            if isinstance(result, BaseException):
+                logger.info("Инбаунды панели %s не получены: %s", key, result)
+                stale = _inbounds_cache.get(key)
+                if stale:
+                    # Старые данные лучше пустоты: конфиг собирается из этих
+                    # инбаундов, и модератору важно видеть, из каких именно.
+                    entry["inbounds"] = stale[1]
+                    entry["error"] = "панель не ответила — показаны данные прошлой проверки"
+                else:
+                    entry["error"] = "панель не ответила — нажми «Проверить ноды»"
+                continue
+            entry["inbounds"] = result
+            entry["fresh"] = True
+            _inbounds_cache[key] = (time.monotonic(), result, "")
+
+    return views
+
+
+@router.get("/nodes", response_class=HTMLResponse)
+async def nodes_page(request: Request):
+    auth = await require(request, "nodes.view")
+    if isinstance(auth, Response):
+        return auth
+
+    edit_code = (request.query_params.get("edit") or "").strip()
+    async with SessionMaker() as db:
+        nodes = list((await db.scalars(select(Node).order_by(Node.priority, Node.id))).all())
+        edit_node = next((node for node in nodes if node.code == edit_code), None) if edit_code else None
+        panels = list(await registry.all_panels(db))
+
+    # Сеть панелей — уже вне сессии БД: соединение не должно ждать чужие таймауты.
+    views = await _panel_views(panels, [node for node in nodes if node.is_active])
+    alive = sum(1 for node in nodes if node.is_active and node.last_check_ok)
+
+    return await page(
+        request,
+        "nodes.html",
+        auth,
+        title="Ноды",
+        page="nodes",
+        nodes=nodes,
+        panels=views,
+        edit_node=edit_node,
+        nodes_active=sum(1 for node in nodes if node.is_active),
+        nodes_alive=alive,
+        last_check_at=next((node.last_check_at for node in nodes if node.last_check_at), None),
+        # Права передаём в контекст: в Jinja функции can() нет, а прятать кнопки
+        # по роли в шаблоне — единственный способ не показывать их поддержке.
+        can_nodes_act=ui.can(auth.role, "nodes.act"),
+        can_nodes_secrets=ui.can(auth.role, "nodes.secrets"),
+    )
+
+
+@router.post("/nodes")
+async def node_save(
+    request: Request,
+    code: str = Form(""),
+    title: str = Form(""),
+    country: str = Form(""),
+    host: str = Form(""),
+    panel_type: str = Form("xui"),
+    panel_url: str = Form(""),
+    panel_token: str = Form(""),
+    inbound_ids: str = Form(""),
+    priority: int = Form(100),
+    is_active: str = Form("1"),
+):
+    """Добавить ноду или обновить существующую (upsert по коду).
+
+    Код — ключ, по которому нода живёт в реестре панелей и в ссылке-подписке,
+    поэтому правится не id, а код: форма одинаково работает и для новой страны,
+    и для правки адреса у уже подключённой.
+    """
+    auth = await require(request, "nodes.act")
+    if isinstance(auth, Response):
+        return auth
+
+    code = (code or "").strip().lower()
+    title = (title or "").strip()
+    kind = (panel_type or "").strip().lower() or "xui"
+    url = (panel_url or "").strip()
+    token = (panel_token or "").strip()
+
+    if not code:
+        return flash_redirect("/admin/nodes", error="Укажи код ноды: латиницей, например jp")
+    if not title:
+        return flash_redirect("/admin/nodes", error="Укажи название — его увидит клиент в приложении")
+    if kind not in PANEL_TYPES:
+        return flash_redirect("/admin/nodes", error="Неизвестный тип панели: поддерживаются xui и fake")
+    if kind == "xui" and not url:
+        return flash_redirect("/admin/nodes", error="Укажи адрес панели: http://IP:2053/путь")
+
+    async with SessionMaker() as db:
+        node = await db.scalar(select(Node).where(Node.code == code))
+        created = node is None
+        if node is None:
+            node = Node(code=code)
+            db.add(node)
+
+        node.title = title[:64]
+        node.country = (country or "").strip().upper()[:8]
+        node.host = (host or "").strip()[:128]
+        node.panel_type = kind
+        node.panel_url = url[:255]
+        # Пустой токен в форме — «не менять». Иначе правка названия затирала бы
+        # секрет: модератор видит в поле маску, а не сам токен (старая панель
+        # на этом теряла доступ к ноде).
+        if token:
+            node.panel_token = token[:255]
+        node.inbound_ids = _clean_ids(inbound_ids)
+        node.priority = int(priority or 100)
+        node.is_active = str(is_active).strip().lower() not in {"0", "false", "off", "no", ""}
+
+        # Клиент панели кэшируется по коду: без сброса подписка молча ходила бы
+        # на старый адрес или со старым токеном.
+        registry.invalidate(code)
+        await audit.log_action(
+            db,
+            "admin.node_saved",
+            actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id),
+            payload={
+                "code": code,
+                "created": created,
+                "is_active": node.is_active,
+                "panel_url": node.panel_url,
+                "token_changed": bool(token),
+            },
+        )
+        await db.commit()
+
+    action = "добавлена" if created else "сохранена"
+    note = "" if token else " · токен не менялся"
+    return flash_redirect("/admin/nodes", message=f"Нода «{title}» {action}{note}")
+
+
+@router.post("/nodes/{node_id}/toggle")
+async def node_toggle(node_id: int, request: Request):
+    auth = await require(request, "nodes.act")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        node = await db.get(Node, node_id)
+        if node is None:
+            return flash_redirect("/admin/nodes", error="Нода не найдена")
+        node.is_active = not node.is_active
+        state = "включена" if node.is_active else "выключена"
+        title, code, active = node.title, node.code, node.is_active
+        registry.invalidate(code)
+        await audit.log_action(
+            db,
+            "admin.node_toggle",
+            actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id),
+            payload={"node_id": node_id, "code": code, "is_active": active},
+        )
+        await db.commit()
+
+    return flash_redirect("/admin/nodes", message=f"Нода «{title}» {state}")
+
+
+@router.post("/nodes/{node_id}/delete")
+async def node_delete(node_id: int, request: Request):
+    auth = await require(request, "nodes.act")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        node = await db.get(Node, node_id)
+        if node is None:
+            return flash_redirect("/admin/nodes", error="Нода не найдена")
+        title, code = node.title, node.code
+        await db.delete(node)
+        registry.invalidate(code)
+        # Открытые алерты удалённой ноды закрываем сами: иначе «нода не
+        # отвечает» висит в списке вечно, и настоящие проблемы тонут в шуме.
+        await alerts_service.resolve_by_fingerprint(db, f"node:{code}", note="нода удалена", by=auth.name)
+        await audit.log_action(
+            db,
+            "admin.node_deleted",
+            actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id),
+            payload={"node_id": node_id, "code": code, "title": title},
+        )
+        await db.commit()
+
+    return flash_redirect("/admin/nodes", message=f"Нода «{title}» удалена")
+
+
+@router.post("/nodes/check")
+async def nodes_check(request: Request):
+    """Проверить основную панель и активные ноды, обновить алерты.
+
+    Пары «нода или None (основная панель) + клиент панели» — тот же контракт,
+    что у фоновой проверки: результат одинаково попадает в `Node.last_check_*`
+    и в алерты, поэтому страница показывает свежее состояние без ожидания.
+    """
+    auth = await require(request, "nodes.act")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        nodes = list(
+            (await db.scalars(select(Node).where(Node.is_active.is_(True)).order_by(Node.priority, Node.id))).all()
+        )
+        pairs: list[tuple[Node | None, PanelClient]] = [(None, registry.primary())]
+        pairs += [(node, registry.for_node(node)) for node in nodes]
+
+        try:
+            results = await alerts_service.check_nodes(db, pairs)
+        except Exception as exc:  # noqa: BLE001 - чужая панель может ответить чем угодно
+            logger.error("Проверка нод не удалась: %s", exc)
+            await db.rollback()
+            return flash_redirect("/admin/nodes", error=f"Проверка не удалась: {exc}")
+
+        alive = sum(1 for entry in results if entry["ok"])
+        failed = [entry["code"] for entry in results if not entry["ok"]]
+        await audit.log_action(
+            db,
+            "admin.node_check",
+            actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id),
+            payload={"total": len(results), "alive": alive, "failed": failed[:10]},
+        )
+        await db.commit()
+
+    # Проверка обновила состояние панелей — старый список инбаундов неактуален.
+    _inbounds_cache.clear()
+
+    if alive == 0:
+        return flash_redirect("/admin/nodes", error=f"Ни одна панель не ответила (проверено {len(results)})")
+    if failed:
+        return flash_redirect(
+            "/admin/nodes",
+            message=f"Отвечают {alive} из {len(results)}. Без ответа: {', '.join(failed[:5])}",
+        )
+    return flash_redirect("/admin/nodes", message=f"Все панели отвечают: {alive} из {len(results)}")
+
+
+# ----------------------------------------------------------------- алерты
+@router.get("/alerts", response_class=HTMLResponse)
+async def alerts_page(request: Request):
+    auth = await require(request, "alerts.view")
+    if isinstance(auth, Response):
+        return auth
+
+    current = filters(request, ALERT_FILTER_KEYS)
+    status = current["status"] or "open"
+    if status not in {code for code, _ in ALERT_TABS}:
+        status = "open"
+    page_no, per_page = parse_page(request)
+
+    async with SessionMaker() as db:
+        items = await alerts_service.list_alerts(db, status=status, limit=per_page, offset=(page_no - 1) * per_page)
+        total = await alerts_service.count_alerts(db, status)
+        counts = {code: await alerts_service.count_alerts(db, code) for code, _ in ALERT_TABS}
+        snapshot = await alerts_service.summary(db)
+        # Клиентов для алертов (например, «поступление без заказа») подтягиваем
+        # одним запросом на страницу, а не по строке.
+        user_ids = {alert.user_id for alert in items if alert.user_id}
+        users = (
+            {user.id: user for user in await db.scalars(select(User).where(User.id.in_(user_ids)))}
+            if user_ids
+            else {}
+        )
+
+    return await page(
+        request,
+        "alerts.html",
+        auth,
+        title="Алерты",
+        page="alerts",
+        items=items,
+        users=users,
+        current=current,
+        status=status,
+        tabs=ALERT_TABS,
+        counts=counts,
+        summary=snapshot,
+        page_data=make_page(items, total, page_no, per_page),
+        can_alerts_act=ui.can(auth.role, "alerts.act"),
+    )
+
+
+@router.post("/alerts/{alert_id}/ack")
+async def alert_ack(alert_id: int, request: Request):
+    """Взять алерт в работу: проблема остаётся открытой, но видно, что ею заняты."""
+    auth = await require(request, "alerts.act")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        alert = await db.get(Alert, alert_id)
+        if alert is None:
+            return flash_redirect("/admin/alerts", error="Алерт не найден")
+        if alert.status == alerts_service.STATUS_RESOLVED:
+            return flash_redirect("/admin/alerts", error="Алерт уже закрыт")
+        await alerts_service.ack_alert(db, alert, by=auth.name)
+        await audit.log_action(
+            db,
+            "admin.alert_ack",
+            actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id),
+            payload={"alert_id": alert_id, "kind": alert.kind},
+        )
+        await db.commit()
+        title = alert.title
+
+    return flash_redirect("/admin/alerts", message=f"Алерт взят в работу: {title}")
+
+
+@router.post("/alerts/{alert_id}/resolve-note")
+async def alert_resolve_note(alert_id: int, request: Request, note: str = Form("")):
+    """Закрыть алерт с пояснением.
+
+    Путь отличается от `/alerts/{id}/resolve` из обзора: там закрытие в один
+    клик, здесь — с причиной, и два одинаковых маршрута конфликтовали бы.
+    """
+    auth = await require(request, "alerts.act")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        alert = await db.get(Alert, alert_id)
+        if alert is None:
+            return flash_redirect("/admin/alerts", error="Алерт не найден")
+        await alerts_service.resolve_alert(db, alert, by=auth.name, note=note)
+        await audit.log_action(
+            db,
+            "admin.alert_resolved",
+            actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id),
+            payload={
+                "alert_id": alert_id,
+                "kind": alert.kind,
+                "note": note,
+                "repeat_count": int(alert.repeat_count or 1),
+            },
+        )
+        await db.commit()
+        title = alert.title
+
+    return flash_redirect("/admin/alerts", message=f"Алерт закрыт: {title}")
+
+
+# ----------------------------------------------------------------- журнал
+def _audit_statement(current: dict[str, str]):  # noqa: ANN202 - SQLAlchemy expression
+    """Условия журнала: только действия команды (kind с префиксом ``admin.``).
+
+    Своя выборка вместо `audit.recent_actions`: там нет фильтра по датам, а
+    разбор инцидента начинается именно с «что было вчера вечером».
+    """
+    stmt = select(Event).where(Event.kind.like(f"{audit.ACTION_PREFIX}%"))
+    if current["actor"]:
+        stmt = stmt.where(Event.actor_name == current["actor"])
+    if current["kind"]:
+        stmt = stmt.where(Event.kind == current["kind"])
+    date_from = _parse_date(current["date_from"])
+    date_to = _parse_date(current["date_to"], end=True)
+    if date_from:
+        stmt = stmt.where(Event.created_at >= date_from)
+    if date_to:
+        stmt = stmt.where(Event.created_at <= date_to)
+    return stmt
+
+
+@router.get("/audit", response_class=HTMLResponse)
+async def audit_page(request: Request):
+    auth = await require(request, "audit.view")
+    if isinstance(auth, Response):
+        return auth
+
+    current = filters(request, AUDIT_FILTER_KEYS)
+    page_no, per_page = parse_page(request)
+
+    async with SessionMaker() as db:
+        stmt = _audit_statement(current)
+        total = int(await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0)
+        events = list(
+            (await db.scalars(stmt.order_by(Event.id.desc()).limit(per_page).offset((page_no - 1) * per_page))).all()
+        )
+        # Список имён для фильтра — из самих событий: команда меняется, а
+        # справочник в коде пришлось бы править руками.
+        actors = [
+            name
+            for name in (
+                await db.scalars(
+                    select(Event.actor_name)
+                    .where(Event.kind.like(f"{audit.ACTION_PREFIX}%"), Event.actor_name.is_not(None))
+                    .group_by(Event.actor_name)
+                    .order_by(Event.actor_name)
+                )
+            ).all()
+            if name
+        ]
+        user_ids = {event.user_id for event in events if event.user_id}
+        users = (
+            {user.id: user for user in await db.scalars(select(User).where(User.id.in_(user_ids)))}
+            if user_ids
+            else {}
+        )
+
+    return await page(
+        request,
+        "audit.html",
+        auth,
+        title="Журнал действий",
+        page="audit",
+        events=events,
+        users=users,
+        actors=actors,
+        current=current,
+        actions=ui.ADMIN_ACTION_LABELS,
+        page_data=make_page(events, total, page_no, per_page),
+    )

@@ -1,21 +1,62 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block content %}
-<div class="login">
-  <h1>Вход в админ-панель</h1>
-  {% if not enabled %}
-    <div class="flash err">
-      Панель выключена: в <code>.env</code> не задан <code>ADMIN_PANEL_PASSWORD</code>.
-      Добавь пароль и перезапусти бота.
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="brand">
+      <span class="brand-mark">K</span>
+      <span>Kometa<small>админ-панель</small></span>
     </div>
-  {% else %}
-  <form method="post" action="/admin/login">
+
+    {% if not enabled %}
     <div class="card">
-      <label class="k" for="password">Пароль</label><br><br>
-      <input type="password" id="password" name="password" autofocus required style="width:100%">
-      <br><br>
-      <button type="submit" style="width:100%">Войти</button>
+      <div class="card-body">
+        <h1 style="font-size:var(--fz-lg)">Панель выключена</h1>
+        <p class="muted small mt-8">
+          Пока не задан <code>ADMIN_PANEL_PASSWORD</code> (или не создана ни одна
+          учётная запись команды), панель не выполняет никаких действий — так
+          безопаснее: открытая админка опаснее отсутствующей.
+        </p>
+        <p class="muted small">Добавь пароль в <code>.env</code> и перезапусти бота:</p>
+        <p><code>ADMIN_PANEL_PASSWORD=длинный-пароль</code></p>
+      </div>
     </div>
-  </form>
-  {% endif %}
+    {% else %}
+    <form method="post" action="/admin/login">
+      <div class="card">
+        <div class="card-body">
+          <h1 style="font-size:var(--fz-lg)">Вход</h1>
+          <p class="muted small mt-8 mb-12">
+            {% if accounts|length > 1 %}
+              Введи свои логин и пароль.
+            {% else %}
+              Введи пароль панели.
+            {% endif %}
+          </p>
+
+          {% if accounts|length > 1 %}
+          <div class="field mb-12">
+            <label for="login">Логин</label>
+            <input type="text" id="login" name="login" autocomplete="username"
+                   autofocus required placeholder="например, {{ accounts[0] }}">
+          </div>
+          {% endif %}
+
+          <div class="field">
+            <label for="password">Пароль</label>
+            <input type="password" id="password" name="password" autocomplete="current-password"
+                   required {% if accounts|length <= 1 %}autofocus{% endif %}>
+          </div>
+
+          <button class="btn btn-primary btn-block mt-16" type="submit">Войти</button>
+          <p class="hint mt-12">
+            Панель по умолчанию доступна только с localhost: подключайся через SSH-туннель
+            <code>ssh -L 8090:127.0.0.1:8090 root@IP</code>.
+          </p>
+        </div>
+      </div>
+    </form>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}

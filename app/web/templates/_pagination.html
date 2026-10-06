@@ -1,0 +1,27 @@
+{# Общий блок пагинации. Требует в контексте page_data (Page) и current (фильтры). #}
+{% if page_data and page_data.total %}
+<div class="pagination">
+  <span>Строки {{ page_data.first_index }}–{{ page_data.last_index }} из {{ num(page_data.total) }}</span>
+  {% if page_data.pages > 1 %}
+  <div class="pages">
+    {% if page_data.has_prev %}
+    <a href="?{{ query_string(current, page=page_data.page - 1, per_page=page_data.per_page) }}"
+       aria-label="Предыдущая страница">‹</a>
+    {% endif %}
+    {% for number in page_data.window() %}
+      {% if number is none %}
+      <span class="gap">…</span>
+      {% elif number == page_data.page %}
+      <span class="current">{{ number }}</span>
+      {% else %}
+      <a href="?{{ query_string(current, page=number, per_page=page_data.per_page) }}">{{ number }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if page_data.has_next %}
+    <a href="?{{ query_string(current, page=page_data.page + 1, per_page=page_data.per_page) }}"
+       aria-label="Следующая страница">›</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}

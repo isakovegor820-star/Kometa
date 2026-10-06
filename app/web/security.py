@@ -1,28 +1,110 @@
-"""Безопасность админ-панели: подписанная cookie и защита от подбора пароля.
+"""Безопасность админ-панели: роли, подписанная cookie, защита от подбора.
 
 Принципы:
-  * панель выключена, пока не задан пароль (``ADMIN_PANEL_PASSWORD``);
-  * пароль сравнивается в постоянном времени (``hmac.compare_digest``);
-  * сессия — подписанная cookie с сроком жизни, без хранения состояния на сервере;
-  * подбор пароля ограничен по IP.
+  * **fail-closed**: пока не задан ни пароль в ``ADMIN_PANEL_PASSWORD``, ни одна
+    учётная запись команды — панель не выполняет ни одного действия, а
+    показывает страницу входа с объяснением;
+  * пароли команды хранятся только хэшем (PBKDF2-HMAC-SHA256, 240 000 итераций);
+  * сравнение пароля — в постоянном времени (``hmac.compare_digest``);
+  * сессия — подписанная cookie со сроком жизни, ролью и именем;
+  * подбор пароля ограничен по IP;
+  * небезопасные методы дополнительно проверяются на same-origin.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import json
+import os
+import secrets
 import time
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import get_settings
+from app.db.models import AdminAccount, utcnow
+from app.web.ui import ROLE_MODERATOR, ROLE_OWNER, ROLE_SUPPORT, ROLES, role_label
 
 COOKIE_NAME = "kometa_admin"
 #: Не больше N неудачных попыток входа с одного IP за окно.
 MAX_LOGIN_ATTEMPTS = 10
 LOGIN_WINDOW_SECONDS = 600
 
+#: Параметры хэширования паролей команды. 240k итераций — ~0.1 c на проверку:
+#: вход не тормозит, а перебор на украденном дампе БД становится дорогим.
+PBKDF2_ITERATIONS = 240_000
+_HASH_PREFIX = "pbkdf2_sha256"
 
-def panel_enabled() -> bool:
-    return bool(get_settings().admin_panel_password)
+
+# --------------------------------------------------------------------- пароли
+def hash_password(password: str, *, iterations: int = PBKDF2_ITERATIONS, salt: bytes | None = None) -> str:
+    """Хэш пароля в формате ``pbkdf2_sha256$итерации$соль$хэш`` (всё в hex)."""
+    salt = salt or os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+    return f"{_HASH_PREFIX}${iterations}${salt.hex()}${digest.hex()}"
+
+
+def verify_password_hash(password: str, stored: str | None) -> bool:
+    """Проверить пароль против сохранённого хэша (постоянное время сравнения)."""
+    if not stored:
+        return False
+    parts = stored.split("$")
+    if len(parts) != 4 or parts[0] != _HASH_PREFIX:
+        return False
+    try:
+        iterations = int(parts[1])
+        salt = bytes.fromhex(parts[2])
+        expected = bytes.fromhex(parts[3])
+    except ValueError:
+        return False
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+    return hmac.compare_digest(digest, expected)
+
+
+def check_password(candidate: str) -> bool:
+    """Пароль владельца из ``.env`` — обратная совместимость со старой панелью."""
+    expected = get_settings().admin_panel_password
+    if not expected:
+        return False
+    return hmac.compare_digest((candidate or "").strip(), expected)
+
+
+# ------------------------------------------------------------------- сессия
+class Session:
+    """Кто вошёл в панель: имя, роль и (если есть) учётная запись."""
+
+    __slots__ = ("name", "role", "account_id", "tg_id", "expires_at")
+
+    def __init__(
+        self,
+        name: str,
+        role: str,
+        *,
+        account_id: int | None = None,
+        tg_id: int | None = None,
+        expires_at: int = 0,
+    ) -> None:
+        self.name = name
+        self.role = role
+        self.account_id = account_id
+        self.tg_id = tg_id
+        self.expires_at = expires_at
+
+    @property
+    def role_label(self) -> str:
+        return role_label(self.role)
+
+    def as_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "role": self.role,
+            "role_label": self.role_label,
+            "account_id": self.account_id,
+            "tg_id": self.tg_id,
+        }
 
 
 def _secret() -> bytes:
@@ -31,34 +113,194 @@ def _secret() -> bytes:
     return raw.encode()
 
 
-def check_password(candidate: str) -> bool:
-    expected = get_settings().admin_panel_password
-    if not expected:
-        return False
-    return hmac.compare_digest(candidate.strip(), expected)
+def _sign(payload: str) -> str:
+    return hmac.new(_secret(), payload.encode(), hashlib.sha256).hexdigest()[:32]
 
 
-def issue_session(now: float | None = None) -> str:
-    """Создать значение cookie: '<истекает>.<подпись>'."""
+def issue_session(
+    now: float | None = None,
+    *,
+    name: str = "владелец",
+    role: str = ROLE_OWNER,
+    account_id: int | None = None,
+    tg_id: int | None = None,
+) -> str:
+    """Создать значение cookie: ``<истекает>.<данные>.<подпись>``.
+
+    Полезная нагрузка (имя и роль) подписана, но не шифруется: секретов в ней
+    нет, зато в журнале видно, кто действовал.
+    """
     ttl = get_settings().admin_session_hours * 3600
     expires_at = int((now if now is not None else time.time()) + ttl)
-    payload = str(expires_at)
-    signature = hmac.new(_secret(), payload.encode(), hashlib.sha256).hexdigest()[:32]
-    return f"{payload}.{signature}"
+    body = json.dumps(
+        {"n": name[:64], "r": role, "a": account_id, "t": tg_id},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    encoded = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
+    payload = f"{expires_at}.{encoded}"
+    return f"{payload}.{_sign(payload)}"
+
+
+def read_session(token: str | None) -> Session | None:
+    """Разобрать cookie. None — cookie нет, подпись не сходится или срок вышел."""
+    if not token or token.count(".") < 2:
+        return None
+    expires_raw, encoded, signature = token.split(".", 2)
+    if not expires_raw.isdigit():
+        return None
+    payload = f"{expires_raw}.{encoded}"
+    if not hmac.compare_digest(signature, _sign(payload)):
+        return None
+    expires_at = int(expires_raw)
+    if expires_at <= time.time():
+        return None
+    try:
+        padded = encoded + "=" * (-len(encoded) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded).decode())
+    except Exception:  # noqa: BLE001 - битая cookie не должна ронять панель
+        return None
+    role = str(data.get("r") or ROLE_OWNER)
+    if role not in ROLES:
+        role = ROLE_SUPPORT
+    return Session(
+        name=str(data.get("n") or "админ"),
+        role=role,
+        account_id=data.get("a"),
+        tg_id=data.get("t"),
+        expires_at=expires_at,
+    )
 
 
 def verify_session(token: str | None) -> bool:
-    if not token or "." not in token:
-        return False
-    payload, signature = token.rsplit(".", 1)
-    if not payload.isdigit():
-        return False
-    expected = hmac.new(_secret(), payload.encode(), hashlib.sha256).hexdigest()[:32]
-    if not hmac.compare_digest(signature, expected):
-        return False
-    return int(payload) > time.time()
+    """Обратная совместимость: есть ли валидная сессия."""
+    return read_session(token) is not None
 
 
+# -------------------------------------------------------------------- доступ
+def panel_enabled() -> bool:
+    """Задан пароль владельца из .env (старый способ входа)."""
+    return bool(get_settings().admin_panel_password)
+
+
+async def any_account_exists(session: AsyncSession) -> bool:
+    return (
+        await session.scalar(select(AdminAccount.id).where(AdminAccount.is_active.is_(True)).limit(1))
+    ) is not None
+
+
+async def panel_available(session: AsyncSession) -> bool:
+    """Панель настроена: есть пароль владельца или хотя бы одна учётная запись."""
+    if panel_enabled():
+        return True
+    return await any_account_exists(session)
+
+
+async def authenticate(session: AsyncSession, login: str, password: str) -> Session | None:
+    """Проверить логин и пароль.
+
+    * пустой логин — старый способ: пароль владельца из ``ADMIN_PANEL_PASSWORD``;
+    * логин указан — ищем активную учётную запись команды.
+
+    Возвращает сессию либо None. Никогда не говорит, что именно неверно.
+    """
+    login = (login or "").strip()
+    password = (password or "").strip()
+
+    if not login:
+        if check_password(password):
+            return Session(name="владелец", role=ROLE_OWNER)
+        # Запасной путь: в панели одна учётная запись и человек вводит только пароль.
+        account = await session.scalar(
+            select(AdminAccount).where(AdminAccount.is_active.is_(True)).order_by(AdminAccount.id).limit(1)
+        )
+        if account is not None and verify_password_hash(password, account.password_hash):
+            account.last_login_at = utcnow()
+            return _session_for(account)
+        return None
+
+    account = await session.scalar(
+        select(AdminAccount).where(AdminAccount.login == login.lower(), AdminAccount.is_active.is_(True))
+    )
+    if account is None or not verify_password_hash(password, account.password_hash):
+        return None
+    account.last_login_at = utcnow()
+    return _session_for(account)
+
+
+def _session_for(account: AdminAccount) -> Session:
+    return Session(
+        name=account.name,
+        role=account.role if account.role in ROLES else ROLE_MODERATOR,
+        account_id=account.id,
+        tg_id=account.tg_id,
+    )
+
+
+# ------------------------------------------------------------------ IP и CSRF
+def client_ip(request) -> str:  # noqa: ANN001 - starlette Request
+    """IP клиента с учётом реверс-прокси.
+
+    За nginx все запросы приходят с 127.0.0.1, и проверка «только localhost»
+    перестала бы что-либо значить. Заголовку верим только если владелец явно
+    сказал ``ADMIN_TRUST_PROXY=true``: иначе его подделает кто угодно.
+    """
+    settings = get_settings()
+    if settings.admin_trust_proxy:
+        forwarded = request.headers.get("x-forwarded-for") or ""
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        real = request.headers.get("x-real-ip")
+        if real:
+            return real.strip()
+    return request.client.host if request.client else ""
+
+
+def allowed_admin_ips() -> set[str]:
+    settings = get_settings()
+    base = {"127.0.0.1", "::1", "testclient"}
+    base |= {ip.strip() for ip in settings.admin_allowed_ips.split(",") if ip.strip()}
+    return base
+
+
+def local_only_ok(request) -> bool:  # noqa: ANN001 - starlette Request
+    settings = get_settings()
+    if not settings.admin_local_only:
+        return True
+    return client_ip(request) in allowed_admin_ips()
+
+
+def same_origin(request) -> bool:  # noqa: ANN001 - starlette Request
+    """Проверка same-origin для POST/PUT/DELETE.
+
+    Cookie сессии стоит с ``SameSite=Lax`` — этого достаточно против обычного
+    кросс-сайтового POST. Дополнительный барьер нужен на случай, когда браузер
+    старый или кука живёт в поддомене: сверяем Origin/Referer с хостом запроса.
+    Запросы без Origin (curl, тесты, скрипты) не блокируем — они не CSRF.
+    """
+    origin = request.headers.get("origin") or request.headers.get("referer") or ""
+    if not origin:
+        return True
+    host = request.headers.get("host") or ""
+    if not host:
+        return True
+    try:
+        from urllib.parse import urlsplit
+
+        return urlsplit(origin).netloc == host
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def cookie_secure() -> bool:
+    """Ставить ли флаг Secure: только когда панель реально работает по HTTPS."""
+    settings = get_settings()
+    if settings.web_ssl_cert and settings.web_ssl_key:
+        return True
+    return settings.public_base_url.startswith("https://")
+
+
+# ------------------------------------------------------------------ троттлинг
 class LoginThrottle:
     """Простое ограничение попыток входа: в памяти процесса."""
 
@@ -77,5 +319,15 @@ class LoginThrottle:
     def reset(self, key: str) -> None:
         self._attempts.pop(key, None)
 
+    def failures(self, key: str) -> int:
+        now = time.time()
+        return len([t for t in self._attempts.get(key, []) if now - t < LOGIN_WINDOW_SECONDS])
+
 
 login_throttle = LoginThrottle()
+
+
+def new_password(length: int = 16) -> str:
+    """Пароль для новой учётной записи: его показываем один раз при создании."""
+    alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(length))

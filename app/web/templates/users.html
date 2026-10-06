@@ -1,65 +1,143 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% set page = 'users' %}
-{% set session_active = True %}
 {% block content %}
-<h1>Пользователи</h1>
 
-<div class="card">
-  <form method="get" action="/admin/users" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
-    <input type="text" name="q" value="{{ q }}" placeholder="Поиск: имя, @username или tg_id">
-    <select name="status">
-      <option value="all" {{ 'selected' if current_status == 'all' else '' }}>Все статусы</option>
-      <option value="trial" {{ 'selected' if current_status == 'trial' else '' }}>Пробные</option>
-      <option value="active" {{ 'selected' if current_status == 'active' else '' }}>Активные</option>
-      <option value="expired" {{ 'selected' if current_status == 'expired' else '' }}>Истёкшие</option>
-      <option value="blocked" {{ 'selected' if current_status == 'blocked' else '' }}>Заблокированные</option>
-      <option value="none" {{ 'selected' if current_status == 'none' else '' }}>Без подписки</option>
-    </select>
-    <button type="submit">Найти</button>
-    <span class="muted">Всего: {{ stats.users_total }} · платных: {{ stats.active_paid }}</span>
-  </form>
+<div class="page-head">
+  <div class="titles">
+    <h1>Пользователи</h1>
+    <div class="sub">
+      Клиентов всего: {{ num(stats.users_total) }} · платных: {{ num(stats.active_paid) }}
+      · на пробном: {{ num(stats.trials_active) }}
+    </div>
+  </div>
+  <div class="actions">
+    {% if 'finance.export' in caps %}
+    <a class="btn btn-ghost" href="/admin/export/users.csv?{{ query_string(current) }}">{{ icon('download') }} CSV</a>
+    {% endif %}
+  </div>
 </div>
 
-{% if items %}
-<table>
-  <tr><th>ID</th><th>Пользователь</th><th>Статус</th><th>До</th><th>Осталось</th><th>Ссылка-подписка</th><th>Действия</th></tr>
-  {% for item in items %}
-  <tr>
-    <td>{{ item.user.id }}</td>
-    <td>
-      {{ item.user.display_name }}
-      {% if item.user.is_blocked %}<span class="pill err">заблокирован</span>{% endif %}
-      <br><span class="muted">{{ item.user.tg_id }}{% if item.user.username %} · @{{ item.user.username }}{% endif %}</span>
-    </td>
-    <td>{{ item.status_label }}</td>
-    <td class="muted">{{ item.sub.expires_at.strftime('%d.%m.%Y %H:%M') if item.sub else '—' }}</td>
-    <td>{{ item.sub.days_left ~ ' дн.' if item.sub else '—' }}</td>
-    <td>
-      {% if item.link %}
-      <code class="trunc" title="{{ item.link }}">{{ item.link }}</code>
-      {% else %}—{% endif %}
-    </td>
-    <td class="row-actions">
-      <form class="inline" method="post" action="/admin/users/{{ item.user.id }}/grant">
-        <input type="number" name="days" value="7" min="-3650" max="3650">
-        <button type="submit">Начислить</button>
-      </form>
-      {% if item.user.is_blocked %}
-      <form class="inline" method="post" action="/admin/users/{{ item.user.id }}/block">
-        <input type="hidden" name="block" value="0">
-        <button class="ghost" type="submit">Разблокировать</button>
-      </form>
-      {% else %}
-      <form class="inline" method="post" action="/admin/users/{{ item.user.id }}/block">
-        <input type="hidden" name="block" value="1">
-        <button class="danger" type="submit">Заблокировать</button>
-      </form>
-      {% endif %}
-    </td>
-  </tr>
+<div class="segmented mb-12">
+  {% for code, label in tabs %}
+  <a href="/admin/users?{{ query_string(current, status=code, page=1) }}"
+     class="{{ 'active' if status == code else '' }}">
+    {{ label }}{% if code in ('all', 'blocked') %}<span class="count">{{ num(counts.get(code, 0)) }}</span>{% endif %}
+  </a>
   {% endfor %}
-</table>
+</div>
+
+<form class="toolbar" method="get" action="/admin/users">
+  <input type="hidden" name="status" value="{{ status }}">
+  <div class="grow">
+    <label class="visually-hidden" for="q">Поиск клиента</label>
+    <input type="search" id="q" name="q" value="{{ current.q }}"
+           placeholder="Поиск: имя, @username, tg_id или номер клиента">
+  </div>
+  <select name="tag" aria-label="Метка">
+    <option value="">Все метки</option>
+    {% for tag in tags %}
+    <option value="{{ tag }}" {{ 'selected' if current.tag == tag else '' }}>{{ tag }}</option>
+    {% endfor %}
+  </select>
+  <select name="sort" aria-label="Сортировка">
+    <option value="new" {{ 'selected' if current.sort in ('', 'new') else '' }}>Новые сверху</option>
+    <option value="old" {{ 'selected' if current.sort == 'old' else '' }}>Старые сверху</option>
+    <option value="expires" {{ 'selected' if current.sort == 'expires' else '' }}>Скоро истекают</option>
+  </select>
+  <select name="per_page" aria-label="Строк на странице">
+    {% for size in [25, 50, 100, 200] %}
+    <option value="{{ size }}" {{ 'selected' if page_data.per_page == size else '' }}>{{ size }} строк</option>
+    {% endfor %}
+  </select>
+  <button class="btn btn-primary" type="submit">{{ icon('search') }} Найти</button>
+  {% if current.q or current.tag %}<a class="btn btn-ghost" href="/admin/users?status={{ status }}">Сбросить</a>{% endif %}
+</form>
+
+{% if items %}
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>ID</th><th>Клиент</th><th>Метки</th><th>Статус</th><th>Действует до</th>
+          <th class="right">Осталось</th><th class="right">Оплат</th><th>Ссылка-подписка</th><th class="actions">Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr data-row data-search="{{ item.user.id }} {{ item.user.display_name }} {{ item.user.username or '' }} {{ item.user.tg_id }} {{ item.user.tags }}">
+          <td class="id">{{ item.user.id }}</td>
+          <td>
+            <div class="who-cell">
+              <span class="avatar">{{ initials(item.user.display_name) }}</span>
+              <span style="min-width:0">
+                <a class="nm" href="/admin/users/{{ item.user.id }}">{{ item.user.display_name }}</a>
+                <span class="meta">{{ item.user.tg_id }}{% if item.user.username %} · @{{ item.user.username }}{% endif %}</span>
+              </span>
+            </div>
+          </td>
+          <td>
+            {% for tag in item.tags %}<span class="tag">{{ tag }}</span> {% endfor %}
+            {% if item.user.is_blocked %}<span class="badge badge-err">заблокирован</span>{% endif %}
+          </td>
+          <td>
+            {% if item.sub %}
+              {% set badge = SUBSCRIPTION_STATUS.get(item.sub.status, (item.sub.status, 'neutral')) %}
+              <span class="badge badge-{{ badge[1] if badge[1] != 'neutral' else '' }}">{{ badge[0] }}</span>
+            {% else %}
+              <span class="badge">без подписки</span>
+            {% endif %}
+          </td>
+          <td class="small dim nowrap">{{ dt(item.sub.expires_at) if item.sub else '—' }}</td>
+          <td class="right">
+            {% if item.sub %}
+              <b class="{{ 'muted' if item.sub.days_left == 0 else '' }}">{{ item.sub.days_left }}</b>
+              <div class="xs dim">{{ days_word(item.sub.days_left) }}</div>
+            {% else %}—{% endif %}
+          </td>
+          <td class="right">{{ item.orders }}</td>
+          <td>
+            {% if item.link %}
+            <span class="copy-chip">
+              <span class="v" title="{{ item.link }}">{{ item.link }}</span>
+              <button type="button" data-copy="{{ item.link }}" title="Скопировать ссылку" aria-label="Скопировать ссылку">{{ icon('copy') }}</button>
+            </span>
+            {% else %}<span class="dim">—</span>{% endif %}
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <a class="btn btn-sm" href="/admin/users/{{ item.user.id }}">Карточка</a>
+              {% if 'users.act' in caps %}
+              <form method="post" action="/admin/users/{{ item.user.id }}/grant" class="inline-form"
+                    title="Начислить дни без оплаты">
+                <input type="number" name="days" value="7" min="1" max="3650" style="width:72px" aria-label="Дней">
+                <button class="btn btn-sm" type="submit">+ дни</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% include "_pagination.html" with context %}
 {% else %}
-<div class="card muted">Ничего не найдено</div>
+<div class="card">
+  <div class="empty">
+    {{ icon('users') }}
+    <div class="t">{% if current.q or current.tag %}Ничего не нашлось{% else %}Клиентов пока нет{% endif %}</div>
+    <div class="small">
+      {% if current.q or current.tag %}
+        Проверь написание или <a href="/admin/users?status={{ status }}">сбрось фильтры</a>.
+      {% else %}
+        Первые клиенты появятся здесь сразу после запуска бота.
+      {% endif %}
+    </div>
+  </div>
+</div>
 {% endif %}
+
 {% endblock %}

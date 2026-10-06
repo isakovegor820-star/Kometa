@@ -20,14 +20,18 @@
 from __future__ import annotations
 
 import json
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import yaml
 
 #: Порт по умолчанию, если в ссылке он не указан.
 DEFAULT_PORT = 443
 #: Отпечаток TLS по умолчанию (uTLS): без него Reality не работает.
-DEFAULT_FINGERPRINT = "chrome"
+#: Выбор не косметический: по разборам волн 2026 года отпечатки Chrome/Safari/iOS
+#: попадают в «подозрительные», а Firefox/Android проходят (docs/РЕМНАВАВЕ-СВЯЗКА.md,
+#: раздел 8.3). Ссылка ``vless://`` всё равно несёт свой ``fp``, поэтому клиент
+#: может переопределить отпечаток — здесь важен дефолт для форматов Clash/sing-box.
+DEFAULT_FINGERPRINT = "firefox"
 #: URL проверки задержки: лёгкий 204 от Google, не отдаёт контент.
 DEFAULT_TEST_URL = "http://www.gstatic.com/generate_204"
 #: Интервал проверки задержки в Clash — секунды.
@@ -185,6 +189,35 @@ def parse_config_link(uri: str | None) -> dict | None:
     for key, value in flat_params.items():
         config.setdefault(key, value)
     return config
+
+
+def rename_locations(configs: list[str], name: str) -> list[str]:
+    """Переименовать локации в подписке: фрагмент ``#...`` → заданное имя.
+
+    Зачем: панель отдаёт служебные имена вида
+    ``DE-REALITY-firefox-client-10.00GB📊-2D,23H⏳`` — в приложении это выглядит
+    мусором. Клиент показывает пользователю именно фрагмент после ``#``,
+    поэтому подменяем его на человеческое «🇩🇪 Германия».
+
+    Имя кодируется percent-encoding: пробелы и эмодзи поедут в ссылке как есть
+    и корректно раскодируются клиентом.
+
+    :param configs: строки конфигов из панели (могут содержать мусор).
+    :param name: человеческое имя локации; пустое — вернуть строки без изменений.
+    :return: новый список строк конфигов.
+    """
+    clean = (name or "").strip()
+    if not clean:
+        return list(configs)
+
+    result: list[str] = []
+    for item in configs:
+        raw = (item or "").strip()
+        if not raw:
+            continue
+        base = raw.split("#", 1)[0]
+        result.append(f"{base}#{quote(clean, safe='')}")
+    return result
 
 
 def _unique_names(names: list[str]) -> list[str]:

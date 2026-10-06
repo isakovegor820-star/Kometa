@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from aiogram import Bot
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +17,7 @@ from app.config import get_settings
 from app.db.models import Order, Plan, Subscription, User
 from app.panels.base import PanelClient
 from app.payments.matching import allocate_signature
-from app.services import events, referral, subscriptions
+from app.services import events, notifications, promo as promo_service, referral, subscriptions
 
 settings = get_settings()
 
@@ -44,19 +45,41 @@ async def create_order(
     *,
     provider: str,
     kind: str = KIND_PURCHASE,
+    with_discount: bool = True,
 ) -> Order:
     sub = await subscriptions.get_subscription(session, user.id)
     if kind == KIND_PURCHASE and sub is not None and sub.is_active:
         kind = KIND_RENEW
 
+    # Скидка на первую оплату: своя (введённый код) или за приглашение.
+    discount = None
+    if with_discount:
+        discount = await promo_service.resolve(session, user, base_rub=plan.price_rub)
+
+    base_rub = plan.price_rub
+    discount_rub = discount.discount_rub if discount else 0
+    amount_rub = base_rub - discount_rub
+    stars_amount = 0
+    if provider == "stars":
+        stars_amount = discount.stars_for(plan.price_stars) if discount else plan.price_stars
+
+    if discount_rub:
+        # Один заказ со скидкой за раз: иначе можно оформить два и оплатить
+        # оба по половинной цене.
+        await _cancel_other_discounted(session, user)
+
     order = Order(
         user_id=user.id,
         plan_id=plan.id,
         kind=kind,
-        amount_rub=plan.price_rub,
+        amount_rub=amount_rub,
+        base_amount_rub=base_rub,
+        discount_rub=discount_rub,
+        promo_code=discount.code if discount else None,
+        stars_amount=stars_amount,
         # Уникальные копейки нужны только для ручных переводов: по ним система
         # сама узнаёт, какой заказ оплатили.
-        pay_kopecks=await _allocate_pay_kopecks(session, plan.price_rub) if provider == "manual" else 0,
+        pay_kopecks=await _allocate_pay_kopecks(session, amount_rub) if provider == "manual" else 0,
         provider=provider,
         status="pending",
         external_id=f"ord-{uuid4().hex[:16]}",
@@ -68,9 +91,47 @@ async def create_order(
         session,
         events.ORDER_CREATED,
         user_id=user.id,
-        payload={"order_id": order.id, "plan": plan.code, "provider": provider, "amount": plan.price_rub},
+        payload={
+            "order_id": order.id,
+            "plan": plan.code,
+            "provider": provider,
+            "amount": amount_rub,
+            "base_amount": base_rub,
+            "discount": discount_rub,
+            "promo": order.promo_code,
+            "stars": stars_amount,
+        },
     )
+    if discount is not None and discount_rub:
+        await events.log_event(
+            session,
+            events.PROMO_APPLIED,
+            user_id=user.id,
+            payload={"order_id": order.id, "code": discount.code, "discount_rub": discount_rub},
+        )
     return order
+
+
+async def _cancel_other_discounted(session: AsyncSession, user: User) -> list[Order]:
+    """Отменить другие неоплаченные заказы со скидкой у этого пользователя."""
+    stmt = select(Order).where(
+        Order.user_id == user.id,
+        Order.status == "pending",
+        Order.discount_rub > 0,
+    )
+    others = list((await session.scalars(stmt)).all())
+    for order in others:
+        order.status = "canceled"
+        order.comment = "заменён новым заказом со скидкой"
+        await events.log_event(
+            session,
+            events.ORDER_CANCELED,
+            user_id=user.id,
+            payload={"order_id": order.id, "reason": "replaced_by_discounted_order"},
+        )
+    if others:
+        await session.flush()
+    return others
 
 
 async def get_order(session: AsyncSession, order_id: int) -> Order | None:
@@ -93,11 +154,14 @@ async def mark_paid(
     *,
     confirmed_by: int | None = None,
     provider_payment_id: str | None = None,
+    bot: Bot | None = None,
 ) -> tuple[Subscription | None, bool]:
     """Отметить заказ оплаченным и выдать/продлить доступ.
 
     Возвращает (подписка, уже_был_оплачен). Второй элемент True означает, что
     заказ уже был оплачен ранее — повторная выдача не производится.
+
+    Если передан ``bot``, пригласивший получает сообщение о начисленных днях.
     """
     if order.status == "paid":
         return await subscriptions.get_subscription(session, order.user_id), True
@@ -124,9 +188,46 @@ async def mark_paid(
         session,
         events.ORDER_PAID,
         user_id=user.id,
-        payload={"order_id": order.id, "amount": order.amount_rub, "provider": order.provider},
+        payload={
+            "order_id": order.id,
+            "amount": order.amount_rub,
+            "discount": order.discount_rub,
+            "promo": order.promo_code,
+            "provider": order.provider,
+        },
     )
-    await referral.reward_on_payment(session, order, panel)
+
+    if order.discount_rub and order.promo_code:
+        promo_row = await promo_service.get_by_code(session, order.promo_code)
+        if promo_row is not None:
+            redemption = await promo_service.redeem(
+                session, promo_row, user, order=order, discount_rub=order.discount_rub
+            )
+            if redemption is not None:
+                await events.log_event(
+                    session,
+                    events.PROMO_REDEEMED,
+                    user_id=user.id,
+                    payload={"order_id": order.id, "code": promo_row.code, "discount_rub": order.discount_rub},
+                )
+            # Промокод введён руками, а не получен по ссылке: привязываем
+            # покупателя к владельцу кода, чтобы тот получил награду.
+            if promo_row.kind == "referral" and promo_row.owner_user_id:
+                owner = await session.get(User, promo_row.owner_user_id)
+                if owner is not None and owner.id != user.id:
+                    await referral.attach_referrer(session, user, owner.referral_code)
+
+    reward = await referral.reward_on_payment(session, order, panel)
+    # Временный атрибут (в БД не пишется): по нему вызывающий код добавляет
+    # в сообщение клиенту строку про бонус за приглашение.
+    order.referral_reward = reward  # type: ignore[attr-defined]
+
+    if bot is not None and reward is not None:
+        if reward.referrer_days > 0:
+            await notifications.notify_referral_reward(bot, reward)
+        elif reward.limit_reached:
+            await notifications.notify_referral_limit(bot, reward)
+
     return sub, False
 
 
@@ -138,6 +239,70 @@ async def cancel_order(session: AsyncSession, order: Order, *, reason: str = "")
         order.comment = reason
     await session.flush()
     await events.log_event(session, events.ORDER_CANCELED, user_id=order.user_id, payload={"order_id": order.id})
+
+
+async def refund_order(
+    session: AsyncSession,
+    order: Order,
+    panels: list[PanelClient],
+    *,
+    actor: str = "",
+    note: str = "",
+) -> tuple[bool, str, Subscription | None]:
+    """Вернуть деньги по оплаченному заказу.
+
+    Что важно для учёта: статус становится ``refunded``, и заказ **перестаёт
+    попадать в выручку** (её считают только по ``paid``). Раньше возврат
+    оставлял деньги в отчётах — сервис показывал прибыль, которой нет.
+
+    Доступ забираем не всегда: если у клиента есть более поздняя оплата
+    (например, вернули первый месяц, а второй оплачен) — доступ остаётся.
+
+    :returns: (получилось, текст для админа, подписка)
+    """
+    if order.status == "refunded":
+        return False, f"Заказ #{order.id} уже возвращён", await subscriptions.get_subscription(session, order.user_id)
+    if order.status != "paid":
+        return False, f"Вернуть можно только оплаченный заказ, а #{order.id} — {order.status}", None
+
+    order.status = "refunded"
+    order.refunded_at = datetime.now(timezone.utc)
+    order.refunded_by = actor or "панель"
+    order.refund_note = note or None
+
+    sub = await subscriptions.get_subscription(session, order.user_id)
+    other_paid = await session.scalar(
+        select(Order.id).where(
+            Order.user_id == order.user_id,
+            Order.status == "paid",
+            Order.id != order.id,
+        ).limit(1)
+    )
+
+    await events.log_event(
+        session,
+        events.ORDER_REFUNDED,
+        user_id=order.user_id,
+        payload={
+            "order_id": order.id,
+            "amount": order.amount_rub,
+            "provider": order.provider,
+            "by": order.refunded_by,
+            "note": note,
+            "access_revoked": bool(sub is not None and other_paid is None),
+        },
+    )
+
+    if sub is not None and other_paid is None:
+        await subscriptions.revoke_access(session, sub, panels, reason=f"refund order #{order.id}")
+        message = f"Заказ #{order.id} возвращён, доступ отключён"
+    elif other_paid is not None:
+        message = f"Заказ #{order.id} возвращён, доступ сохранён (есть более поздняя оплата)"
+    else:
+        message = f"Заказ #{order.id} возвращён (подписки у клиента уже нет)"
+
+    await session.flush()
+    return True, message, sub
 
 
 async def pending_orders(session: AsyncSession, limit: int = 50) -> list[Order]:

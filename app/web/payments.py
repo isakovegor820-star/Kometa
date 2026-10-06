@@ -79,8 +79,9 @@ async def cryptobot_webhook(request: Request) -> JSONResponse:
         sub, already = await orders_service.mark_paid(
             session,
             order,
-            registry.primary(),
+            await subscriptions.all_user_panels(session),
             provider_payment_id=str(invoice.get("invoice_id") or ""),
+            bot=bot,
         )
         await events.log_event(
             session,
@@ -91,7 +92,7 @@ async def cryptobot_webhook(request: Request) -> JSONResponse:
         await session.commit()
 
         if bot is not None and user is not None and sub is not None and not already:
-            await _notify_paid(bot, user, sub)
+            await _notify_paid(bot, user, sub, order)
             await notifications.notify_admins(
                 bot,
                 f"🪙 <b>Оплата криптой</b>\nЗаказ #{order.id}, {order.amount_rub} ₽\n"
@@ -101,7 +102,7 @@ async def cryptobot_webhook(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
-async def _notify_paid(bot: Bot, user: User, sub) -> None:  # noqa: ANN001 - Subscription
+async def _notify_paid(bot: Bot, user: User, sub, order=None) -> None:  # noqa: ANN001 - Subscription, Order
     from app.bot import keyboards
 
     expires = sub.expires_at.strftime("%d.%m.%Y %H:%M") if sub.expires_at else "—"
@@ -109,7 +110,7 @@ async def _notify_paid(bot: Bot, user: User, sub) -> None:  # noqa: ANN001 - Sub
     try:
         await bot.send_message(
             user.tg_id,
-            texts.ORDER_PAID.format(expires=expires, days=sub.days_left, link=link),
+            texts.order_paid_text(order, expires=expires, days=sub.days_left, link=link),
             reply_markup=keyboards.connect_kb(link),
             disable_web_page_preview=True,
         )
@@ -193,8 +194,9 @@ async def wata_webhook(request: Request) -> JSONResponse:
         sub, already = await orders_service.mark_paid(
             session,
             order,
-            registry.primary(),
+            await subscriptions.all_user_panels(session),
             provider_payment_id=str(data.get("id") or ""),
+            bot=bot,
         )
         await events.log_event(
             session,
@@ -211,7 +213,7 @@ async def wata_webhook(request: Request) -> JSONResponse:
         await session.commit()
 
         if bot is not None and user is not None and sub is not None and not already:
-            await _notify_paid(bot, user, sub)
+            await _notify_paid(bot, user, sub, order)
             await notifications.notify_admins(
                 bot,
                 f"💳 <b>Оплата через WATA</b>\nЗаказ #{order.id}, {data.get('amount')} "
@@ -253,7 +255,7 @@ async def _revoke_after_refund(request: Request, order_id: int | None, transacti
         user = await session.get(User, order.user_id)
         sub = await subscriptions.get_subscription(session, order.user_id) if user else None
         if user is not None and sub is not None:
-            await subscriptions.set_enabled(sub, registry.primary(), False)
+            await subscriptions.set_enabled(sub, await subscriptions.all_user_panels(session), False)
             sub.status = "blocked"
         await events.log_event(
             session,
@@ -345,7 +347,7 @@ async def platega_webhook(request: Request) -> JSONResponse:
 
         user = await session.get(User, order.user_id)
         sub, already = await orders_service.mark_paid(
-            session, order, registry.primary(), provider_payment_id=transaction_id
+            session, order, await subscriptions.all_user_panels(session), provider_payment_id=transaction_id, bot=bot
         )
         await events.log_event(
             session,
@@ -361,7 +363,7 @@ async def platega_webhook(request: Request) -> JSONResponse:
         await session.commit()
 
         if bot is not None and user is not None and sub is not None and not already:
-            await _notify_paid(bot, user, sub)
+            await _notify_paid(bot, user, sub, order)
             await notifications.notify_admins(
                 bot,
                 f"💳 <b>Оплата через Platega</b>\nЗаказ #{order.id}, {order.amount_rub} ₽ "

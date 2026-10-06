@@ -25,13 +25,38 @@ async def init_db() -> None:
 
 #: Колонки, добавленные после первого релиза: (таблица, колонка, DDL).
 #: create_all не меняет существующие таблицы, поэтому дописываем вручную.
+#: Новые таблицы (промокоды, алерты, роли) create_all создаёт сам — здесь только колонки.
 _EXTRA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("orders", "pay_kopecks", "INTEGER DEFAULT 0"),
+    ("orders", "base_amount_rub", "INTEGER DEFAULT 0"),
+    ("orders", "discount_rub", "INTEGER DEFAULT 0"),
+    ("orders", "promo_code", "VARCHAR(32)"),
+    ("orders", "stars_amount", "INTEGER DEFAULT 0"),
+    ("orders", "refunded_at", "DATETIME"),
+    ("orders", "refunded_by", "VARCHAR(64)"),
+    ("orders", "refund_note", "TEXT"),
+    ("users", "promo_code", "VARCHAR(32)"),
+    ("users", "bonus_days_balance", "INTEGER DEFAULT 0"),
+    ("users", "tags", "VARCHAR(128) DEFAULT ''"),
+    ("referrals", "rewarded_at", "DATETIME"),
+    # Аудит действий администратора — в том же журнале событий.
+    ("events", "actor_name", "VARCHAR(64)"),
+    ("events", "actor_role", "VARCHAR(16)"),
+    ("events", "actor_tg_id", "BIGINT"),
+    ("events", "source", "VARCHAR(8)"),
+    ("events", "ip", "VARCHAR(45)"),
+)
+
+#: Индексы для запросов панели: create_all создаёт их только на новых базах.
+_EXTRA_INDEXES: tuple[tuple[str, str], ...] = (
+    ("ix_orders_status_created", "CREATE INDEX IF NOT EXISTS ix_orders_status_created ON orders (status, created_at)"),
+    ("ix_events_kind_created", "CREATE INDEX IF NOT EXISTS ix_events_kind_created ON events (kind, created_at)"),
+    ("ix_alerts_status_created", "CREATE INDEX IF NOT EXISTS ix_alerts_status_created ON alerts (status, created_at)"),
 )
 
 
 async def _apply_light_migrations(conn) -> None:  # noqa: ANN001 - AsyncConnection
-    """Лёгкие миграции для SQLite: добавляет недостающие колонки.
+    """Лёгкие миграции для SQLite: добавляет недостающие колонки и индексы.
 
     Для PostgreSQL используем Alembic — здесь только чтобы существующая
     база разработчика не отвалилась после обновления кода.
@@ -43,6 +68,11 @@ async def _apply_light_migrations(conn) -> None:  # noqa: ANN001 - AsyncConnecti
         existing = {row[1] for row in result.fetchall()}
         if existing and column not in existing:
             await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    for _name, ddl in _EXTRA_INDEXES:
+        try:
+            await conn.exec_driver_sql(ddl)
+        except Exception:  # noqa: BLE001 - таблицы может ещё не быть в старой базе
+            pass
 
 
 async def seed_plans() -> None:

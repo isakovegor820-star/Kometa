@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'team' %}
+{% block title %}Команда и роли — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Команда и роли</h1>
+    <div class="sub">Кто ещё заходит в панель, что ему можно и как вернуть доступ · время UTC</div>
+  </div>
+</div>
+
+{% if active_owners < 2 %}
+<div class="flash warn">{{ icon('alert') }}<div>
+  <b>Активный владелец один.</b> Пока он один, панель не даст его разжаловать или выключить.
+  Заведи второго владельца — иначе доступ придётся возвращать через <code>ADMIN_PANEL_PASSWORD</code>.
+</div></div>
+{% endif %}
+
+<div class="stats">
+  <div class="stat">
+    <div class="k">{{ icon('shield') }} Доступов всего</div>
+    <div class="v">{{ num(accounts|length) }}</div>
+    <div class="d">включая выключенные</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('check') }} Активных</div>
+    <div class="v">{{ num(accounts|selectattr('is_active')|list|length) }}</div>
+    <div class="d">могут войти в панель</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('key') }} Владельцев</div>
+    <div class="v">{{ num(active_owners) }}</div>
+    <div class="d">полный доступ к деньгам и ролям</div>
+  </div>
+</div>
+
+{# --- список доступов ---------------------------------------------------- #}
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>Учётные записи</h2>
+    <div class="actions"><span class="xs dim">пароли хранятся только хэшем</span></div>
+  </div>
+  {% if accounts %}
+  <div class="table-scroll">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Логин</th>
+          <th>Имя</th>
+          <th>Роль</th>
+          <th>Telegram ID</th>
+          <th>Статус</th>
+          <th>Последний вход</th>
+          <th>Создан</th>
+          <th class="actions">Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for account in accounts %}
+        <tr>
+          <td>
+            <code>{{ account.login }}</code>
+            {% if auth_id is not none and account.id == auth_id %}<span class="tag">это вы</span>{% endif %}
+          </td>
+          <td><b>{{ account.display_name or account.login }}</b></td>
+          <td>
+            <span class="badge badge-{{ 'accent' if account.role == 'owner' else ('info' if account.role == 'moderator' else '') }}">
+              {{ role_label(account.role) }}
+            </span>
+          </td>
+          <td class="small dim">{% if account.tg_id %}<code>{{ account.tg_id }}</code>{% else %}—{% endif %}</td>
+          <td>
+            {% if account.is_active %}
+            <span class="badge badge-ok">активна</span>
+            {% else %}
+            <span class="badge badge-err">выключена</span>
+            {% endif %}
+          </td>
+          <td class="small dim nowrap">{{ ago(account.last_login_at) if account.last_login_at else 'ни разу' }}</td>
+          <td class="small dim nowrap">{{ dt_day(account.created_at) }}</td>
+          <td class="actions">
+            <div class="row-actions">
+              <button class="btn btn-sm" type="button" data-open-dialog="account-{{ account.id }}"
+                      aria-label="Изменить доступ {{ account.login }}">{{ icon('edit') }} Изменить</button>
+              <form method="post" action="/admin/team/{{ account.id }}/password" class="inline-form"
+                    data-confirm="Сбросить пароль для {{ account.login }}? Старый перестанет работать сразу.">
+                <button class="btn btn-sm btn-ghost" type="submit"
+                        aria-label="Сбросить пароль {{ account.login }}">{{ icon('key') }} Пароль</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ icon('shield') }}
+    <div class="t">Учётных записей нет</div>
+    <div class="small">Пока их нет, вход в панель работает по паролю владельца из <code>ADMIN_PANEL_PASSWORD</code>.</div>
+  </div>
+  {% endif %}
+</div>
+
+{# --- создание доступа --------------------------------------------------- #}
+<div class="card">
+  <div class="card-head">
+    <h2>{{ icon('plus') }} Новый доступ</h2>
+    <div class="actions"><span class="xs dim">логин потом не меняется</span></div>
+  </div>
+  <form method="post" action="/admin/team">
+    <div class="card-body form-grid">
+      <div class="field">
+        <label for="new-login">Логин</label>
+        <input id="new-login" type="text" name="login" placeholder="ivan" required minlength="3" maxlength="32"
+               pattern="[a-z0-9._-]{3,32}" autocomplete="off">
+        <span class="hint">Строчные латинские буквы, цифры, точка, дефис, подчёркивание.</span>
+      </div>
+      <div class="field">
+        <label for="new-name">Имя</label>
+        <input id="new-name" type="text" name="display_name" placeholder="Иван" maxlength="64" autocomplete="off">
+        <span class="hint">Как подписывать действия в журнале.</span>
+      </div>
+      <div class="field">
+        <label for="new-role">Роль</label>
+        <select id="new-role" name="role">
+          {% for code, label, description in roles %}
+          <option value="{{ code }}" {{ 'selected' if code == 'moderator' else '' }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <span class="hint">Описания ролей — в блоке ниже.</span>
+      </div>
+      <div class="field">
+        <label for="new-password">Пароль</label>
+        <input id="new-password" type="password" name="password" placeholder="оставь пустым — сгенерируем"
+               minlength="12" autocomplete="new-password">
+        <span class="hint">Свой пароль — от 12 символов. Сгенерированный покажем один раз после создания.</span>
+      </div>
+      <div class="field">
+        <label for="new-tg">Telegram ID</label>
+        <input id="new-tg" type="text" name="tg_id" placeholder="123456789" inputmode="numeric" autocomplete="off">
+        <span class="hint">Необязательно: по нему действие в панели связывается с человеком в боте.</span>
+      </div>
+    </div>
+    <div class="card-foot">
+      <button class="btn btn-primary" type="submit">{{ icon('plus') }} Создать доступ</button>
+      <span class="hint">Новый человек входит на <code>/admin/login</code> своим логином и паролем.</span>
+    </div>
+  </form>
+</div>
+
+{# --- что умеют роли: чтобы выбирать осознанно -------------------------- #}
+<div class="card">
+  <div class="card-head"><h2>{{ icon('shield') }} Что умеют роли</h2></div>
+  <div class="card-body">
+    <dl class="kv">
+      {% for code, label, description in roles %}
+      <dt>{{ label }}</dt>
+      <dd><span class="small">{{ description }}</span></dd>
+      {% endfor %}
+      <dt>Смена роли</dt>
+      <dd class="small">действует сразу: права проверяются при каждом запросе, перезаходить не нужно</dd>
+    </dl>
+  </div>
+</div>
+
+{# --- безопасность: то, что легко забыть, когда всё работает ----------- #}
+<div class="card">
+  <div class="card-head"><h2>{{ icon('key') }} Безопасность</h2></div>
+  <div class="card-body">
+    <dl class="kv">
+      <dt>Как заходить</dt>
+      <dd class="small">
+        {% if local_only %}
+        панель открыта только с localhost — вход через SSH-туннель:
+        <code>ssh -L 8090:127.0.0.1:8090 root@IP</code>, дальше <code>http://127.0.0.1:8090/admin</code>.
+        Если панель вынесена в интернет, ставь её за HTTPS и включай <code>ADMIN_LOCAL_ONLY=false</code> осознанно.
+        {% else %}
+        панель открыта по сети (<code>ADMIN_LOCAL_ONLY=false</code>) — держи её только за HTTPS:
+        без шифрования пароль и сессия видны тому, кто стоит между тобой и сервером.
+        {% endif %}
+      </dd>
+      <dt>Резервный вход</dt>
+      <dd class="small">
+        {% if env_password_set %}
+        пароль владельца из <code>ADMIN_PANEL_PASSWORD</code> работает всегда, даже если учётные записи
+        потеряны или все выключены. Держи его в менеджере паролей и меняй после смены команды.
+        {% else %}
+        <span class="badge badge-warn">ADMIN_PANEL_PASSWORD не задан</span> — резервного входа нет.
+        Если потеряешь доступ к учётным записям, вернуть панель можно будет только правкой в базе.
+        {% endif %}
+      </dd>
+      <dt>Срок сессии</dt>
+      <dd class="small">
+        сессия живёт {{ session_hours }} ч (<code>ADMIN_SESSION_HOURS</code>), потом нужен повторный вход.
+        Общий компьютер — выходи из панели кнопкой внизу меню.
+      </dd>
+      <dt>Пароли</dt>
+      <dd class="small">
+        хранятся только хэшем (PBKDF2-HMAC-SHA256), в журнал не пишутся. Сброшенный пароль
+        показывается один раз — передай человеку лично и попроси сменить.
+      </dd>
+    </dl>
+  </div>
+</div>
+
+{# --- формы правки: по модалке на запись -------------------------------- #}
+{% for account in accounts %}
+<dialog class="modal" id="account-{{ account.id }}" data-backdrop-close>
+  <form method="post" action="/admin/team/{{ account.id }}">
+    <div class="card-head">
+      <h2>Доступ <code>{{ account.login }}</code></h2>
+      <div class="actions">
+        <button class="btn btn-ghost btn-icon btn-sm" type="button" data-close-dialog aria-label="Закрыть">{{ icon('x') }}</button>
+      </div>
+    </div>
+    <div class="card-body form-grid">
+      <div class="field span-2">
+        <label for="name-{{ account.id }}">Имя</label>
+        <input id="name-{{ account.id }}" type="text" name="display_name" value="{{ account.display_name }}" maxlength="64">
+      </div>
+      <div class="field">
+        <label for="role-{{ account.id }}">Роль</label>
+        <select id="role-{{ account.id }}" name="role">
+          {% for code, label, description in roles %}
+          <option value="{{ code }}" {{ 'selected' if account.role == code else '' }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="tg-{{ account.id }}">Telegram ID</label>
+        <input id="tg-{{ account.id }}" type="text" name="tg_id" value="{{ account.tg_id or '' }}" inputmode="numeric" style="width:100%">
+      </div>
+      <div class="field span-2">
+        <span class="label">Пароль</span>
+        <input type="password" name="password" placeholder="оставь пустым — не менять" minlength="12" autocomplete="new-password">
+        <span class="hint">От 12 символов. Забыл пароль — быстрее кнопка «Пароль» в списке: она сгенерирует новый.</span>
+      </div>
+      <div class="field span-2">
+        <span class="label">Доступ</span>
+        {# Скрытый ноль + чекбокс: снятая галочка приходит явным «нет». #}
+        <div class="check-row">
+          <input type="hidden" name="is_active" value="0">
+          <label><input type="checkbox" class="checkbox" name="is_active" value="1" {{ 'checked' if account.is_active else '' }}> может входить в панель</label>
+        </div>
+        <span class="hint">Выключение не удаляет запись: история действий человека остаётся в журнале.</span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" type="button" data-close-dialog>Отмена</button>
+      <button class="btn btn-primary" type="submit">Сохранить</button>
+    </div>
+  </form>
+</dialog>
+{% endfor %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Модалки открываются вручную: admin.js умеет только закрывать <dialog>. */
+document.addEventListener("click", function (event) {
+  var trigger = event.target.closest("[data-open-dialog]");
+  if (!trigger) return;
+  var dialog = document.getElementById(trigger.getAttribute("data-open-dialog"));
+  if (dialog) dialog.showModal();
+});
+</script>
+{% endblock %}
