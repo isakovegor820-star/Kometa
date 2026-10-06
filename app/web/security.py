@@ -292,12 +292,27 @@ def same_origin(request) -> bool:  # noqa: ANN001 - starlette Request
         return False
 
 
-def cookie_secure() -> bool:
-    """Ставить ли флаг Secure: только когда панель реально работает по HTTPS."""
+def cookie_secure(request=None) -> bool:  # noqa: ANN001 - starlette Request | None
+    """Ставить ли флаг ``Secure`` у cookie сессии.
+
+    Решаем по фактической схеме запроса, а не по настройкам: панель может
+    работать и по HTTPS (сертификат задан), и по HTTP за туннелем. Если флаг
+    поставить «на всякий случай», браузер перестанет отправлять cookie при
+    доступе по HTTP, и вход будет выглядеть сломанным.
+
+    Заголовку ``X-Forwarded-Proto`` верим только при ``ADMIN_TRUST_PROXY=true``:
+    иначе его подделает кто угодно.
+    """
+    if request is None:
+        return False
     settings = get_settings()
-    if settings.web_ssl_cert and settings.web_ssl_key:
+    if request.url.scheme == "https":
         return True
-    return settings.public_base_url.startswith("https://")
+    if settings.admin_trust_proxy:
+        forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+        if forwarded == "https":
+            return True
+    return False
 
 
 # ------------------------------------------------------------------ троттлинг

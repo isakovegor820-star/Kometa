@@ -116,7 +116,7 @@ async def login_submit(request: Request, password: str = Form(""), login: str = 
         ),
         httponly=True,
         samesite="lax",
-        secure=security.cookie_secure(),
+        secure=security.cookie_secure(request),
         max_age=settings.admin_session_hours * 3600,
     )
     return response

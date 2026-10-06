@@ -239,3 +239,23 @@ async def test_last_owner_cannot_be_demoted(client, session):
 
     await session.refresh(owner)
     assert owner.role == "owner"
+
+async def test_cookie_secure_only_on_https(session):
+    """Флаг Secure — по схеме запроса, а не «на всякий случай».
+
+    На проде панель работает по HTTPS (сертификат задан в .env), но владелец
+    ходит в неё и через SSH-туннель. Если ставить Secure всегда, cookie
+    перестаёт возвращаться по HTTP и вход выглядит сломанным.
+    """
+    app = await build_app(bot=None)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="https://testserver", follow_redirects=False) as secure:
+        response = await secure.post("/admin/login", data={"password": OWNER_PASSWORD})
+        assert "secure" in response.headers["set-cookie"].lower()
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver", follow_redirects=False) as plain:
+        response = await plain.post("/admin/login", data={"password": OWNER_PASSWORD})
+        assert "secure" not in response.headers["set-cookie"].lower()
+        # и сессия после этого работает: страница открывается, а не редиректит
+        assert (await plain.get("/admin")).status_code == 200
