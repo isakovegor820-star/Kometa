@@ -23,3 +23,8 @@ INFO:     Uvicorn running on http://0.0.0.0:8090 (Press CTRL+C to quit)
 2026-10-06 07:24:35,865 | INFO     | aiogram.dispatcher | Start polling
 2026-10-06 07:24:35,948 | INFO     | aiogram.dispatcher | Run polling for bot @kometavpnservise_bot id=8958117679 - 'Kometa VPN'
 2026-10-06 07:24:47,823 | WARNING  | app.web.payments | Пришёл вебхук Platega, но провайдер не настроен
+2026-10-06 07:26:35,174 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:28:35 UTC)" (scheduled at 2026-10-06 05:26:35.171103+00:00)
+2026-10-06 07:26:35,175 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:28:35 UTC)" executed successfully
+2026-10-06 07:28:33,944 | INFO     | aiogram.event | Update id=793051533 is handled. Duration 456 ms by bot id=8958117679
+2026-10-06 07:28:35,172 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:30:35 UTC)" (scheduled at 2026-10-06 05:28:35.171103+00:00)
+2026-10-06 07:28:35,172 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:30:35 UTC)" executed successfully
