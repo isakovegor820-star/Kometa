@@ -36,3 +36,15 @@ INFO:     Uvicorn running on http://0.0.0.0:8090 (Press CTRL+C to quit)
 2026-10-06 07:29:35,195 | INFO     | apscheduler.executors.default | Job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-06 05:34:35 UTC)" executed successfully
 2026-10-06 07:30:35,173 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:32:35 UTC)" (scheduled at 2026-10-06 05:30:35.171103+00:00)
 2026-10-06 07:30:35,174 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:32:35 UTC)" executed successfully
+2026-10-06 07:32:35,173 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:34:35 UTC)" (scheduled at 2026-10-06 05:32:35.171103+00:00)
+2026-10-06 07:32:35,174 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:34:35 UTC)" executed successfully
+2026-10-06 07:34:35,173 | INFO     | apscheduler.executors.default | Running job "job_expire_subscriptions (trigger: interval[0:10:00], next run at: 2026-10-06 05:44:35 UTC)" (scheduled at 2026-10-06 05:34:35.170958+00:00)
+2026-10-06 07:34:35,185 | INFO     | apscheduler.executors.default | Running job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" (scheduled at 2026-10-06 05:34:35.171072+00:00)
+2026-10-06 07:34:35,187 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:36:35 UTC)" (scheduled at 2026-10-06 05:34:35.171103+00:00)
+2026-10-06 07:34:35,188 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:36:35 UTC)" executed successfully
+2026-10-06 07:34:35,188 | INFO     | apscheduler.executors.default | Running job "job_autopay (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" (scheduled at 2026-10-06 05:34:35.171130+00:00)
+2026-10-06 07:34:35,188 | INFO     | apscheduler.executors.default | Job "job_autopay (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" executed successfully
+2026-10-06 07:34:35,188 | INFO     | apscheduler.executors.default | Running job "job_node_health (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" (scheduled at 2026-10-06 05:34:35.171152+00:00)
+2026-10-06 07:34:35,188 | INFO     | apscheduler.executors.default | Job "job_node_health (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" executed successfully
+2026-10-06 07:34:35,193 | INFO     | apscheduler.executors.default | Job "job_expire_subscriptions (trigger: interval[0:10:00], next run at: 2026-10-06 05:44:35 UTC)" executed successfully
+2026-10-06 07:34:35,193 | INFO     | apscheduler.executors.default | Job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" executed successfully
