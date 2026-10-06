@@ -19,6 +19,17 @@ settings = get_settings()
 
 @router.callback_query(F.data == "trial:start")
 async def cb_start_trial(call: CallbackQuery, session: AsyncSession, user: User) -> None:
+    if not settings.sales_enabled:
+        # Нода не готова — тестовый доступ тоже не выдаём, иначе клиент
+        # получит нерабочий конфиг и уйдёт.
+        await call.answer("Сервис готовится к запуску", show_alert=True)
+        await call.message.edit_text(
+            texts.SALES_CLOSED.format(note=settings.sales_closed_note),
+            reply_markup=keyboards.back_to_menu_kb(),
+            disable_web_page_preview=True,
+        )
+        return
+
     panel = registry.primary()
     try:
         sub, granted = await subscriptions.start_trial(session, user, panel)

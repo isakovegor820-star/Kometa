@@ -38,6 +38,10 @@ def _expires_text(dt) -> str:
 
 
 async def send_plans(target: Message | CallbackQuery, session: AsyncSession) -> None:
+    if not settings.sales_enabled:
+        await _show_closed(target)
+        return
+
     plans = await orders.list_plans(session)
     if not plans:
         text, markup = texts.WELCOME, keyboards.back_to_menu_kb()
@@ -49,6 +53,17 @@ async def send_plans(target: Message | CallbackQuery, session: AsyncSession) -> 
         await target.answer()
     else:
         await target.answer(text, reply_markup=markup)
+
+
+async def _show_closed(target: Message | CallbackQuery) -> None:
+    """Заглушка на время подготовки: деньги не принимаем."""
+    text = texts.SALES_CLOSED.format(note=settings.sales_closed_note)
+    markup = keyboards.back_to_menu_kb()
+    if isinstance(target, CallbackQuery):
+        await target.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        await target.answer()
+    else:
+        await target.answer(text, reply_markup=markup, disable_web_page_preview=True)
 
 
 @router.callback_query(F.data == "plans")
@@ -93,6 +108,13 @@ async def cb_plan_card(call: CallbackQuery, session: AsyncSession) -> None:
 
 @router.callback_query(F.data.startswith("pay:"))
 async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None:
+    if not settings.sales_enabled:
+        # Защита от старых кнопок: даже если у клиента осталось сообщение
+        # с тарифом, деньги не принимаем.
+        await call.answer("Продажи ещё не открыты", show_alert=True)
+        await _show_closed(call)
+        return
+
     _, plan_id_raw, provider_code = call.data.split(":")
     plan = await orders.get_plan(session, int(plan_id_raw))
     provider = payments.get(provider_code)
