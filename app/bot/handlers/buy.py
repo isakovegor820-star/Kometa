@@ -273,7 +273,7 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
     link = subscriptions.subscription_link(sub.subscription_token)
     await bot.send_message(
         user.tg_id,
-        texts.ORDER_PAID.format(expires=_expires_text(sub.expires_at), days=sub.days_left),
+        texts.ORDER_PAID.format(expires=_expires_text(sub.expires_at), days=sub.days_left, link=link),
         reply_markup=keyboards.connect_kb(link),
         disable_web_page_preview=True,
     )

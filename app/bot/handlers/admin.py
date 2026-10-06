@@ -112,7 +112,14 @@ async def cb_confirm_order(call: CallbackQuery, session: AsyncSession, bot: Bot)
 
     if user is not None and sub is not None and not already:
         expires = sub.expires_at.strftime("%d.%m.%Y %H:%M") if sub.expires_at else "—"
-        await bot.send_message(user.tg_id, texts.ORDER_PAID.format(expires=expires, days=sub.days_left))
+        await bot.send_message(
+            user.tg_id,
+            texts.ORDER_PAID.format(
+                expires=expires,
+                days=sub.days_left,
+                link=subscriptions.subscription_link(sub.subscription_token),
+            ),
+        )
         await bot.send_message(
             user.tg_id,
             texts.SUBSCRIPTION_LINK_HINT.format(link=subscriptions.subscription_link(sub.subscription_token)),

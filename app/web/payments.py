@@ -109,7 +109,7 @@ async def _notify_paid(bot: Bot, user: User, sub) -> None:  # noqa: ANN001 - Sub
     try:
         await bot.send_message(
             user.tg_id,
-            texts.ORDER_PAID.format(expires=expires, days=sub.days_left),
+            texts.ORDER_PAID.format(expires=expires, days=sub.days_left, link=link),
             reply_markup=keyboards.connect_kb(link),
             disable_web_page_preview=True,
         )
