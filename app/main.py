@@ -27,7 +27,7 @@ from app.panels.base import PanelError
 from app.panels.registry import registry
 from app.payments.base import PaymentError, PaymentStatus
 from app.payments.registry import payments
-from app.services import notifications, orders, subscriptions
+from app.services import notifications, orders, subscriptions, watchdog
 from app.web.sub import build_app
 
 settings = get_settings()
@@ -38,7 +38,9 @@ logger = logging.getLogger("kometa")
 async def job_expire_subscriptions(bot: Bot) -> None:
     async with SessionMaker() as session:
         try:
-            changed = await subscriptions.disable_expired(session, registry.primary())
+            changed = await subscriptions.disable_expired(
+                session, await subscriptions.all_user_panels(session)
+            )
         except PanelError as exc:
             logger.error("Не удалось отключить истёкшие подписки: %s", exc)
             return
@@ -46,6 +48,18 @@ async def job_expire_subscriptions(bot: Bot) -> None:
         if changed:
             sent = await notifications.notify_expired(bot, session, changed)
             logger.info("Отключено подписок: %s, уведомлено: %s", len(changed), sent)
+
+
+async def job_watch_clients(bot: Bot) -> None:
+    """Суточный контроль клиентов: аномалии трафика и «вечные» доступы."""
+    if not settings.watch_enabled:
+        return
+    report = await watchdog.run_watch(registry.primary())
+    if report is None:
+        logger.warning("Контроль клиентов: отчёт не собран (панель молчит)")
+        return
+    logger.info("Контроль клиентов: клиентов %s, аномалий %s", report.total, report.alert_count)
+    await notifications.notify_admins(bot, watchdog.format_report(report))
 
 
 async def job_reminders(bot: Bot) -> None:
@@ -105,23 +119,53 @@ async def job_autopay(bot: Bot) -> None:
 
 
 async def job_node_health(bot: Bot) -> None:
-    """Следим за панелями и сообщаем админам об изменении состояния."""
+    """Следим за всеми панелями (странами) и сообщаем о смене состояния.
+
+    Проверяем не только основную панель: если упала нода Токио, клиенты Дальнего
+    Востока остаются без локации, и об этом нужно узнать сразу, а не от них.
+
+    Проверка идёт через сервис алертов: он пишет ``last_check_at``/``last_check_ok``
+    у нод и заводит (или закрывает) алерты в панели. Telegram остаётся для
+    мгновенного сигнала, но проблема больше не теряется, если сообщение
+    прочитали и забыли.
+    """
+    from app.db.models import Node
+    from app.services import alerts as alerts_service
+
     state: dict[str, bool] = job_node_health.__dict__.setdefault("state", {})
-    for panel in [registry.primary()]:
+    async with SessionMaker() as session:
+        pairs: list[tuple[Node | None, object]] = [(None, registry.primary())]
+        nodes = list(
+            (
+                await session.scalars(
+                    select(Node).where(Node.is_active.is_(True)).order_by(Node.priority, Node.id)
+                )
+            ).all()
+        )
+        pairs.extend((node, registry.for_node(node)) for node in nodes)
         try:
-            ok = await panel.health()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Панель %s: ошибка проверки — %s", panel.name, exc)
-            ok = False
-        previous = state.get(panel.name)
-        if previous is not None and previous != ok:
+            results = await alerts_service.check_nodes(session, pairs)  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001 - фоновая задача не должна падать молча
+            logger.exception("Проверка нод упала: %s", exc)
+            await session.rollback()
+            return
+        await session.commit()
+
+    for entry in results:
+        label = entry["title"]
+        ok = bool(entry["ok"])
+        previous = state.get(label)
+        # Сообщаем о смене состояния, а также если проблема обнаружена на первой
+        # проверке после запуска: молчать о мёртвой ноде только потому, что бот
+        # перезапустился минуту назад, — плохая идея.
+        if (previous is not None and previous != ok) or (previous is None and not ok):
             text = (
-                f"✅ Нода <b>{panel.name}</b> снова отвечает."
+                f"✅ Нода <b>{label}</b> снова отвечает."
                 if ok
-                else f"⚠️ Нода <b>{panel.name}</b> недоступна — проверь сервер и панель."
+                else f"⚠️ Нода <b>{label}</b> недоступна — проверь сервер и панель."
             )
             await notifications.notify_admins(bot, text)
-        state[panel.name] = ok
+        state[label] = ok
 
 
 # ---------------------------------------------------------------------- запуск
@@ -132,19 +176,33 @@ def setup_logging() -> None:
     )
 
 
+def _uvicorn_kwargs() -> dict[str, object]:
+    """Параметры запуска веб-слоя, включая TLS, если заданы сертификаты.
+
+    Клиенты (Happ, v2rayNG) отказываются добавлять подписку по http, поэтому
+    на боевом сервере веб-слой слушает https с сертификатом Let's Encrypt.
+    """
+    kwargs: dict[str, object] = {
+        "host": settings.web_host,
+        "port": settings.web_port,
+        "log_level": settings.log_level.lower(),
+        "access_log": False,
+    }
+    if settings.web_ssl_cert and settings.web_ssl_key:
+        kwargs["ssl_certfile"] = settings.web_ssl_cert
+        kwargs["ssl_keyfile"] = settings.web_ssl_key
+    return kwargs
+
+
 async def run_web(bot: Bot) -> None:
     app = await build_app(bot)
-    config = uvicorn.Config(
-        app,
-        host=settings.web_host,
-        port=settings.web_port,
-        log_level=settings.log_level.lower(),
-        access_log=False,
-    )
+    config = uvicorn.Config(app, **_uvicorn_kwargs())
     server = uvicorn.Server(config)
-    logger.info("Подписки: http://%s:%s/sub/<token>", settings.web_host, settings.web_port)
+    scheme = "https" if (settings.web_ssl_cert and settings.web_ssl_key) else "http"
+    logger.info("Подписки: %s://%s:%s/sub/<token>", scheme, settings.web_host, settings.web_port)
     logger.info(
-        "Админ-панель: http://%s:%s/admin %s",
+        "Админ-панель: %s://%s:%s/admin %s",
+        scheme,
         settings.web_host,
         settings.web_port,
         "" if settings.admin_panel_password else "(ВЫКЛЮЧЕНА: задай ADMIN_PANEL_PASSWORD)",
@@ -188,6 +246,15 @@ async def main() -> None:
         id="autopay",
     )
     scheduler.add_job(job_node_health, "interval", minutes=5, args=[bot], id="node_health")
+    # Сторож аномалий: раз в сутки (09:00 МСК) сверяем клиентов и трафик.
+    scheduler.add_job(
+        job_watch_clients,
+        "cron",
+        hour=6,
+        minute=0,
+        args=[bot],
+        id="watch_clients",
+    )
     scheduler.start()
 
     web_task = asyncio.create_task(run_web(bot))
