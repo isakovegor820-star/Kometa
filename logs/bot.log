@@ -1,50 +1,24 @@
-2026-10-06 07:24:35,166 | INFO     | kometa | База готова: sqlite+aiosqlite:////Users/egor/Downloads/VPN servise/data/kometa.db
-2026-10-06 07:24:35,170 | INFO     | kometa | Способы оплаты: stars
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Added job "job_expire_subscriptions" to job store "default"
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Added job "job_reminders" to job store "default"
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Added job "job_expire_orders" to job store "default"
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Added job "job_check_crypto" to job store "default"
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Added job "job_autopay" to job store "default"
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Added job "job_node_health" to job store "default"
-2026-10-06 07:24:35,171 | INFO     | apscheduler.scheduler | Scheduler started
-2026-10-06 07:24:35,206 | INFO     | kometa | Подписки: http://0.0.0.0:8090/sub/<token>
-2026-10-06 07:24:35,206 | INFO     | kometa | Админ-панель: http://0.0.0.0:8090/admin 
-INFO:     Started server process [40287]
+2026-10-06 07:39:49,972 | INFO     | kometa | База готова: sqlite+aiosqlite:////Users/egor/Downloads/VPN servise/data/kometa.db
+2026-10-06 07:39:49,976 | INFO     | kometa | Способы оплаты: stars
+2026-10-06 07:39:49,977 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-06 07:39:49,977 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-06 07:39:49,977 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-06 07:39:49,977 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-06 07:39:49,977 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-06 07:39:49,977 | INFO     | apscheduler.scheduler | Adding job tentatively -- it will be properly scheduled when the scheduler starts
+2026-10-06 07:39:49,978 | INFO     | apscheduler.scheduler | Added job "job_expire_subscriptions" to job store "default"
+2026-10-06 07:39:49,978 | INFO     | apscheduler.scheduler | Added job "job_reminders" to job store "default"
+2026-10-06 07:39:49,978 | INFO     | apscheduler.scheduler | Added job "job_expire_orders" to job store "default"
+2026-10-06 07:39:49,978 | INFO     | apscheduler.scheduler | Added job "job_check_crypto" to job store "default"
+2026-10-06 07:39:49,978 | INFO     | apscheduler.scheduler | Added job "job_autopay" to job store "default"
+2026-10-06 07:39:49,978 | INFO     | apscheduler.scheduler | Added job "job_node_health" to job store "default"
+2026-10-06 07:39:49,978 | INFO     | apscheduler.scheduler | Scheduler started
+2026-10-06 07:39:50,008 | INFO     | kometa | Подписки: http://0.0.0.0:8090/sub/<token>
+2026-10-06 07:39:50,008 | INFO     | kometa | Админ-панель: http://0.0.0.0:8090/admin 
+INFO:     Started server process [41118]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8090 (Press CTRL+C to quit)
-2026-10-06 07:24:35,659 | INFO     | kometa | Бот запущен: @kometavpnservise_bot
-2026-10-06 07:24:35,865 | INFO     | aiogram.dispatcher | Start polling
-2026-10-06 07:24:35,948 | INFO     | aiogram.dispatcher | Run polling for bot @kometavpnservise_bot id=8958117679 - 'Kometa VPN'
-2026-10-06 07:24:47,823 | WARNING  | app.web.payments | Пришёл вебхук Platega, но провайдер не настроен
-2026-10-06 07:26:35,174 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:28:35 UTC)" (scheduled at 2026-10-06 05:26:35.171103+00:00)
-2026-10-06 07:26:35,175 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:28:35 UTC)" executed successfully
-2026-10-06 07:28:33,944 | INFO     | aiogram.event | Update id=793051533 is handled. Duration 456 ms by bot id=8958117679
-2026-10-06 07:28:35,172 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:30:35 UTC)" (scheduled at 2026-10-06 05:28:35.171103+00:00)
-2026-10-06 07:28:35,172 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:30:35 UTC)" executed successfully
-2026-10-06 07:29:35,172 | INFO     | apscheduler.executors.default | Running job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-06 05:34:35 UTC)" (scheduled at 2026-10-06 05:29:35.171072+00:00)
-2026-10-06 07:29:35,186 | INFO     | apscheduler.executors.default | Running job "job_autopay (trigger: interval[0:05:00], next run at: 2026-10-06 05:34:35 UTC)" (scheduled at 2026-10-06 05:29:35.171130+00:00)
-2026-10-06 07:29:35,190 | INFO     | apscheduler.executors.default | Job "job_autopay (trigger: interval[0:05:00], next run at: 2026-10-06 05:34:35 UTC)" executed successfully
-2026-10-06 07:29:35,191 | INFO     | apscheduler.executors.default | Running job "job_node_health (trigger: interval[0:05:00], next run at: 2026-10-06 05:34:35 UTC)" (scheduled at 2026-10-06 05:29:35.171152+00:00)
-2026-10-06 07:29:35,191 | INFO     | apscheduler.executors.default | Job "job_node_health (trigger: interval[0:05:00], next run at: 2026-10-06 05:34:35 UTC)" executed successfully
-2026-10-06 07:29:35,195 | INFO     | apscheduler.executors.default | Job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-06 05:34:35 UTC)" executed successfully
-2026-10-06 07:30:35,173 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:32:35 UTC)" (scheduled at 2026-10-06 05:30:35.171103+00:00)
-2026-10-06 07:30:35,174 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:32:35 UTC)" executed successfully
-2026-10-06 07:32:35,173 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:34:35 UTC)" (scheduled at 2026-10-06 05:32:35.171103+00:00)
-2026-10-06 07:32:35,174 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:34:35 UTC)" executed successfully
-2026-10-06 07:34:35,173 | INFO     | apscheduler.executors.default | Running job "job_expire_subscriptions (trigger: interval[0:10:00], next run at: 2026-10-06 05:44:35 UTC)" (scheduled at 2026-10-06 05:34:35.170958+00:00)
-2026-10-06 07:34:35,185 | INFO     | apscheduler.executors.default | Running job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" (scheduled at 2026-10-06 05:34:35.171072+00:00)
-2026-10-06 07:34:35,187 | INFO     | apscheduler.executors.default | Running job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:36:35 UTC)" (scheduled at 2026-10-06 05:34:35.171103+00:00)
-2026-10-06 07:34:35,188 | INFO     | apscheduler.executors.default | Job "job_check_crypto (trigger: interval[0:02:00], next run at: 2026-10-06 05:36:35 UTC)" executed successfully
-2026-10-06 07:34:35,188 | INFO     | apscheduler.executors.default | Running job "job_autopay (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" (scheduled at 2026-10-06 05:34:35.171130+00:00)
-2026-10-06 07:34:35,188 | INFO     | apscheduler.executors.default | Job "job_autopay (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" executed successfully
-2026-10-06 07:34:35,188 | INFO     | apscheduler.executors.default | Running job "job_node_health (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" (scheduled at 2026-10-06 05:34:35.171152+00:00)
-2026-10-06 07:34:35,188 | INFO     | apscheduler.executors.default | Job "job_node_health (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" executed successfully
-2026-10-06 07:34:35,193 | INFO     | apscheduler.executors.default | Job "job_expire_subscriptions (trigger: interval[0:10:00], next run at: 2026-10-06 05:44:35 UTC)" executed successfully
-2026-10-06 07:34:35,193 | INFO     | apscheduler.executors.default | Job "job_expire_orders (trigger: interval[0:05:00], next run at: 2026-10-06 05:39:35 UTC)" executed successfully
+2026-10-06 07:39:50,470 | INFO     | kometa | Бот запущен: @kometavpnservise_bot
+2026-10-06 07:39:50,676 | INFO     | aiogram.dispatcher | Start polling
+2026-10-06 07:39:50,767 | INFO     | aiogram.dispatcher | Run polling for bot @kometavpnservise_bot id=8958117679 - 'Kometa VPN'

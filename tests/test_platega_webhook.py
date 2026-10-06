@@ -190,6 +190,38 @@ async def test_invalid_json_is_rejected(client, session, panel):
     assert response.status_code == 400
 
 
+async def test_chargeback_disables_subscription(client, session, panel, monkeypatch):
+    """Возврат денег (CHARGEBACKED) должен отключать доступ."""
+    user, order = await make_order(session, 9409)
+    provider = payments.get("platega_sbp")
+    stub_api_check(monkeypatch, provider, PaymentStatus.PAID)
+
+    # сначала обычная оплата
+    await client.post("/payments/platega/webhook", content=webhook_body(order.id), headers=headers())
+    await session.refresh(order)
+    assert order.status == "paid"
+    sub = await subscriptions.get_subscription(session, user.id)
+    assert sub.status == "active"
+
+    # затем чарджбэк
+    response = await client.post(
+        "/payments/platega/webhook", content=webhook_body(order.id, status="CHARGEBACKED"), headers=headers()
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "refunded"
+    await session.refresh(sub)
+    assert sub.status == "blocked"
+
+
+async def test_chargeback_status_maps_to_refunded():
+    """Статус CHARGEBACKED из документации Platega разбирается как возврат."""
+    provider = payments.get("platega_sbp")
+    _, status, _ = provider.parse_callback({"id": "x", "status": "CHARGEBACKED", "payload": "order:1"})
+
+    assert status is PaymentStatus.REFUNDED
+
+
 async def test_order_found_by_transaction_id_when_payload_missing(client, session, panel, monkeypatch):
     """В примере вебхука Platega поля payload нет — заказ ищем по id транзакции.
 

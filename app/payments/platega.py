@@ -86,6 +86,11 @@ _STATUS_MAP: dict[str, PaymentStatus] = {
     "canceled": PaymentStatus.CANCELED,
     "cancelled": PaymentStatus.CANCELED,  # встречается в англоязычных ответах
     "failed": PaymentStatus.CANCELED,
+    # Возврат денег плательщику: платёж был успешным, но деньги ушли обратно.
+    # Обрабатываем отдельным статусом — по нему отключаем доступ.
+    "chargebacked": PaymentStatus.REFUNDED,
+    "chargeback": PaymentStatus.REFUNDED,
+    "refunded": PaymentStatus.REFUNDED,
 }
 
 #: Подсказка на ошибку «No available requisites»: у Platega P2P-реквизиты

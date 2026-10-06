@@ -17,6 +17,8 @@ class PaymentStatus(str, Enum):
     PAID = "paid"
     CANCELED = "canceled"
     EXPIRED = "expired"
+    #: Платёж был оплачен, но деньги вернули (чарджбэк по карте). Доступ надо отключить.
+    REFUNDED = "refunded"
 
 
 @dataclass(slots=True)

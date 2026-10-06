@@ -221,6 +221,55 @@ async def wata_webhook(request: Request) -> JSONResponse:
 
 
 # ------------------------------------------------------------------- Platega
+async def _find_order(session, order_id: int | None, transaction_id: str) -> "Order | None":  # noqa: ANN001
+    """Найти заказ по payload из колбэка или по id транзакции.
+
+    Platega может не вернуть payload в колбэке — тогда опираемся на id транзакции,
+    который мы сами и сгенерировали при создании платежа.
+    """
+    from sqlalchemy import select
+
+    order = await session.get(Order, order_id) if order_id else None
+    if order is None and transaction_id:
+        order = await session.scalar(select(Order).where(Order.external_id == transaction_id))
+        if order is not None:
+            logger.info("Заказ #%s найден по id транзакции Platega", order.id)
+    return order
+
+
+async def _revoke_after_refund(request: Request, order_id: int | None, transaction_id: str, raw: dict) -> None:
+    """Отключить доступ после возврата денег (чарджбэк по карте)."""
+    from app.db.session import SessionMaker
+
+    bot: Bot | None = getattr(request.app.state, "bot", None)
+    async with SessionMaker() as session:
+        order = await _find_order(session, order_id, transaction_id)
+        if order is None:
+            logger.warning("Возврат Platega: заказ не найден (payload=%s, id=%s)", order_id, transaction_id)
+            return
+
+        user = await session.get(User, order.user_id)
+        sub = await subscriptions.get_subscription(session, order.user_id) if user else None
+        if user is not None and sub is not None:
+            await subscriptions.set_enabled(sub, registry.primary(), False)
+            sub.status = "blocked"
+        await events.log_event(
+            session,
+            events.ORDER_REFUNDED,
+            user_id=order.user_id,
+            payload={"order_id": order.id, "source": "platega_webhook", "raw": raw},
+        )
+        await session.commit()
+
+        if bot is not None and user is not None:
+            await notifications.notify_admins(
+                bot,
+                f"↩️ <b>Возврат платежа (Platega)</b>\nЗаказ #{order.id}, {order.amount_rub} ₽\n"
+                f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>)\n"
+                "Доступ отключён.",
+            )
+
+
 @router.post("/platega/webhook")
 async def platega_webhook(request: Request) -> JSONResponse:
     """Уведомления Platega.io: оплата или отмена.
@@ -250,6 +299,11 @@ async def platega_webhook(request: Request) -> JSONResponse:
 
     order_id, status, raw = provider.parse_callback(body)
     transaction_id = str(raw.get("id") or "")
+
+    if status is PaymentStatus.REFUNDED:
+        # Чарджбэк: платёж был успешным, но деньги вернули. Отключаем доступ.
+        await _revoke_after_refund(request, order_id, transaction_id, raw)
+        return JSONResponse({"ok": True, "status": status.value})
 
     if status is not PaymentStatus.PAID:
         logger.info("Platega: статус %s по заказу %s (оплаты нет)", status.value, order_id)

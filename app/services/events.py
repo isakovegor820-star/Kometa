@@ -15,6 +15,8 @@ TRIAL_STARTED = "trial_started"
 ORDER_CREATED = "order_created"
 ORDER_PAID = "order_paid"
 ORDER_CANCELED = "order_canceled"
+#: Деньги вернули плательщику (чарджбэк) — доступ отключён.
+ORDER_REFUNDED = "order_refunded"
 SUBSCRIPTION_EXPIRED = "subscription_expired"
 SUBSCRIPTION_EXTENDED = "subscription_extended"
 REFERRAL_REWARDED = "referral_rewarded"
