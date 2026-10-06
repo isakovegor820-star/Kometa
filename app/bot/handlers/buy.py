@@ -270,13 +270,12 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
     if already or sub is None:
         return
 
+    link = subscriptions.subscription_link(sub.subscription_token)
     await bot.send_message(
         user.tg_id,
         texts.ORDER_PAID.format(expires=_expires_text(sub.expires_at), days=sub.days_left),
-    )
-    await bot.send_message(
-        user.tg_id,
-        texts.SUBSCRIPTION_LINK_HINT.format(link=subscriptions.subscription_link(sub.subscription_token)),
+        reply_markup=keyboards.connect_kb(link),
+        disable_web_page_preview=True,
     )
     plan = await orders.get_plan(session, order.plan_id) if order.plan_id else None
     await notifications.notify_admins(

@@ -320,9 +320,14 @@ async def _notify_user(bot: Bot, user: User, sub) -> None:  # noqa: ANN001 - Sub
             f"✅ Оплата получена! Подписка активна до <b>{expires}</b> ({sub.days_left} дн.).",
         )
         if with_link:
+            from app.bot import keyboards
+
+            link = subs_service.subscription_link(with_link)
             await bot.send_message(
                 user.tg_id,
-                texts.SUBSCRIPTION_LINK_HINT.format(link=subs_service.subscription_link(with_link)),
+                texts.SUBSCRIPTION_LINK_HINT.format(link=link),
+                reply_markup=keyboards.connect_kb(link),
+                disable_web_page_preview=True,
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Не смог уведомить пользователя %s: %s", user.tg_id, exc)

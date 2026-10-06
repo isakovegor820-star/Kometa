@@ -46,11 +46,14 @@ async def cb_start_trial(call: CallbackQuery, session: AsyncSession, user: User)
         await call.answer()
         return
 
+    link = subscriptions.subscription_link(sub.subscription_token)
     await call.message.edit_text(
         texts.TRIAL_STARTED.format(days=settings.trial_days, gb=settings.trial_gb),
         reply_markup=keyboards.subscription_kb(has_panel_user=bool(sub.panel_user_uuid)),
     )
     await call.message.answer(
-        texts.SUBSCRIPTION_LINK_HINT.format(link=subscriptions.subscription_link(sub.subscription_token))
+        texts.SUBSCRIPTION_LINK_HINT.format(link=link),
+        reply_markup=keyboards.connect_kb(link),
+        disable_web_page_preview=True,
     )
     await call.answer("Пробный доступ выдан 🎉")

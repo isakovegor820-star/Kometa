@@ -62,11 +62,29 @@ async def cb_link(call: CallbackQuery, session: AsyncSession, user: User) -> Non
     if sub is None:
         await call.answer("Сначала получи доступ", show_alert=True)
         return
+    link = subscriptions.subscription_link(sub.subscription_token)
     await call.message.answer(
-        texts.SUBSCRIPTION_LINK_HINT.format(link=subscriptions.subscription_link(sub.subscription_token)),
-        reply_markup=keyboards.back_to_menu_kb(),
+        texts.SUBSCRIPTION_LINK_HINT.format(link=link),
+        reply_markup=keyboards.connect_kb(link),
+        disable_web_page_preview=True,
     )
     await call.answer()
+
+
+@router.callback_query(F.data == "sub:copy")
+async def cb_copy_link(call: CallbackQuery, session: AsyncSession, user: User) -> None:
+    """Ссылка отдельным сообщением — тапом по <code> копируется целиком."""
+    sub = await subscriptions.get_subscription(session, user.id)
+    if sub is None:
+        await call.answer("Сначала получи доступ", show_alert=True)
+        return
+    link = subscriptions.subscription_link(sub.subscription_token)
+    await call.message.answer(
+        texts.SUBSCRIPTION_COPY.format(link=link),
+        reply_markup=keyboards.connect_kb(link),
+        disable_web_page_preview=True,
+    )
+    await call.answer("Скопировано — вставь в приложении")
 
 
 @router.callback_query(F.data == "sub:refresh")

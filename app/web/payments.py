@@ -102,14 +102,16 @@ async def cryptobot_webhook(request: Request) -> JSONResponse:
 
 
 async def _notify_paid(bot: Bot, user: User, sub) -> None:  # noqa: ANN001 - Subscription
+    from app.bot import keyboards
+
     expires = sub.expires_at.strftime("%d.%m.%Y %H:%M") if sub.expires_at else "—"
+    link = subscriptions.subscription_link(sub.subscription_token)
     try:
         await bot.send_message(
-            user.tg_id, f"✅ Оплата получена! Подписка активна до <b>{expires}</b> ({sub.days_left} дн.)."
-        )
-        await bot.send_message(
             user.tg_id,
-            f"🔗 Ссылка-подписка:\n<code>{subscriptions.subscription_link(sub.subscription_token)}</code>",
+            texts.ORDER_PAID.format(expires=expires, days=sub.days_left),
+            reply_markup=keyboards.connect_kb(link),
+            disable_web_page_preview=True,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Не смог уведомить пользователя %s: %s", user.tg_id, exc)

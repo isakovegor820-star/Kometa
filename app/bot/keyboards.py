@@ -97,6 +97,28 @@ def stars_order_kb(order_id: int, pay_url: str, reseller_url: str = "", stars: i
     return kb.as_markup()
 
 
+def connect_kb(sub_url: str) -> InlineKeyboardMarkup:
+    """Кнопки быстрого подключения: одно нажатие — профиль уже в приложении.
+
+    Диплинки взяты из документации клиентов (Happ, v2rayNG, Hiddify).
+    Если система не открывает схему приложения, остаётся кнопка «Скопировать».
+    """
+    from urllib.parse import quote
+
+    kb = InlineKeyboardBuilder()
+    if sub_url:
+        kb.button(text="🟢 Подключить в Happ", url=f"happ://add/{sub_url}")
+        kb.button(
+            text="🔵 Подключить в v2rayNG",
+            url=f"v2rayng://install-sub/?url={quote(sub_url, safe='')}%23Kometa",
+        )
+        kb.button(text="🟣 Подключить в Hiddify", url=f"hiddify://install-config/?url={sub_url}")
+        kb.button(text="📋 Скопировать ссылку", callback_data="sub:copy")
+    kb.button(text="⬅️ В меню", callback_data="menu:main")
+    kb.adjust(1, 1, 1, 1, 1)
+    return kb.as_markup()
+
+
 def subscription_kb(has_panel_user: bool) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🔗 Ссылка-подписка", callback_data="sub:link")
