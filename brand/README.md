@@ -21,6 +21,10 @@
 | [avatar/kometa-avatar.svg](avatar/kometa-avatar.svg) | векторный исходник (правится в Figma/Illustrator) |
 | [avatar/preview.png](avatar/preview.png) | лист превью: размеры, палитра, мокап списка чатов |
 | [avatar/alternates/](avatar/alternates) | два альтернативных концепта (см. ниже) |
+| [banner/kometa-welcome-1280x720.png](banner/kometa-welcome-1280x720.png) | **баннер приветствия** — фото в первом сообщении бота |
+| [banner/kometa-intro.mp4](banner/kometa-intro.mp4) | он же анимацией 6 с (первое сообщение / закреп) |
+| [banner/kometa-intro-storyboard.png](banner/kometa-intro-storyboard.png) | раскадровка анимации по кадрам |
+| [banner/kometa-channel-cover-1280x720.png](banner/kometa-channel-cover-1280x720.png) | обложка канала |
 
 ## Как поставить
 
@@ -43,6 +47,26 @@
 
 Градиент знака: `#2BC57F → #45E698 → #8FF8AA → #DCFF5C`.
 Фон: радиальный `#1AAB75 → #0E7350 → #06432F → #02231A` (центр 34 %/26 %).
+
+## Баннеры и анимация
+
+Баннер приветствия (`banner/kometa-welcome-1280x720.png`) — то, что бот отправляет первым
+сообщением: картинка + подпись. Анимация (`banner/kometa-intro.mp4`, 6 с, 1920×1080, 30 fps,
+H.264) — тот же макет, где комета-стрела влетает слева-снизу, а текст и чипы появляются
+по очереди; дальше свечение «дышит». Отправляется как `sendAnimation` — Telegram проигрывает
+её сам и зацикливает.
+
+Анимацию рендерит HyperFrames внутри Open Design: исходник — HTML+GSAP-таймлайн
+(`source/comet-intro.html`), растеризация в Chromium и кодирование в MP4 там же.
+
+```bash
+# положить композицию в проект Open Design и отрендерить
+cp brand/source/comet-intro.html "$OD_DATA/projects/kometa-brand/.hyperframes-cache/comet-intro/index.html"
+OD="node \"/Applications/Open Design.app/Contents/Resources/app/prebundled/daemon/daemon-cli.mjs\""
+$OD media scaffold --composition-dir .hyperframes-cache/comet-intro --project kometa-brand
+$OD media generate --surface video --model hyperframes-html --project kometa-brand \
+  --composition-dir .hyperframes-cache/comet-intro --output kometa-intro.mp4
+```
 
 ## Альтернативы
 

@@ -1,0 +1,444 @@
+           On Russia’s Early Introduction of QUIC SNI Censorship
+          Nico Heitmann                             Niklas Niere                   Felix Graf Lange                 Juraj Somorovsky
+        Paderborn University                    Paderborn University               Paderborn University             Paderborn University
+
+Abstract                                                                       connections by dropping packets—in-path censorship—is possible.
+Governments around the world limit free access to information                  As of now, QUIC SNI censorship through packet dropping has
+through Internet censorship. With the rising adoption of the QUIC              been reported for China [46] and Russia [14] and hypothesized
+protocol, these censors have been forced to evolve their systems.              for Ethiopia, Kazakhstan, Myanmar, and Pakistan [44]. Non-SNI
+Russia introduced sweeping changes to its censorship after its full-           QUIC censorship has been reported for Iran, India, Russia, and
+scale invasion of Ukraine, including completely blocking inter-                Uganda by Elmenhorst et al. [15, 16].
+national QUIC connections. However, after this broad filter was
+                                                                                  Censorship in Russia. Russia has a long history of decentralized
+identified in 2022, Russian QUIC censorship received little attention:
+                                                                               Internet censorship [33], and discussed censorship strategies with
+The current state of QUIC censorship by TSPU devices is largely
+                                                                               China since 2016 [5]. In 2021, Russia centralized its Internet censor-
+unknown. In this paper, we provide a timeline of Russian QUIC cen-
+                                                                               ship efforts by deploying “TSPU devices” in Internet Service Pro-
+sorship and detail its current state. We identify that Russian TSPU
+                                                                               viders (ISPs). Russia has severely tightened its Internet censorship
+devices switched to SNI-dependent QUIC censorship on a large scale
+                                                                               since beginning its full-scale invasion of Ukraine [22], obstructing
+between May 2022 and July 2023, a fact that went largely unnoticed
+                                                                               free access to information for people in Russia. In 2022, forum users
+for three years. While the GFW was previously thought to be the
+                                                                               reported that Russia began broad censorship of QUIC [37]. This was
+first censor with broad SNI-dependent QUIC censorship, we high-
+                                                                               later confirmed by analyses by Elmenhorst [15] and Xue et al. [45].
+light that Russian TSPU devices broadly adopted SNI-dependent
+                                                                               While Elmenhorst et al. also described SNI-specific censorship for
+QUIC censorship at least nine months before the GFW. We consider
+                                                                               Russia’s domestic traffic [16], this behavior was only anecdotally
+this an indicator of the TSPU devices’ flexibility and of Russia’s
+                                                                               described for its international traffic [12].
+willingness to invest in strict and up-to-date censorship.
+                                                                                  Research Gap. During regular censorship tests in Russia, we
+Keywords                                                                       observed that Russia has disabled its broad QUIC filter and instead
+Censorship, QUIC, SNI, Russia, TSPU                                            censors QUIC traffic based on the domain in the SNI extension.
+                                                                               Afterward, we detected anecdotal evidence of this switch in Russian-
+1    Introduction                                                              language forums. Despite anecdotal evidence, we could neither
+                                                                               discern an existing timeline of Russia’s QUIC censorship nor a
+Internet censorship affects more than half of all Internet users
+                                                                               description of its current QUIC censorship behavior.
+around the world [18]. Countries such as Russia [34, 45] obstruct
+their citizens’ free access to the Internet by analyzing and selectively          Contributions. To close the aforementioned research gap, we
+blocking protocols such as IP [25], DNS [20, 30], HTTP [8, 20],                analyzed Russia’s international QUIC SNI censorship—which has
+and TLS [10, 29, 45]. Newly developed protocols are often soon                 previously only been discussed on Russian-language forums. We
+targeted by censors in an effort to maintain control [9, 23, 28].              provide a detailed timeline of Russia’s QUIC censorship in Section 2
+Potentially replacing HTTP/2 over TLS, HTTP/3 over QUIC [6] is                 and portray its current state in Section 3. Through our analyses, we
+already adopted widely [19]. As such, QUIC traffic is also targeted            make the following findings about Russia’s international QUIC
+by censors [15, 16, 44, 46].                                                   SNI censorship:
+   QUIC Censorship. QUIC [21, 39], a transport protocol based on                   • It started between May 2022 and July 2023—at least 9 months
+TLS 1.3 [35], provides confidentiality and authenticity—most no-                     before the first reports of China’s GFW targeting QUIC [46].
+tably to HTTP/3 traffic. Although QUIC prevents censors from                       • It was discussed in isolation but went unnoticed by the broader
+decrypting and analyzing application traffic, the initial QUIC hand-                 community.
+shake messages are protected only by keys derived from public                      • Its blocklist closely matches Russia’s TLS censorship.
+information, allowing censors to analyze their content. As the hand-               • It employs packet dropping and residual censorship.
+shake contains the website’s domain name in the Server Name                        • It exhibits domain-specific behavior.
+Indication (SNI) extension [1], censors can effectively determine
+its destination. A censor’s options for tearing down QUIC con-                 2     Timeline of QUIC Censorship in Russia
+nections by injecting packets—on-path censorship—are limited be-               To retrospectively identify the start of Russia’s QUIC SNI block-
+cause most of their control packets are encrypted; blocking QUIC               ing, we reconstruct the timeline of QUIC censorship in Russia. We
+                                                                               collected past QUIC censorship observations, particularly from
+This work is licensed under the Creative Commons Attribu-
+tion 4.0 International License. To view a copy of this license                 Russian-language forum posts, and contextualized our findings
+visit https://creativecommons.org/licenses/by/4.0/ or send a                   with QUIC traffic data from Cloudflare Radar [13]. Figure 1 depicts
+letter to Creative Commons, PO Box 1866, Mountain View, CA 94042, USA.
+                                                                               a consolidated timeline of Russian QUIC censorship, highlighting
+Free and Open Communications on the Internet 2026(2), 1–6
+© 2026 Copyright held by the owner/author(s).                                  three major time periods. Until February 2022, QUIC traffic in Rus-
+                                                                               sia was not censored (Period A). By March 2022, Russia likely
+                                                                           1
+Free and Open Communications on the Internet 2026(2)                                                                                                                                    Heitmann et al.
+
+
+                     Period A                                         Period B                                  Period C
+
+                                                                      QUIC censorship in Russia reported [37]                            China introduced QUIC censorship [46]
+                                                                      Russian invasion of Ukraine [2]           Broad QUIC filter lifted before this point [12]
+                                                         30%                                                               Cloudflare analytics
+
+
+
+
+                 QUIC Percentage of Cloudflare HTTP(S)
+                                                                                                                           outage [31]                   Cloudflare throttled
+                                                         25%                                                                                                     in Russia [40]
+
+
+                                                         20%
+
+                                                         15%
+
+                                                         10%
+                                                                                                                                           QUIC Percentage from Russia
+                                                         5%                                                                                QUIC Percentage (Global)
+                                                                                                                                           Total traffic from Russia (separate scale)
+                                                         0%
+                                                               2022                            2023                             2024                             2025
+
+Figure 1: Timeline of QUIC censorship in Russia reconstructed from forum posts and data provided by Cloudflare. The timeline
+shows the total number of HTTP(s) requests from Russia to Cloudflare and QUIC usage as a percentage of requests to Cloudflare,
+archived from Cloudflare Radar [13]; Cloudflare does not report absolute traffic statistics. The shaded red area highlights a
+drop in QUIC traffic from February 26, 2022 to June 3, 2022, where broad QUIC censorship was likely present (Period B, see
+Section 2.2). After Russia lifted the broad QUIC filter, they used an SNI-based filter (Period C, see Section 2.3).
+
+
+started dropping all international QUIC traffic (Period B)—this co-                                                        were dropped during this time. If the first packet did not trigger
+incides with Russia’s full-scale invasion of Ukraine. Between May                                                          censorship, the flow was not analyzed further—a phenomenon we
+2022 and July 2023, Russia switched from dropping all QUIC traffic                                                         call residual clearance. Similar to other censorship by the TSPU
+to dropping only QUIC traffic with an SNI containing a forbidden                                                           devices, flows that began outside of Russia were unaffected [11].
+domain (Period C). Below, we detail each period.
+                                                                                                                              SNI-based Filtering Within Russia. While international QUIC traf-
+2.1    No QUIC-specific Censorship (Period A)                                                                              fic was entirely blocked in Russia, national QUIC traffic exhibited
+                                                                                                                           SNI-specific blocking. This was first reported anecdotally for the
+We found no evidence of Russian QUIC censorship prior to February
+                                                                                                                           Russian social media site vk.com on March 4, 2022 [37]. Elmenhorst
+2022. Since QUIC was standardized in May 2021, it has been uncen-
+                                                                                                                           analyzed this special case in March 2022. They confirmed that the
+sored in Russia for approximately 9 months. Simultaneously, TLS
+                                                                                                                           TSPU devices could decrypt QUIC Initial packets and extract the
+was censored in Russia through widely installed TSPU devices [45].
+                                                                                                                           hostname located in the SNI [14, 15].
+As browsers would infer a website’s QUIC support over the Alt-Svc
+header in an earlier TLS connection [7], TLS censorship might have
+impacted QUIC accessibility in Russia. Similarly, potential DNS cen-                                                       2.3     International SNI-based QUIC Censorship
+sorship might have prevented clients from determining websites’                                                                    (Period C)
+QUIC support via early deployments of HTTPS records [36].
+                                                                                                                           We strongly believe that since at least July 2023, Russia has dis-
+                                                                                                                           abled international QUIC traffic dropping and switched to fine-
+2.2    Broad QUIC Blocking (Period B)                                                                                      grained SNI-based QUIC censorship, as supported by forum posts
+On March 4, 2022, users first reported that Russia enabled QUIC-                                                           and data independently provided by Cloudflare [12, 13]. To extract
+specific censorship by dropping all international QUIC traffic [37].                                                       the SNI, TSPU devices analyzed the first packet of all UDP flows,
+This is corroborated by QUIC traffic from Russia to Cloudflare                                                             limited to destination port 443 [12]. They decrypted the QUIC Ini-
+dropping 46% [13] compared to HTTP over TLS/TCP a few days                                                                 tial packet, and, if the domain was forbidden, dropped the packet
+earlier [38]—on February 26, 2022, two days after Russia’s full-                                                           and all following packets on the UDP flow for an unknown dura-
+scale invasion of Ukraine.                                                                                                 tion. If the first packet did not trigger censorship, the rest of the
+   Russia identified, and subsequently dropped, all international                                                          connection was residually cleared.
+QUIC traffic via QUIC’s Initial packets [21]. TSPU devices ana-
+lyzed all UDP flows destined to port 443 [41, 45] that originated                                                             When was the Broad Filter Lifted? User reports indicate that Rus-
+in Russia [11]. A flow was blocked when the first packet was at                                                            sia switched from broad to SNI-specific QUIC filtering somewhere
+least 1001 bytes long and contained the four-byte version header                                                           between May 2022 and July 2023 [3, 12]. Although we cannot de-
+for QUIC version 1 (0x00000001) [41, 45]. The TSPU maintained                                                              termine exactly when the broad filter was lifted, Cloudflare’s traffic
+state for UDP flows for 420 seconds [45] and residually censored                                                           reports indicate it occurred on June 3, 2022 in many areas of Russia.
+the UDP flow: All following packets with the same IPs and ports                                                            On that day, QUIC usage in Russia returned to pre-block levels (see
+                                                                                                                      2
+On Russia’s Early Introduction of QUIC SNI Censorship                                                                                  Free and Open Communications on the Internet 2026(2)
+
+                                                                                                                  100000
+
+
+
+
+                                                                              # Domains (not censored over TLS)
+                                                                                                                   90000                      Domain censored over TLS                    2500
+
+
+
+
+                                                                                                                                                                                             # Domains (censored over TLS)
+                                           TSPU                                                                    80000                      Domain not censored over TLS                2250
+                 QUICv1: ukrinform.ua                                                                              70000                                                                  2000
+                                                                                                                   60000                                                                  1750
+                                                                                                                                                                                          1500
+                                        420s                                                                       50000                                                                  1250
+                                                                                                                   40000                                                                  1000
+                 QUICv1: ukrinform.ua             QUICv1: ukrinform.ua                                             30000                                                                  750
+                                                                                                                   20000                                                                  500
+                 QUICv2: ukrinform.ua             QUICv2: ukrinform.ua                                             10000                                                                  250
+                                                                                                                       0                                                                  0
+                                                                                                                           0   1   2      3       4     5     6      7       8   9   10
+                                                                                                                                              # Dropped QUIC packets
+Figure 2: Russia blocks QUICv1 Initial Packets if the SNI ex-
+tension in the request contains a censored domain. QUICv2                               Figure 3: Number of censored QUIC connections out of 10 per
+is not affected. After blocking an Initial Packet, the Russian                          domain from the Tranco Top 100k list.2 Domains accessible
+censor drops subsequent packets on the same 4-tuple for 420                             via TLS are also accessible via QUIC (light blue bars). Domains
+seconds. Subsequent packets reset the timer. All censorship,                            blocked via TLS are also blocked via QUIC (dark red bars).
+including residual, is unidirectional: Traffic that enters Rus-                         The variance indicates that both the network and the Russian
+sia is never censored.                                                                  QUIC censorship are unreliable.
+
+
+Figure 1). Despite a small drop in overall traffic from Russia, the ab-                   update QUICv2 is not censored, facilitating potential circumvention
+solute QUIC traffic increased by at least 38% on that day alone [13].                     at all our vantage points (see Table 2).
+As this timing is corroborated by a forum post [4], we suspect that
+                                                                                            Affected Ports. Russia’s broad QUIC censorship (see Section 2.2)
+Russia lifted its broad QUIC filter on June 3, 2022. A third source
+                                                                                         and initial SNI-based censorship (see Section 2.3) only affected port
+independently reports it being lifted by July 8, 2023 [12].
+                                                                                         443 [12, 41, 45]. Russia’s current QUIC censorship is not limited
+   SNI-based Throttling. In addition to blocking domains, the SNI                        to port 443; we detected QUIC censorship on random ports, up to
+in QUIC packets was used as a trigger to throttle traffic to YouTube.                    port 65535. We found all destination ports to be affected at two of
+The throttling via QUIC had started by July 18, 2024 [43]—one week                       our vantage points (Saint Petersburg and Novosibirsk). In Moscow,
+after TLS throttling [26]. The throttled bandwidth was inconsistent                      22% of the system ports (1–1023) were not targeted by censorship.
+across Russia. On August 8, 2024, YouTube was blocked completely,                        Notably, the ports relevant to QUIC are targeted at all locations:
+via SNI-based blocking in TLS [24]. It is unclear whether QUIC was                       443 (HTTP/3) and 853 (DNS over QUIC).
+affected initially, but at least one Internet provider also blocked
+                                                                                             Blocked Domains. We compared Russian TLS and QUIC cen-
+YouTube via QUIC by April 18, 2025 [27].
+                                                                                          sorship of domains on the Tranco Top 100k list.2 We sent TLS
+                                                                                          ClientHello messages and QUIC Initial Packets containing the
+3    Current QUIC Censorship in Russia                                                    tested domain in the SNI extension from our Russian vantage
+To evaluate Russia’s current QUIC censorship, we sent QUIC Initial                        points3 to our vantage point in Germany. To reduce false positives
+packets from vantage points in three Russian cities (see Appen-                           and false negatives, we tested each domain 10 times and random-
+dix A) to a vantage point under our control in Germany. We ran                            ized the execution order. We determined that Russia censored TLS
+our measurements in March and April 2026, and found identical                             through packet dropping for 2,644 domains.4 Figure 3 shows that
+behavior across our three Russian vantage points. We provide pcap                         these domains are also blocked over QUIC. Similarly, domains that
+files that show our key results on GitHub.1                                               are not blocked over TLS are also not blocked over QUIC. Our results
+                                                                                          are highly consistent with blocklists for TLS and QUIC being equal.
+    SNI Censorship. Our measurements show that Russia censors
+QUIC connections based on their target domain: Instead of blocking                          Location of Censorship Devices. We manually validated the loca-
+all QUIC connections, Russia’s censor now decrypts the QUIC Initial                      tion of the QUIC censorship devices by gradually increasing the
+packets, locates the SNI extension in the embedded TLS handshake,                        TTL of our packets and measuring ICMP responses [32]. From
+and blocks the connection if the domain should be censored (see                          our vantage point in Moscow, all QUIC censorship occurred be-
+Figure 2). To this end, it drops packets with unwanted domains                           tween the third and fourth hop, which lay in Moscow and outside
+in the SNI extension. Therefore, Russia’s QUIC censorship must                           of Russia, respectively. At all vantage points, the TLS and QUIC
+operate in-path. This is similar to Russian TLS censorship, which                        censorship we measured were located at the same hop. We strongly
+drops ClientHello messages with unwanted domains [34].                                   suspect the censorship devices to be Russian TSPU devices de-
+                                                                                         scribed by Xue et al. [45].
+   Censorship Details. We determined that Russian QUIC censorship
+employs residual censorship on the 4-tuple (src IP, src port, dst IP,                        Comparison to China’s QUIC Censorship. SNI-based QUIC cen-
+dst port) for 420 seconds—sending additional messages resets the                          sorship has previously been described for the GFW by Zohaib et
+timer. It operates unidirectionally, only targeting traffic leaving
+                                                                                          2 Tranco list L7684, March 12, 2026, available at https://tranco-list.eu/list/L7684.
+the country. Interestingly, it targets only QUICv1; the standardized                      3 Due to RAM limitations, we were unable to run this experiment on our vantage point
+                                                                                          in Novosibirsk.
+1 https://github.com/UPB-SysSec/RussiaQuicResults                                        4 This corresponds to the type “SNI-Based (IV)” described by Xue et al. [45].
+
+                                                                          3
+Free and Open Communications on the Internet 2026(2)                                                                               Heitmann et al.
+
+
+                                                                               Russia Censored QUIC SNI Before China. China’s international
+                      Domain-Specific
+                                               TSPU
+                                                                            QUIC SNI censor has been reported as the first of its kind [46]. In
+                     uncensored UDP data                                    this work, we note that Russia’s QUIC SNI censorship was very
+                     QUICv1: discord.com                                    likely deployed at least 9 months prior, and even earlier domesti-
+                     QUICv1: discord.com
+                                            420s                            cally. This aligns with previous findings about Russia adapting to
+                     QUICv1: discord.com
+                                                                            new protocols before China [28]. Other earlier QUIC SNI censors
+                     uncensored UDP data                                    might exist: In 2025, a leak of internal documents of the company
+                     QUICv1: discord.com
+                                                                            Geedge revealed code for QUIC-specific censorship [44]. Geedge
+                     QUICv1: ukrinform.ua
+                                            420s                            has customers in Ethiopia, Kazakhstan, Myanmar, and Pakistan [44].
+                     QUICv1: discord.com
+
+                                                                            This implies that more censors—especially those using Geedge’s
+                                                                            software—already have or may gain support to censor QUIC.
+Figure 4: For selected domains, Russian QUIC censorship
+does not trigger if uncensored data was sent over the same                     Identifying Circumvention Techniques. The rising number of QUIC
+4-tuple. After 420 seconds, the residual clearance ends. No-                censors highlights the need for QUIC censorship circumvention.
+tably, censorship of unaffected domains still triggers residual             Like in the GFW’s QUIC censorship [46], parsing QUIC Initial
+censorship that overwrites the residual clearance.                          packets and ClientHello opens avenues for circumvention (see Ap-
+                                                                            pendix B). For example, Zohaib et al. [46] identified fragmenting the
+                                                                            ClientHello as a successful circumvention for the GFW. Success-
+al. [46]. Both—the Russian censor and the GFW—censor QUIC by                ful modifications in Russia—like using QUICv2—show that their
+dropping packets. A key difference is that the Russian censor drops         QUIC parser is also incomplete. We advocate for future work to
+the initial packets and immediately enforces residual censorship,           evaluate QUIC censors for circumvention techniques.
+while the GFW allows the initial packet to pass and only enforces
+residual censorship after a short delay. This mirrors the different            TSPU Uniformity. Russia’s TSPU infrastructure is highly uni-
+designs of the Russian TSPU devices [45] and the GFW, which per-            form [45], implying that measurements from our three vantage
+form packet inspection in-path and on-path, respectively. Further           points likely generalize beyond the vantage points’ network pro-
+similarities are that both do not limit their censorship to port 443,       viders. Nevertheless, there may be exceptions, as for the initial
+do not censor QUICv2, and only censor outgoing traffic—the GFW              broad QUIC filter, which did not apply to all traffic from Rus-
+disabled bidirectional QUIC censorship in September 2024. Appen-            sia (see Figure 1).
+dix B details QUIC parsing differences between Russia and China,               Ethical Considerations. Our scans aim to minimize the risks im-
+and shows that some circumventions that worked in China [46]                posed on Russian individuals. To this end, we rented vantage points
+are not successful in Russia (payload no. 8).                               in Russia and sent traffic only between servers under our control.
+   Domain-specific Behavior. In our evaluations, some domains ex-           We took care to minimize the number of vantage points rented in
+hibited different blocking behavior. For instance, QUIC connections         Russia, and complied with all applicable sanctions [17]. Although
+containing discord.com were subject to residual clearance: They             our findings might be used by Russia to modify the TSPU, we
+were not censored over QUIC when preceded by non-censored data.             strongly believe the direct benefit to their people and the censor-
+Figure 4 depicts this behavior. We stress that in our evaluations,          ship circumvention community outweighs this risk.
+only a few domains were affected by this behavior. Some of these
+domains also triggered distinct behavior in previous work [42, 45].         5   Conclusions
+Another example of domain-specific behavior is port-specific block-         In this paper, we reconstruct a timeline of Russian QUIC censorship
+ing: In our evaluations, some domains were only blocked on port             and detail its current state. We identify that Russia switched from a
+443. We refer to Appendix C for a list of domain-specific behaviors.        broad block of all international QUIC traffic to SNI-dependent QUIC
+All domains that triggered domain-specific behavior were blocked            censorship between May 2022 and July 2023. This SNI-dependent
+at the same network hop as other QUIC traffic. We speculate that            QUIC censorship persists to this day and is characterized by packet
+complex configuration options or multiple TSPU devices with differ-         drops, long residual censorship, and domain-specific behavior. We
+ing configurations are the cause of domain-specific QUIC behavior.          stress that Russia’s SNI-dependent QUIC censorship went largely
+                                                                            unnoticed for three years. Russia also started censoring QUIC via
+4    Discussion and Future Work                                             the SNI at least nine months before China’s GFW—the first academ-
+    Public Knowledge, but Not Discussed. The initial broad QUIC             ically discussed SNI-dependent QUIC censor. We advocate for an
+filter in Russia was well-known [14, 15, 38, 45], but the switch            analysis of potentially unnoticed QUIC censorship in other coun-
+to SNI-based censorship was only discussed on Russian-language              tries and emphasize the need for usable circumvention techniques.
+forums [37]. The broad filter was well-understood by the time it
+was lifted, so there may have been little reason for international          Acknowledgments
+researchers to continue analyzing Russia’s QUIC censorship. At the          We want to thank the reviewers for their insightful comments and
+same time, the SNI-based filter received little attention, possibly         constructive feedback. We also thank all individuals who provided
+because it initially only applied to domestic traffic. Notably, as of       evidence for Russian QUIC censorship in forums and other discus-
+2025, widespread SNI-based censorship in Russia was unknown                 sion spaces. Niklas Niere was funded by the Deutsche Forschungs-
+in scientific literature [46].                                              gemeinschaft (DFG, German Research Foundation) – 555828767.
+                                                                        4
+On Russia’s Early Introduction of QUIC SNI Censorship                                                                   Free and Open Communications on the Internet 2026(2)
+
+
+References                                                                                   [28] Niklas Niere, Felix Lange, Nico Heitmann, and Juraj Somorovsky. 2025. Encrypted
+ [1] D. Eastlake 3rd. 2011. Transport Layer Security (TLS) Extensions: Extension                  Client Hello (ECH) in Censorship Circumvention. Free and Open Communications
+     Definitions. RFC 6066. IETF. http://tools.ietf.org/rfc/rfc6066.txt                           on the Internet (2025). https://www.petsymposium.org/foci/2025/foci-2025-
+ [2] Al Jazeera. 2022.            Russian forces launch full-scale invasion of                    0016.php
+     Ukraine. https://www.aljazeera.com/news/2022/2/24/putin-orders-military-                [29] Niklas Niere, Felix Lange, Robert Merget, and Juraj Somorovsky. 2025. Transport
+     operations-in-eastern-ukraine-as-un-meets                                                    Layer Obscurity: Circumventing SNI Censorship on the TLS-Layer. In 2025 IEEE
+ [3] anonymous28. 2022. Forum Post: “Система может расшифровать QUIC_V1 и                         Symposium on Security and Privacy (SP). IEEE Computer Society, San Francisco,
+     декодировать SNI.”. https://ntc.party/t/1823/32                                              CA, USA, 1344–1362. https://doi.org/10.1109/SP61157.2025.00151
+ [4] anonymous57. 2022. Forum Post: “Локалхост в надежных руках. [...]”. https:              [30] Paul Pearce, Ben Jones, Frank Li, Roya Ensafi, Nick Feamster, Nick Weaver, and
+     //ntc.party/t/1823/69                                                                        Vern Paxson. 2017. Global Measurement of DNS Manipulation. In 26th USENIX
+ [5] Daniil Belovodyev, Andrei Soshnikov, Reid Standish, and Systema. 2023. Leaked                Security Symposium (USENIX Security 17). USENIX Association, Vancouver,
+     Files Show China And Russia Sharing Tactics On Internet Control, Censorship.                 BC, Canada, 307–323. https://www.usenix.org/conference/usenixsecurity17/
+     Radio Free Europe/Radio Liberty (April 2023). https://www.rferl.org/a/russia-                technical-sessions/presentation/pearce
+     china-internet-censorship-collaboration/32350263.html                                   [31] Matthew Prince. 2023. Post mortem on the Cloudflare Control Plane and Analytics
+ [6] M. Bishop. 2022. HTTP/3. RFC 9114. IETF. http://tools.ietf.org/rfc/rfc9114.txt               Outage. https://blog.cloudflare.com/post-mortem-on-cloudflare-control-plane-
+ [7] Mike Bishop. 2022. HTTP/3. Request for Comments RFC 9114. Internet Engineer-                 and-analytics-outage/
+     ing Task Force. https://doi.org/10.17487/RFC9114                                        [32] Ram Sundara Raman, Mona Wang, Jakub Dalek, Jonathan Mayer, and Roya Ensafi.
+ [8] Kevin Bock, George Hughey, Xiao Qiang, and Dave Levin. 2019. Geneva: Evolving                2022. Network measurement methods for locating and examining censorship
+     Censorship Evasion Strategies. In Proceedings of the 2019 ACM SIGSAC Conference              devices. In Proceedings of the 18th International Conference on emerging Net-
+     on Computer and Communications Security (CCS ’19). Association for Computing                 working EXperiments and Technologies (CoNEXT ’22). Association for Computing
+     Machinery, New York, NY, USA, 2199–2214. https://doi.org/10.1145/3319535.                    Machinery, New York, NY, USA, 18–34. https://doi.org/10.1145/3555050.3569133
+     3363189                                                                                 [33] Reethika Ramesh, Ram Sundara Raman, Matthew Bernhard, Victor Ongkowijaya,
+ [9] Kevin Bock, iyouport, Anonymous, Louis-Henri Merino, David Fifield, Amir                     Leonid Evdokimov, Anne Edmundson, Steven Sprecher, Muhammad Ikram, and
+     Houmansadr, and Dave Levin. 2020. Exposing and Circumventing China’s                         Roya Ensafi. 2020. Decentralized Control: A Case Study of Russia. In Proceedings
+     Censorship of ESNI. https://gfw.report/blog/gfw_esni_blocking/en/                            2020 Network and Distributed System Security Symposium. Internet Society, San
+[10] Kevin Bock, Gabriel Naval, Kyle Reese, and Dave Levin. 2021. Even Censors                    Diego, CA. https://doi.org/10.14722/ndss.2020.23098
+     Have a Backup: Examining China’s Double HTTPS Censorship Middleboxes. In                [34] Reethika Ramesh, Ram Sundara Raman, Apurva Virkud, Alexandra Dirksen,
+     Proceedings of the ACM SIGCOMM 2021 Workshop on Free and Open Communi-                       Armin Huremagic, David Fifield, Dirk Rodenburg, Rod Hynes, Doug Madory,
+     cations on the Internet (FOCI ’21). Association for Computing Machinery, New                 and Roya Ensafi. 2023. Network Responses to Russia’s Invasion of Ukraine
+     York, NY, USA, 1–7. https://doi.org/10.1145/3473604.3474559                                  in 2022: A Cautionary Tale for Internet Freedom. In 32nd USENIX Security
+[11] bolvan. 2022. Forum Post: “Подтверждаю. Добавлю к этому, что к входящим                      Symposium (USENIX Security 23). USENIX Association, Anaheim, CA, USA,
+     пакетам фильтрация не применяется и используется stateful фильтр. [. . . ]”.                 2581–2598. https://www.usenix.org/conference/usenixsecurity23/presentation/
+     https://ntc.party/t/1823/11                                                                  ramesh-network-responses
+[12] bolvan. 2023. Forum Post: “Текущая ситуация по QUIC примерно такая. [. . . ]”.          [35] E. Rescorla. 2018. The Transport Layer Security (TLS) Protocol Version 1.3. RFC
+     https://ntc.party/t/1823/74                                                                  8446. IETF. http://tools.ietf.org/rfc/rfc8446.txt
+[13] Cloudflare. 2025. Cloudflare Radar. https://radar.cloudflare.com/                       [36] Benjamin M. Schwartz, Mike Bishop, and Erik Nygren. 2023. Service Binding
+[14] Kathrin Elmenhorst. 2022. Broad blocking of HTTP/3 traffic in Russia (AS31213,               and Parameter Specification via the DNS (SVCB and HTTPS Resource Records).
+     AS12389). https://github.com/kelmenhorst/quic-censorship/issues/4                            Request for Comments RFC 9460. Internet Engineering Task Force. https:
+[15] Kathrin Elmenhorst. 2022. A Quick Look at QUIC Censorship. https://www.                      //doi.org/10.17487/RFC9460
+     opentech.fund/news/a-quick-look-at-quic-censorship/                                     [37] serfreeman1337. 2022. Forum Post: “Не устанавливается соединение по QUIC
+[16] Kathrin Elmenhorst, Bertram Schütz, Nils Aschenbruck, and Simone Basso. 2021.               для зарубежных сайтов. [. . . ]”. https://ntc.party/t/1823/1
+     Web censorship measurements of HTTP/3 over QUIC. In Proceedings of the 21st             [38] Max Stucchi and Robin Wilton. 2022. QUIC vs TLS on Russian Networks. https://
+     ACM Internet Measurement Conference (IMC ’21). Association for Computing                     pulse.internetsociety.org/blog/internet-perspectives-ukraine-and-russia#QUIC
+     Machinery, New York, NY, USA, 276–282. https://doi.org/10.1145/3487552.                 [39] M. Thomson and S. Turner. 2021. Using TLS to Secure QUIC. RFC 9001. IETF.
+     3487836                                                                                      http://tools.ietf.org/rfc/rfc9001.txt
+[17] European Commission. 2026. EU Sanctions Map. https://sanctionsmap.eu/                   [40] Michael Tremante and Alissa Starzak. 2025. Russian Internet users are unable to
+[18] Freedom House. 2024. Freedom on the Net 2024. https://freedomhouse.org/                      access the open Internet. https://blog.cloudflare.com/russian-internet-users-
+     report/freedom-net/2024/struggle-trust-online                                                are-unable-to-access-the-open-internet/
+[19] Huston Geoff. 2025. A QUIC Progress Report | blabs. https://labs.apnic.net/             [41] ValdikSS. 2022. Forum Post: “Фильтр работает только для пакетов с UDP-
+     index.php/2025/06/16/a-quic-progress-report/                                                 нагрузкой больше 1001 байтов (включительно). [. . . ]”. https://ntc.party/t/
+[20] Michael Harrity, Kevin Bock, Frederick Sell, and Dave Levin. 2022. GET /out:                 1823/10
+     Automated Discovery of Application-Layer Censorship Evasion Strategies. In              [42] ValdikSS. 2024. Forum Post: “Замедляют по SNI *.googlevideo.com — домена, с
+     31st USENIX Security Symposium (USENIX Security 22). USENIX Association,                     которого раздаётся видео YouTube,”. https://ntc.party/t/8055/2
+     Boston, MA, 465–483. https://www.usenix.org/conference/usenixsecurity22/                [43] ValdikSS. 2024. Forum Post: “Начали замедлять и QUIC (HTTP/3) тоже. [. . . ]”.
+     presentation/harrity                                                                         https://ntc.party/t/8055/79
+[21] J. Iyengar and M. Thomson. 2021. QUIC: A UDP-Based Multiplexed and Secure               [44] wkrp. 2025. Leak of Geedge Networks internal documents (100,000+ from
+     Transport. RFC 9000. IETF. http://tools.ietf.org/rfc/rfc9000.txt                             Jira, Confluence, GitLab) · Issue #519 · net4people/bbs. https://github.com/
+[22] Anastasiia Kruope. 2025. Disrupted, Throttled, and Blocked.                https:            net4people/bbs/issues/519
+     //www.hrw.org/report/2025/07/30/disrupted-throttled-and-blocked/state-                  [45] Diwen Xue, Benjamin Mixon-Baca, ValdikSS, Anna Ablove, Beau Kujath, Je-
+     censorship-control-and-increasing-isolation                                                  didiah R. Crandall, and Roya Ensafi. 2022. TSPU: Russia’s decentralized censor-
+[23] Ruixuan Li, Baojun Liu, Chaoyi Lu, Haixin Duan, and Jun Shao. 2024. A                        ship system. In Proceedings of the 22nd ACM Internet Measurement Conference
+     Worldwide View on the Reachability of Encrypted DNS Services. In Proceedings                 (IMC ’22). Association for Computing Machinery, New York, NY, USA, 179–194.
+     of the ACM Web Conference 2024. ACM, Singapore Singapore, 1193–1202. https:                  https://doi.org/10.1145/3517745.3561461
+     //doi.org/10.1145/3589334.3645539                                                       [46] Ali Zohaib, Qiang Zao, Jackson Sippe, Abdulrahman Alaraj, Amir Houmansadr,
+[24] loskiq. 2024. Forum Post: “видимо, начали блочить домен www.youtube.com                      Zakir Durumeric, and Eric Wustrow. 2025. Exposing and Circumventing SNI-
+     по SNI [. . . ]”. https://ntc.party/t/8055/145                                               based QUIC Censorship of the Great Firewall of China. In 34th USENIX Security
+[25] Alexander Master and Christina Garman. 2023. A Worldwide View of Nation-                     Symposium (USENIX Security 25). USENIX Association, Seattle, WA, USA, 783–802.
+     state Internet Censorship. Free and Open Communications on the Internet (2023).              https://www.usenix.org/conference/usenixsecurity25/presentation/zohaib
+     https://petsymposium.org/foci/2023/foci-2023-0008.php
+[26] Meduza. 2024. В России, как заявил источник «Медузы», начали
+     замедлять YouTube. «Ростелеком» утверждает, что возникли проблемы
+     в работе оборудования Google.             https://meduza.io/feature/2024/07/12/v-
+     rossii-kak-zayavil-istochnik-meduzy-nachali-zamedlyat-youtube-rostelekom-
+     utverzhdaet-chto-voznikli-problemy-v-rabote-oborudovaniya-google
+[27] Molchun. 2025. Forum Post: “В то время как на йоте полный блок ВСЕХ
+     ресурсов. [. . . ]”. https://ntc.party/t/8055/337
+
+
+                                                                                         5
+Free and Open Communications on the Internet 2026(2)                                                                                         Heitmann et al.
+
+
+A     Vantage Points                                                          C    Domain-specific Behavior
+Table 1: Location of the vantage points used in our evalu-                    Table 3: Domain-specific blocking behavior. We detected 22
+ations. We rented vantage points in Russia’s three largest                    domains that triggered censorship only on port 443, and 31
+cities, and rented one in Germany as our scan target.                         patterns that passed the TSPU if the flow was cleared by an
+                                                                              uncensored first packet.
+               Abbr.     Location              AS Number
+                                                                                  Domain                       443 Only       Residual Clearance
+                MOW      Moscow                50867
+                SPE      Saint Petersburg      214822                             default                          #                     #
+                NVS      Novosibirsk           214822                             discord.com
+                 –       Berlin, Germany       8560                               discordapp.com
+                                                                                  napps-1.com
+B     QUIC Parsing Tests                                                          napps-2.com
+We reproduced the parsing tests by Zohaib et al. [46] in Russia,                  nordaccount.com
+using ukrinform.ua as the censored domain. Table 2 shows that                     nordlayer.com
+the blocking behavior matches across all our vantage points for all               nordpass.com
+payloads and differs between Russia and China [46].
+                                                                                  fralcks.com
+   For consistency among the payloads, we made minor modifica-
+                                                                                  gillsonse.com
+tions. We included padding to 1200 bytes and a complete Client-
+                                                                                  horizono.xyz
+Hello in all payloads. In payload 7, we included an innocuous SNI
+                                                                                  janetvill.com
+instead of removing the SNI altogether. Zohaib et al.’s description
+                                                                                  maleyu.org
+of payload 5 diverges from the payload given in their artifacts;
+                                                                                  oakdenet.com
+we include both variants.
+                                                                                  seagrav.com
+                                                                                  valentiae.com
+Table 2: Results from adapting Zohaib et al.’s parsing pay-
+                                                                                  viewlak.com
+loads [46] for our scans from Russia. The blocking behavior
+                                                                                  wirevpn.app
+was consistent across all our Russian vantage points and dif-
+                                                                                  icpsuawn1zy5amys.com
+fers from the censorship observed in China.
+                                                                                  njtzzrvg0lwj3bsn.info
+                                                                                  p99nxpivfscyverz.me
+ No. Description                                            Blocked?              x9fnzrtl4x8pynsf.com
+                                                       MOW SPE NVS [46]           zwyr157wwiu6eior.com
+     1 Regular Initial with censored SNI                                          *.googlevideo.com                #
+     2 Remove last byte                                              #            news.google.com                  #
+     3 Version bytes 00000002, invalid MAC #               #     #   #            play.google.com                  #
+     4 SCID & DCID empty (length 0)        #               #     #                totallyacdn.com                  #
+     5 DCID set to length 255              #               #     #   #            whiskergalaxy.com                #
+     – SCID set to length 255              #               #     #   –
+     6 Crypto frame len. 0, data unchanged #               #     #                deepstateplatypus.com            #
+     7 ALPN with censored hostname         #               #     #   #            hubstack.net                     #
+     8 PING & PADDING before/after Crypto                            #            mariberimajinasi.store           #
+     9 ECH, outer SNI cloudflare-ech.com #                 #     #   #            xhentai.tv                       #
+    10 QUIC version 2                      #               #     #   #                  # absent      present (different than default behavior)
+
+            MOW: Moscow SPE: Saint Petersburg NVS: Novosibirsk
+                       # not blocked       blocked
+
+
+
+
+                                                                          6
+

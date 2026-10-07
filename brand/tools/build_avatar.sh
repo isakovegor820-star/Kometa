@@ -38,7 +38,7 @@ render() {
     --image-format png --out "$RAW_DIR/$name.raw.png" --daemon-url "$DAEMON_URL" --json >/dev/null
   echo "   $name → $RAW_DIR/$name.raw.png"
 }
-for name in avatar-a-comet-arrow avatar-b-growth-bars avatar-c-monogram-k; do
+for name in avatar-a-comet-arrow avatar-b-growth-bars avatar-c-monogram-k banner-welcome banner-channel-cover; do
   render "$name" &
 done
 wait

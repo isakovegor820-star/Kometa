@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #021a12; }
+      svg { width: 1920px; height: 1080px; display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="6" data-width="1920" data-height="1080">
+
+      <svg viewBox="0 0 1440 810" xmlns="http://www.w3.org/2000/svg"
+           font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif">
+        <defs>
+          <radialGradient id="bg" cx="26%" cy="24%" r="105%">
+            <stop offset="0%"   stop-color="#178f63"/>
+            <stop offset="32%"  stop-color="#0d6b4a"/>
+            <stop offset="64%"  stop-color="#053a29"/>
+            <stop offset="100%" stop-color="#021a12"/>
+          </radialGradient>
+          <linearGradient id="sweep" gradientUnits="userSpaceOnUse" x1="120" y1="760" x2="1320" y2="80">
+            <stop offset="0%"   stop-color="#4dffae" stop-opacity="0"/>
+            <stop offset="48%"  stop-color="#4dffae" stop-opacity="0.09"/>
+            <stop offset="100%" stop-color="#d8ff66" stop-opacity="0.05"/>
+          </linearGradient>
+          <linearGradient id="mark" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="286" y2="0">
+            <stop offset="0%"   stop-color="#2bc57f"/>
+            <stop offset="34%"  stop-color="#45e698"/>
+            <stop offset="72%"  stop-color="#8ff8aa"/>
+            <stop offset="100%" stop-color="#dcff5c"/>
+          </linearGradient>
+          <radialGradient id="aura" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"   stop-color="#38ffa0" stop-opacity="0.32"/>
+            <stop offset="62%"  stop-color="#17c877" stop-opacity="0.10"/>
+            <stop offset="100%" stop-color="#17c877" stop-opacity="0"/>
+          </radialGradient>
+          <linearGradient id="word" gradientUnits="userSpaceOnUse" x1="100" y1="220" x2="620" y2="360">
+            <stop offset="0%"   stop-color="#ffffff"/>
+            <stop offset="70%"  stop-color="#e6fff2"/>
+            <stop offset="100%" stop-color="#b6ffd8"/>
+          </linearGradient>
+          <radialGradient id="vig" cx="50%" cy="46%" r="78%">
+            <stop offset="50%"  stop-color="#000000" stop-opacity="0"/>
+            <stop offset="100%" stop-color="#000c08" stop-opacity="0.55"/>
+          </radialGradient>
+          <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="34" result="far"/>
+            <feGaussianBlur stdDeviation="9"  result="near"/>
+            <feMerge><feMergeNode in="far"/><feMergeNode in="near"/><feMergeNode in="near"/></feMerge>
+          </filter>
+          <filter id="trailBlur" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="30"/>
+          </filter>
+          <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="3"/>
+          </filter>
+          <filter id="grain" x="0" y="0" width="100%" height="100%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"/>
+            <feColorMatrix type="saturate" values="0"/>
+          </filter>
+        </defs>
+
+        <rect width="1440" height="810" fill="url(#bg)"/>
+        <rect width="1440" height="810" fill="url(#sweep)"/>
+
+        <g id="orbits" fill="none" stroke="#7dffbe" stroke-linecap="round">
+          <circle cx="1190" cy="380" r="330" stroke-width="2.5" opacity="0.13"
+                  stroke-dasharray="230 1843" transform="rotate(-18 1190 380)"/>
+          <circle cx="1190" cy="380" r="408" stroke-width="2.5" opacity="0.07"
+                  stroke-dasharray="96 2467" transform="rotate(150 1190 380)"/>
+        </g>
+
+        <ellipse id="auraEl" cx="1190" cy="375" rx="430" ry="360" fill="url(#aura)"/>
+
+        <!-- размытый след пролёта -->
+        <g id="trail" opacity="0" transform="translate(1200 380) rotate(-42) scale(1.25) translate(-152 0)"
+           filter="url(#trailBlur)">
+          <path d="M 0 0 C 46 -12 108 -32 186 -40 L 186 -76 L 286 0 L 186 76 L 186 40 C 108 32 46 12 0 0 Z"
+                fill="#3ceb95"/>
+        </g>
+
+        <!-- знак кометы-стрелы: внешняя группа — для GSAP, внутренняя держит посадку -->
+        <g id="markGroup">
+          <g transform="translate(1200 380) rotate(-42) scale(1.25) translate(-152 0)">
+            <g id="markGlow" filter="url(#glow)" opacity="0.7">
+              <path d="M 0 0 C 46 -12 108 -32 186 -40 L 186 -76 L 286 0 L 186 76 L 186 40 C 108 32 46 12 0 0 Z"
+                    fill="#3ceb95"/>
+            </g>
+            <g id="sparks" fill="url(#mark)" opacity="0.6">
+              <circle cx="-16" cy="8" r="8"/>
+              <circle cx="-46" cy="18" r="5" opacity="0.75"/>
+            </g>
+            <path d="M 0 0 C 46 -12 108 -32 186 -40 L 186 -76 L 286 0 L 186 76 L 186 40 C 108 32 46 12 0 0 Z"
+                  fill="url(#mark)"/>
+            <path d="M 22 -7 C 66 -17 116 -32 178 -38" fill="none" stroke="#ffffff" stroke-width="6"
+                  stroke-linecap="round" opacity="0.2" filter="url(#soft)"/>
+          </g>
+        </g>
+
+        <g id="copy">
+          <text id="eyebrow" x="112" y="212" font-size="23" font-weight="600" letter-spacing="5.5" fill="#6ff2a8">TELEGRAM-БОТ</text>
+          <text id="wordmark" x="106" y="352" font-size="132" font-weight="800" letter-spacing="-3" fill="url(#word)">KOMETA</text>
+          <text id="tagline" x="112" y="416" font-size="33" font-weight="500" fill="#a9f0c8">
+            Защищённое подключение<tspan fill="#7cf7ab"> · </tspan>без тормозов
+          </text>
+
+          <g id="chips" font-size="24" font-weight="600" fill="#dcffee">
+            <g class="chip">
+              <rect x="110" y="486" width="286" height="70" rx="35" fill="#ffffff" opacity="0.07"/>
+              <rect x="110" y="486" width="286" height="70" rx="35" fill="none" stroke="#7cf7ab" stroke-width="1.5" opacity="0.3"/>
+              <text x="142" y="531" fill="#7cf7ab">∞</text><text x="186" y="531">Безлимит</text>
+            </g>
+            <g class="chip">
+              <rect x="420" y="486" width="320" height="70" rx="35" fill="#ffffff" opacity="0.07"/>
+              <rect x="420" y="486" width="320" height="70" rx="35" fill="none" stroke="#7cf7ab" stroke-width="1.5" opacity="0.3"/>
+              <text x="452" y="531" fill="#7cf7ab">◎</text><text x="496" y="531">До 3 устройств</text>
+            </g>
+            <g class="chip">
+              <rect x="764" y="486" width="236" height="70" rx="35" fill="#ffffff" opacity="0.07"/>
+              <rect x="764" y="486" width="236" height="70" rx="35" fill="none" stroke="#7cf7ab" stroke-width="1.5" opacity="0.3"/>
+              <text x="796" y="531" fill="#7cf7ab">◍</text><text x="840" y="531">2 локации</text>
+            </g>
+          </g>
+
+          <g id="plate">
+            <rect x="110" y="612" width="392" height="76" rx="38" fill="#dcff5c" opacity="0.14"/>
+            <rect x="110" y="612" width="392" height="76" rx="38" fill="none" stroke="#dcff5c" stroke-width="1.5" opacity="0.45"/>
+            <text x="148" y="660" font-size="27" font-weight="700" fill="#dcff5c">🎁 Первые 3 дня — бесплатно</text>
+          </g>
+        </g>
+
+        <rect width="1440" height="810" fill="url(#vig)"/>
+        <rect width="1440" height="810" filter="url(#grain)" opacity="0.05" style="mix-blend-mode:overlay"/>
+      </svg>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true, defaults: { ease: 'power3.out' } });
+
+      gsap.set('#copy > text, #chips .chip, #plate', { transformOrigin: 'left center' });
+      gsap.set('#markGroup', { transformOrigin: '1200px 380px' });
+
+      // комета влетает из левого нижнего угла
+      tl.fromTo('#markGroup',
+        { x: -820, y: 620, scale: 0.45, opacity: 0, rotate: -6 },
+        { x: 0, y: 0, scale: 1, opacity: 1, rotate: 0, duration: 1.15, ease: 'power4.out' }, 0)
+
+        .fromTo('#trail', { opacity: 0 }, { opacity: 0.75, duration: 0.5 }, 0.05)
+        .to('#trail', { opacity: 0, duration: 0.7, ease: 'power2.in' }, 0.5)
+
+        .fromTo('#sparks', { scale: 0, opacity: 0 },
+          { scale: 1, opacity: 0.6, duration: 0.5, stagger: 0.12 }, 0.75)
+
+        .fromTo('#eyebrow', { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.6 }, 0.45)
+        .fromTo('#wordmark', { opacity: 0, y: 42 }, { opacity: 1, y: 0, duration: 0.85 }, 0.55)
+        .fromTo('#tagline', { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: 0.7 }, 0.75)
+
+        .fromTo('#chips .chip', { opacity: 0, scale: 0.88 },
+          { opacity: 1, scale: 1, duration: 0.55, stagger: 0.13 }, 1.0)
+
+        .fromTo('#plate', { opacity: 0, y: 22, scale: 0.94 },
+          { opacity: 1, y: 0, scale: 1, duration: 0.6 }, 1.45)
+
+        .fromTo('#orbits', { opacity: 0 }, { opacity: 1, duration: 1.2 }, 0.9)
+
+        // мягкое «дыхание» свечения: зацикленное видео не рвётся на стыке
+        .to('#markGlow', { opacity: 1, duration: 1.1, yoyo: true, repeat: 1, ease: 'sine.inOut' }, 2.0)
+        .to('#auraEl', { opacity: 0.72, duration: 1.1, yoyo: true, repeat: 1, ease: 'sine.inOut' }, 2.0);
+
+      window.__timelines['main'] = tl;
+    </script>
+  </body>
+</html>

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Kometa — обложка канала 1280×720</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #000; }
+  .stage { position: fixed; inset: 0; display: grid; place-items: center; }
+  .frame { width: min(100vw, 177.7778vh); aspect-ratio: 16 / 9; }
+  svg { width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+<div class="stage">
+<svg viewBox="0 0 1440 810" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Kometa — обложка канала"
+     font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif">
+  <defs>
+    <radialGradient id="bg" cx="22%" cy="20%" r="108%">
+      <stop offset="0%"   stop-color="#16895f"/>
+      <stop offset="30%"  stop-color="#0c6746"/>
+      <stop offset="62%"  stop-color="#053827"/>
+      <stop offset="100%" stop-color="#021a12"/>
+    </radialGradient>
+
+    <linearGradient id="sweep" gradientUnits="userSpaceOnUse" x1="80" y1="780" x2="1360" y2="60">
+      <stop offset="0%"   stop-color="#4dffae" stop-opacity="0"/>
+      <stop offset="46%"  stop-color="#4dffae" stop-opacity="0.07"/>
+      <stop offset="100%" stop-color="#d8ff66" stop-opacity="0.04"/>
+    </linearGradient>
+
+    <linearGradient id="mark" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="286" y2="0">
+      <stop offset="0%"   stop-color="#2bc57f"/>
+      <stop offset="34%"  stop-color="#45e698"/>
+      <stop offset="72%"  stop-color="#8ff8aa"/>
+      <stop offset="100%" stop-color="#dcff5c"/>
+    </linearGradient>
+
+    <radialGradient id="aura" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#2ff59a" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#17c877" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="vig" cx="50%" cy="46%" r="80%">
+      <stop offset="45%"  stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000c08" stop-opacity="0.62"/>
+    </radialGradient>
+
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="22" result="far"/>
+      <feGaussianBlur stdDeviation="6"  result="near"/>
+      <feMerge>
+        <feMergeNode in="far"/>
+        <feMergeNode in="near"/>
+        <feMergeNode in="near"/>
+      </feMerge>
+    </filter>
+
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="3" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+    </filter>
+  </defs>
+
+  <rect width="1440" height="810" fill="url(#bg)"/>
+  <rect width="1440" height="810" fill="url(#sweep)"/>
+
+  <!-- орбиты по краям, центр свободен под имя канала -->
+  <g fill="none" stroke="#7dffbe" stroke-linecap="round">
+    <circle cx="1288" cy="120" r="300" stroke-width="2.5" opacity="0.10"
+            stroke-dasharray="210 1675" transform="rotate(24 1288 120)"/>
+    <circle cx="-40" cy="742" r="330" stroke-width="2.5" opacity="0.09"
+            stroke-dasharray="180 1893" transform="rotate(-14 -40 742)"/>
+  </g>
+
+  <ellipse cx="720" cy="405" rx="560" ry="300" fill="url(#aura)"/>
+
+  <!-- штрихи скорости: фактура в центре, не спорит с именем канала -->
+  <g transform="rotate(-42 720 405)" stroke="#8dffc4" stroke-linecap="round" fill="none">
+    <line x1="640" y1="150" x2="1330" y2="150" stroke-width="2"   opacity="0.10"/>
+    <line x1="760" y1="255" x2="1310" y2="255" stroke-width="1.6" opacity="0.07"/>
+    <line x1="700" y1="360" x2="1360" y2="360" stroke-width="2"   opacity="0.09"/>
+    <line x1="820" y1="470" x2="1290" y2="470" stroke-width="1.6" opacity="0.06"/>
+    <line x1="680" y1="580" x2="1320" y2="580" stroke-width="2"   opacity="0.08"/>
+    <line x1="780" y1="690" x2="1240" y2="690" stroke-width="1.6" opacity="0.05"/>
+  </g>
+
+  <!-- шапка: знак + вордмарк -->
+  <g transform="translate(238 122) rotate(-42) scale(0.68) translate(-152 0)">
+    <g filter="url(#glow)" opacity="0.65">
+      <path d="M 0 0 C 46 -12 108 -32 186 -40 L 186 -76 L 286 0 L 186 76 L 186 40 C 108 32 46 12 0 0 Z"
+            fill="#3ceb95"/>
+    </g>
+    <path d="M 0 0 C 46 -12 108 -32 186 -40 L 186 -76 L 286 0 L 186 76 L 186 40 C 108 32 46 12 0 0 Z"
+          fill="url(#mark)"/>
+  </g>
+
+  <text x="352" y="146" font-size="64" font-weight="800" letter-spacing="-1.2" fill="#f2fff8">KOMETA</text>
+  <text x="354" y="188" font-size="21" font-weight="600" letter-spacing="4.6" fill="#6ff2a8">
+    ЗАЩИЩЁННОЕ ПОДКЛЮЧЕНИЕ
+  </text>
+
+  <!-- подвал -->
+  <g font-size="24" font-weight="600" fill="#bfeeda">
+    <text x="290" y="692">Безлимитный трафик<tspan fill="#5fd79c">   ·   </tspan>
+      До 3 устройств<tspan fill="#5fd79c">   ·   </tspan>2 локации</text>
+  </g>
+  <rect x="290" y="716" width="240" height="4" rx="2" fill="#dcff5c" opacity="0.55"/>
+
+  <rect width="1440" height="810" fill="url(#vig)"/>
+  <rect width="1440" height="810" filter="url(#grain)" opacity="0.05" style="mix-blend-mode:overlay"/>
+</svg>
+</div>
+</body>
+</html>

@@ -1,0 +1,269 @@
+On Russia's Early Introduction of
+QUIC SNI Censorship
+Nico Heitmann, Niklas Niere, Felix Graf Lange, Juraj Somorovsky
+                    Paderborn University
+
+July 20, 2026
+QUIC and HTTP/3
+
+
+
+
+              TLS
+
+
+
+
+                    2
+QUIC and HTTP/3
+
+
+
+
+HTTP/3 Support (%)
+                                   TLS QUIC
+
+
+
+
+                                                                           2
+                     https://httparchive.org/reports/state-of-the-web#h3
+Russia Censors QUIC — since 2022
+
+
+
+
+     Russian-language forum discussions (Mar. 2022)
+
+
+
+                                                      3
+Russia Censors QUIC — since 2022
+
+
+
+
+     Russian-language forum discussions (Mar. 2022)
+
+
+
+       Elmenhorst (2022)                 Xue et al. (2022) 3
+Russia Censors QUIC — since 2022
+
+                                   4 years ago,
+                                still unchanged?
+
+
+     Russian-language forum discussions (Mar. 2022)
+
+
+
+       Elmenhorst (2022)                 Xue et al. (2022) 3
+TLS and QUIC                                QUIC Initial
+                                        Version: 1
+                                        DCID: foo
+                                        ...
+     ClientHello                            ClientHello
+  ...                                    ...
+  SNI: ukrinform.ua                      SNI: ukrinform.ua
+  ...                                    ...
+
+          TLS                                     QUIC
+
+
+ QUIC Initial Packets encrypted obfuscated
+
+                      SNI also readable in QUIC
+                                                             4
+Russian TLS Censorship
+
+
+                                   ClientHello
+                                ...
+                                SNI: ukrinform.ua
+                    TSPU        ...
+
+                 ukrinform.ua   420s
+
+
+
+
+                                                    5
+Russian QUIC Censorship
+
+
+
+
+ Cloudflare Radar         6
+Russian QUIC Censorship
+
+
+
+
+ Cloudflare Radar         6
+Period B: Broad QUIC Censorship
+                                                  Initial Packet
+Port = 443
+                                               Version: 1
+Length >= 1001
+                                               DCID: foo
+Version = 0x00000001                           ...
+                                                    ClientHello
+   All international QUIC                        ...
+        traffic blocked                           SNI: vk.com
+                                                 ...
+
+                                      vk.com         420s
+
+
+
+
+ Forum users, Elmenhorst (2022), Xue et al. (2022)                 7
+Period B: Broad QUIC Censorship
+                                                  Initial Packet
+Port = 443
+                                               Version: 1
+Length >= 1001
+                                               DCID: foo
+Version = 0x00000001                           ...
+                                                    ClientHello
+                                                 ...
+vk.com allowed domestically
+                                                  SNI: vk.com
+                                                 ...
+                                                                   vk.com
+                                      vk.com
+
+
+
+
+ Forum users, Elmenhorst (2022), Xue et al. (2022)                          8
+Russian QUIC Censorship
+
+
+
+
+ Cloudflare Radar         9
+Vantage Points   Russia:
+                 ●
+                   Moscow
+Germany:         ●
+                   Saint Petersburg
+●
+  Berlin         ●
+                   Novosibirsk
+
+
+
+
+                                      10
+Period C: QUIC SNI Censorship
+                                              Initial Packet
+Port = 443
+                                           Version: 1
+Length >= 1001
+                                           DCID: foo
+Version = 0x00000001                       ...
+                                                   ClientHello
+                                                ...
+International SNI censor
+                                                SNI: ukrinform.ua
+                                                ...
+
+                                 ukrinform.ua     420s
+
+
+
+                                                 4-tuple
+ Forum users & Our measurements (March–April 2026)                  11
+Comparison to TLS Censorship—Blocklist
+
+
+
+
+ Our measurements (March–April 2026)     12
+Comparison to TLS Censorship—Blocklist
+                           Matching Blocklists
+                           (Tranco Top 100K)
+
+
+             Uncensored                            Censored
+            (QUIC & TLS)                         (QUIC & TLS)
+
+
+
+
+ Our measurements (March–April 2026)                            12
+Censor Location
+                                             TLS & QUIC Censor
+                                           at identical network hop
+
+
+                                 TLS
+                                 QUIC
+
+
+            ...                                          ...
+                  TTL=n-1          TTL=n       TTL=n+1
+
+ Our measurements (March–April 2026)                                  13
+Parsing/Circumvention
+
+
+
+
+ Our measurements (March–April 2026)   Zohaib et al., 2025   14
+Domain-specific Behavior
+
+
+               uncensored.com
+               ukrinform.ua
+
+
+
+
+               uncensored.com
+               discord.com
+
+
+
+ Our measurements (March–April 2026)   15
+Domain-specific Behavior
+
+                                         Residual Clearance
+               uncensored.com               (31 domains)
+               ukrinform.ua
+                                       Only port=443 censored
+                                             (22 domains)
+
+
+               uncensored.com
+               discord.com
+
+
+
+ Our measurements (March–April 2026)                            15
+Are TSPU devices responsible?
+
+
+
+
+                      Uniformity between VPs
+
+                       Consistency with TLS
+
+                                               16
+Takeaways
+●
+    Large-scale QUIC censorship in Russia
+
+
+
+
+●
+    Deployed before China’s QUIC Censorship
+
+
+
+                                              17
+

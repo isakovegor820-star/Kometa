@@ -66,6 +66,28 @@ def round_mask(size: int, ss: int = 4) -> Image.Image:
     return big.resize((size, size), Image.LANCZOS)
 
 
+def crop_16x9(raw: Path) -> Image.Image:
+    """Баннер вёрстан как кадр 16:9 по центру страницы — берём центральную полосу."""
+    im = Image.open(raw).convert("RGB")
+    w, h = im.size
+    target_h = round(w * 9 / 16)
+    if target_h > h:  # страница уже кадра — режем по ширине
+        target_w = round(h * 16 / 9)
+        left = (w - target_w) // 2
+        return im.crop((left, 0, left + target_w, h))
+    top = (h - target_h) // 2
+    return im.crop((0, top, w, top + target_h))
+
+
+def save_banner(raw: Path, out_dir: Path, name: str) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    band = crop_16x9(raw)
+    for px in (1280, 2560):
+        band.resize((px, round(px * 9 / 16)), Image.LANCZOS).save(
+            out_dir / f"{name}-{px}x{round(px * 9 / 16)}.png", optimize=True
+        )
+
+
 def save_set(square: Image.Image, base: Path, name: str, with_round: bool = True,
              with_jpeg: bool = False) -> None:
     base.mkdir(parents=True, exist_ok=True)
@@ -201,6 +223,19 @@ def main() -> int:
             print(f"пропуск: нет {path}", file=sys.stderr)
             continue
         save_set(square_crop(path), out_dir, out_name, with_round, with_jpeg)
+        print(f"{out_name}: готово")
+
+    # баннеры 16:9: приветствие в боте и обложка канала
+    banner_dir = brand / "banner"
+    for raw_name, out_name in (
+        ("banner-welcome", "kometa-welcome"),
+        ("banner-channel-cover", "kometa-channel-cover"),
+    ):
+        path = raw / f"{raw_name}.raw.png"
+        if not path.exists():
+            print(f"пропуск: нет {path}", file=sys.stderr)
+            continue
+        save_banner(path, banner_dir, out_name)
         print(f"{out_name}: готово")
 
     # превью-лист рендерится из артефакта и просто уменьшается
