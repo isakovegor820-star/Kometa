@@ -44,6 +44,10 @@ AWG_PORT="${AWG_PORT:-990}"
 # См. docs/LTE-ВАРИАНТЫ-2026-10.md, §6.1.
 REALITY_FP="${REALITY_FP:-firefox}"
 REALITY_REMARK="${REALITY_REMARK:-Kometa-Reality-443}"
+# Запасные домены маскировки (ротация SNI): список через запятую или пробел.
+# Попадают в realitySettings.serverNames вместе с основным --sni, поэтому
+# смена маскировки у клиентов не требует пересоздавать инбаунд.
+REALITY_SNI_EXTRA="${REALITY_SNI_EXTRA:-}"
 # Remark AWG не содержит порта: порт — это параметр инбаунда, а не его имя.
 # Иначе смена --awg-port на уже настроенной ноде создала бы второй инбаунд.
 AWG_REMARK="${AWG_REMARK:-Kometa-AWG}"
@@ -116,6 +120,10 @@ usage() {
   --awg-port N       порт AmneziaWG, UDP (по умолчанию 990 — ниже 1000, чтобы
                      не попадать под блокировку UDP-портов >1000 на LTE)
   --sni DOMAIN       домен маскировки Reality (по умолчанию — автоподбор)
+  --sni-extra LIST   запасные домены маскировки через запятую: попадут в
+                     serverNames вместе с основным. Нужны для ротации SNI:
+                     если домен сожгут, клиенты переключаются без пересоздания
+                     инбаунда (например --sni-extra www.bing.com,yandex.ru)
   --whitelist        режим «белых списков»: маскироваться под разрешённый
                      российский домен (yandex.ru, ozon.ru, vk.com, …)
   --no-reality       не создавать VLESS+Reality
@@ -389,6 +397,7 @@ find_inbound_by_remark() { # find_inbound_by_remark <remark> → id или пу�
 create_reality_inbound() {
     local remark="$1" port="$2"
     local keys priv pub sid settings stream sniffing payload resp new_id
+    local names extra_sorted
     local version
 
     version="$(panel_version || true)"
@@ -410,15 +419,23 @@ create_reality_inbound() {
 
     # settings/streamSettings — строки с JSON внутри JSON (так устроено API 3x-ui).
     settings='{"clients":[],"decryption":"none","fallbacks":[]}'
+    # serverNames: первый — текущий домен маскировки, дальше запасные (--sni-extra).
+    # Запасные нужны для ротации: если домен сожгут как признак обхода, клиенты
+    # переключаются на другой SNI без пересоздания инбаунда.
+    extra_sorted="${REALITY_SNI_EXTRA//,/ }"
+    names="$(printf '%s\n' "$SNI" $extra_sorted | awk 'NF && !seen[$0]++' | jq -R . | jq -sc .)"
     stream="$(jq -nc \
         --arg sni "$SNI" --arg priv "$priv" --arg pub "$pub" --arg sid "$sid" \
-        --arg fp "$REALITY_FP" \
+        --arg fp "$REALITY_FP" --argjson names "$names" \
         '{network:"tcp",security:"reality",externalProxy:[],
-          realitySettings:{show:false,xver:0,target:($sni+":443"),serverNames:[$sni],
+          realitySettings:{show:false,xver:0,target:($sni+":443"),serverNames:$names,
             privateKey:$priv,minClientVer:"",maxClientVer:"",maxTimediff:0,
             shortIds:[$sid],
             settings:{publicKey:$pub,fingerprint:$fp,serverName:"",spiderX:"/"}}}')"
-    sniffing='{"enabled":true,"destOverride":["http","tls","quic"],"metadataOnly":false,"routeOnly":false}'
+    # routeOnly: домен из sniffing нужен только для маршрутизации — он не
+    # подменяет адрес назначения и не оседает в логах. Это часть обещания
+    # «не храним историю посещений» (docs/ЛОГИ-И-ПРИВАТНОСТЬ.md).
+    sniffing='{"enabled":true,"destOverride":["http","tls","quic"],"metadataOnly":false,"routeOnly":true}'
 
     payload="$(jq -nc --arg remark "$remark" --argjson port "$port" \
         --arg settings "$settings" --arg stream "$stream" --arg sniffing "$sniffing" \
@@ -669,6 +686,7 @@ main() {
             --reality-fp)   REALITY_FP="${2:?}"; shift 2 ;;
             --awg-port)     AWG_PORT="${2:?}"; shift 2 ;;
             --sni)          SNI="${2:?}"; shift 2 ;;
+            --sni-extra)    REALITY_SNI_EXTRA="${2:?}"; shift 2 ;;
             --whitelist)    SNI_CANDIDATES="$WHITELIST_SNI_CANDIDATES"; shift ;;
             --no-reality)   DO_REALITY=0; shift ;;
             --no-awg)       DO_AWG=0; shift ;;

@@ -160,3 +160,32 @@ def test_singbox_builder_does_not_emit_amneziawg_fields():
     builder = source.split("def _singbox_wireguard_outbound")[1].split("\ndef ")[0]
     for key in ("jc", "jmin", "jmax", "s1", "s2", "h1", "i1"):
         assert f'"{key}"' not in builder, f"поле {key} попадёт в sing-box и сломает конфиг"
+
+
+# --- 5. Логи и ротация SNI ------------------------------------------------
+
+
+def test_sniffing_is_route_only(node_script: str):
+    """sniffing.routeOnly=true: домен нужен только для маршрутизации.
+
+    Иначе Xray подменяет им адрес назначения, а разобранный домен — лишняя
+    сущность, которую в политике мы обещаем не хранить
+    (docs/ЛОГИ-И-ПРИВАТНОСТЬ.md). Проверено по конфигу Xray: routeOnly
+    оставляет sniffed-домен для правил роутинга и не трогает dial.
+    """
+    assert '"routeOnly":true' in node_script
+    assert '"routeOnly":false' not in node_script
+
+
+def test_sni_extra_extends_server_names(node_script: str):
+    """--sni-extra попадает в serverNames вместе с основным доменом."""
+    assert 'REALITY_SNI_EXTRA="${REALITY_SNI_EXTRA:-}"' in node_script
+    assert "--sni-extra" in node_script
+    assert "serverNames:$names" in node_script
+    # Дубликаты убираем: два одинаковых serverNames — мусор в конфиге.
+    assert "!seen[$0]++" in node_script
+
+
+def test_sni_extra_documented_in_help(node_script: str):
+    """Флаг описан в --help: иначе о ротации никто не узнает."""
+    assert "--sni-extra LIST" in node_script
