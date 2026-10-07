@@ -25,6 +25,12 @@
 # брать адрес или нет. См. docs/БЕЛЫЕ-СПИСКИ-ВНЕДРЕНИЕ.md, §3.1.
 #
 # Результат: таблица «проверка → итог → что это значит».
+#
+# Отчёт для разбора: --report probes.csv --label "МТС Новосибирск"
+#   Копит строки CSV — по одной на замер: время, метка, оператор, регион, режим,
+#   цель, группа, вердикт, детали. Нужен потому, что замеров много
+#   (оператор × город × адрес) и глазами их не свести. Оператор и регион
+#   берутся из LTE_OPERATOR и LTE_REGION.
 
 set -u
 
@@ -40,6 +46,12 @@ DEEP_PORTS="443"
 CHECK_RANGE=""
 RANGE_LIST=""
 POOL_FILE=""
+#: Файл отчёта (CSV): одна строка на каждый замер. Замеров много
+#: (оператор × город × адрес), и глазами их не свести — с --report результаты
+#: копятся, а потом открываются таблицей.
+REPORT_FILE="${REPORT_FILE:-}"
+#: Метка замера: «МТС Новосибирск, центр» и т.п. Попадает в отчёт.
+LABEL="${LABEL:-}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -55,7 +67,9 @@ while [[ $# -gt 0 ]]; do
         --check-range) CHECK_RANGE="${2:?}"; shift 2 ;;
         --range-list)  RANGE_LIST="${2:?}"; shift 2 ;;
         --pool)        POOL_FILE="${2:?}"; shift 2 ;;
-        -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
+        --report)      REPORT_FILE="${2:?}"; shift 2 ;;
+        --label)       LABEL="${2:?}"; shift 2 ;;
+        -h|--help)   sed -n '2,36p' "$0"; exit 0 ;;
         *)           echo "Неизвестный аргумент: $1" >&2; exit 2 ;;
     esac
 done
@@ -88,10 +102,37 @@ run_timeout() { # run_timeout <секунды> <команда...>
     fi
 }
 
-pass() { printf '%-34s ✅ %s\n' "$1" "$2"; }
-fail() { printf '%-34s ❌ %s\n' "$1" "$2"; }
+pass() { PASS_N=$((PASS_N + 1)); printf '%-34s ✅ %s\n' "$1" "$2"; }
+fail() { FAIL_N=$((FAIL_N + 1)); printf '%-34s ❌ %s\n' "$1" "$2"; }
 warn() { printf '%-34s ⚠️  %s\n' "$1" "$2"; }
-skip() { printf '%-34s ➖ %s\n' "$1" "$2"; }
+skip() { SKIP_N=$((SKIP_N + 1)); printf '%-34s ➖ %s\n' "$1" "$2"; }
+
+# --- отчёт (--report) -------------------------------------------------------
+#
+# Формат: CSV с заголовком, по строке на замер. Запятые внутри полей заменяем
+# на «;», чтобы файл открывался таблицей без экранирования.
+report_init() {
+    [[ -n "$REPORT_FILE" ]] || return 0
+    [[ -f "$REPORT_FILE" ]] && return 0
+    printf '%s\n' "время,метка,оператор,регион,режим,цель,группа,вердикт,детали" >> "$REPORT_FILE"
+}
+
+report_row() { # report_row <режим> <цель> <группа> <вердикт> <детали>
+    [[ -n "$REPORT_FILE" ]] || return 0
+    local mode="$1" target="$2" group="$3" verdict="$4" detail="$5"
+    mode="${mode//,/;}"; target="${target//,/;}"; group="${group//,/;}"
+    verdict="${verdict//,/;}"; detail="${detail//,/;}"
+    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+        "$(date '+%Y-%m-%d %H:%M')" "${LABEL//,/;}" "${LTE_OPERATOR:-}" "${LTE_REGION:-}" \
+        "$mode" "$target" "$group" "$verdict" "$detail" >> "$REPORT_FILE"
+}
+
+#: Счётчики для итоговой строки отчёта в основном режиме. Объявлены до первого
+#: вызова pass()/fail(): при `set -u` инкремент необъявленной переменной падает.
+PASS_N=0
+FAIL_N=0
+SKIP_N=0
+report_init
 
 # --- режим --deep: один адрес, повторы, RST против таймаута ------------------
 #
@@ -124,21 +165,26 @@ probe_once() { # probe_once <host> <port> <префикс> [quiet]
 
 # Проверка адреса БЕЗ слушателя: rc=28 (тишина) = L3 пропускает, rc=7 = блок.
 # Именно так проверяется «белая» /24, не поднимая на ней сервер.
-check_quiet_addr() { # check_quiet_addr <IP>
-    local ip="$1" q_tls=0 q_hs=0 q_rst=0 q_to=0 q_other=0 attempt
+check_quiet_addr() { # check_quiet_addr <IP> [группа: подсеть или метка пула]
+    local ip="$1" group="${2:-}" q_tls=0 q_hs=0 q_rst=0 q_to=0 q_other=0 attempt verdict
     for ((attempt = 1; attempt <= REPEAT; attempt++)); do
         probe_once "$ip" 443 q quiet
     done
     printf '%-16s ' "$ip"
     if [[ "$q_rst" -gt 0 && "$q_to" -eq 0 && "$q_tls" -eq 0 && "$q_hs" -eq 0 ]]; then
+        verdict="БЛОК"
         printf '❌ БЛОК (RST): адрес отброшен фильтром\n'
     elif [[ "$q_to" -gt 0 && "$q_rst" -eq 0 ]]; then
+        verdict="ПРОХОДИТ"
         printf '✅ ПРОХОДИТ (тишина = нет слушателя, L3 пропускает)\n'
     elif [[ "$q_tls" -gt 0 || "$q_hs" -gt 0 ]]; then
+        verdict="КТО-ТО ЕСТЬ"
         printf '⚠️  на адресе кто-то есть (rc TOS/TLS) — для проверки /24 бери пустой\n'
     else
+        verdict="СМЕШАННО"
         printf '❓ смешанно (RST=%d, тишина=%d) — повтори\n' "$q_rst" "$q_to"
     fi
+    report_row "range" "$ip" "$group" "$verdict" "rst=$q_rst;to=$q_to;tls=$q_tls;hs=$q_hs"
 }
 
 # Режим --pool: проверить пул входов (основной + резерв) и сказать, какой годится.
@@ -190,7 +236,7 @@ check_range() { # check_range <a.b.c.0/24>
     echo "----------------------------------------------------------------------"
     local ok=0 bad=0
     for suffix in 1 77 254; do
-        check_quiet_addr "${base}.${suffix}"
+        check_quiet_addr "${base}.${suffix}" "${base}.0/24"
     done
     echo "----------------------------------------------------------------------"
     echo "Как читать: «ПРОХОДИТ» хотя бы на одном пустом адресе — вся /24, скорее"
@@ -202,7 +248,7 @@ check_range() { # check_range <a.b.c.0/24>
 }
 
 probe_deep() {
-    local host="$1" port="$2" attempt rc tls_ok=0 handshake=0 rst=0 timeout=0 other=0
+    local host="$1" port="$2" attempt rc tls_ok=0 handshake=0 rst=0 timeout=0 other=0 verdict
     echo "Глубокий замер: ${host}:${port}, попыток: ${REPEAT}"
     echo "Контроль: ${CONTROL_URL}"
     echo "----------------------------------------------------------------------"
@@ -236,19 +282,26 @@ probe_deep() {
         "$host" "$port" "$tls_ok" "$handshake" "$rst" "$timeout" "$other"
 
     if [[ "$tls_ok" -gt 0 ]]; then
+        verdict="ПРОХОДИТ"
         echo "ВЕРДИКТ: адрес ПРОХОДИТ — TCP и TLS состоялись. Можно брать."
     elif [[ "$handshake" -gt 0 && "$rst" -eq 0 && "$timeout" -eq 0 ]]; then
+        verdict="НЕОДНОЗНАЧНО"
         echo "ВЕРДИКТ: НЕОДНОЗНАЧНО — TCP есть, TLS обрывается (rc=35)."
         echo "          Так выглядят и блок без RST, и перехват, и кривой слушатель."
         echo "          Подними на адресе рабочий TLS и повтори; без этого не брать."
     elif [[ "$rst" -gt 0 && "$timeout" -eq 0 ]]; then
+        verdict="БЛОК"
         echo "ВЕРДИКТ: адрес ЗАБЛОКИРОВАН (RST от фильтра). Не брать."
     elif [[ "$timeout" -gt 0 && "$rst" -eq 0 ]]; then
+        verdict="ТИШИНА"
         echo "ВЕРДИКТ: тишина. Либо нет слушателя, либо блок без RST."
         echo "          Подними на адресе TLS-слушатель и повтори — иначе вывод неоднозначен."
     else
+        verdict="СМЕШАННО"
         echo "ВЕРДИКТ: смешанная картина — режим переключается по вышкам. Повтори замер."
     fi
+    report_row "deep" "${host}:${port}" "" "$verdict" \
+        "tls=$tls_ok;hs=$handshake;rst=$rst;to=$timeout;other=$other;sni=${SNI:-нет}"
 
     if run_timeout "$((TIMEOUT + 2))" curl "${curl_args[@]}" "$CONTROL_URL" >/dev/null 2>&1; then
         pass "контроль после" "интернет есть"
@@ -428,6 +481,12 @@ else
 fi
 
 # --- итог -------------------------------------------------------------------
+
+# Строка отчёта по полному прогону: вердикт складывается из счётчиков проверок.
+verdict="НЕ ПРОХОДИТ"
+[[ "$FAIL_N" -eq 0 && "$PASS_N" -gt 0 ]] && verdict="ПРОХОДИТ"
+[[ "$FAIL_N" -gt 0 && "$PASS_N" -gt 0 ]] && verdict="ЧАСТИЧНО"
+report_row "full" "${HOST}" "" "$verdict" "ok=$PASS_N;fail=$FAIL_N;skip=$SKIP_N;sni=${SNI:-нет}"
 
 cat <<'EOF'
 ----------------------------------------------------------------------
