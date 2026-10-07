@@ -11,7 +11,7 @@ from app.bot import keyboards, texts
 from app.config import get_settings
 from app.db.models import User
 from app.panels.registry import registry
-from app.services import referral, subscriptions
+from app.services import orders, promo, referral, subscriptions
 
 router = Router(name="start")
 settings = get_settings()
@@ -26,7 +26,47 @@ async def main_menu_view(session: AsyncSession, user: User) -> tuple[str, object
         text = texts.MENU_ACTIVE
     else:
         text = texts.MENU_EXPIRED
-    return text, keyboards.main_menu(has_subscription=sub is not None, is_active=bool(sub and sub.is_active))
+    # Скидку показываем там, где человек точно её увидит.
+    promo_row = await promo.available(session, user)
+    if promo_row is not None:
+        text += texts.MENU_DISCOUNT_HINT.format(percent=promo_row.percent)
+    # Цену самого дешёвого тарифа видно прямо в меню: клиент понимает
+    # порядок цен, не открывая раздел «Тарифы».
+    plans = await orders.list_plans(session)
+    min_price = min((plan.price_rub for plan in plans), default=0)
+    return text, keyboards.main_menu(
+        has_subscription=sub is not None,
+        is_active=bool(sub and sub.is_active),
+        min_price=min_price,
+    )
+
+
+async def send_referral_greeting(
+    message: Message, session: AsyncSession, user: User, referrer: User
+) -> None:
+    """Поздороваться с приглашённым и сразу показать его скидку."""
+    plans = await orders.list_plans(session)
+    percent = settings.referral_discount_percent
+    examples = "\n".join(
+        texts.REFERRAL_GREETING_EXAMPLE.format(
+            title=plan.title,
+            base=plan.price_rub,
+            price=plan.price_rub
+            - promo.calc_discount_rub(plan.price_rub, percent, settings.referral_discount_max_rub),
+        )
+        for plan in plans[:3]
+    )
+    await message.answer(
+        texts.REFERRAL_GREETING.format(
+            referrer=referrer.display_name,
+            percent=percent,
+            examples=examples,
+            invited_days=settings.referral_bonus_days_invited,
+            code=promo.code_for_referral(referrer.referral_code),
+        ),
+        reply_markup=keyboards.plans_button_kb(),
+        disable_web_page_preview=True,
+    )
 
 
 @router.message(CommandStart())
@@ -38,11 +78,8 @@ async def cmd_start(message: Message, session: AsyncSession, user: User) -> None
 
     if payload.startswith("ref_"):
         referrer = await referral.attach_referrer(session, user, payload[4:])
-        if referrer is not None:
-            await message.answer(
-                f"👋 Тебя пригласил {referrer.display_name}. "
-                f"После первой оплаты ты получишь +{settings.referral_bonus_days_invited} дня к подписке."
-            )
+        if referrer is not None and referrer.id != user.id:
+            await send_referral_greeting(message, session, user, referrer)
 
     text, markup = await main_menu_view(session, user)
     await message.answer(text, reply_markup=markup)

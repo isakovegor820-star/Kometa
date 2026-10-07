@@ -16,7 +16,7 @@ from app.panels.registry import registry
 from app.payments.base import PaymentError, PaymentStatus
 from app.payments.payload import parse_order_id_from_payload
 from app.payments.registry import payments
-from app.services import events, notifications, orders, subscriptions
+from app.services import events, notifications, orders, promo, subscriptions
 
 logger = logging.getLogger(__name__)
 router = Router(name="buy")
@@ -37,28 +37,39 @@ def _expires_text(dt) -> str:
     return dt.strftime("%d.%m.%Y %H:%M") if dt else "—"
 
 
-async def send_plans(target: Message | CallbackQuery, session: AsyncSession) -> None:
-    if not settings.sales_enabled:
-        await _show_closed(target)
-        return
+async def send_plans(target: Message | CallbackQuery, session: AsyncSession, user: User | None = None) -> None:
+    """Экран тарифов.
 
+    Тарифы показываем ВСЕГДА — и пока оплата не подключена: банк-партнёр и клиент
+    должны видеть, сколько и за что платят. Отличается только шапка: при закрытых
+    продажах честно пишем, что оплата по СБП включится в ближайшие дни.
+    """
     plans = await orders.list_plans(session)
     if not plans:
         text, markup = texts.WELCOME, keyboards.back_to_menu_kb()
+    elif not settings.sales_enabled:
+        text = texts.PLANS_HEADER_SOON.format(
+            devices=plans[0].devices_limit,
+            locations=settings.locations_note,
+        )
+        markup = keyboards.plans_kb(plans)
     else:
-        text = texts.PLANS_HEADER
-        markup = keyboards.plans_kb(plans, show_stars=settings.stars_enabled)
-    if isinstance(target, CallbackQuery):
-        await target.message.edit_text(text, reply_markup=markup)
-        await target.answer()
-    else:
-        await target.answer(text, reply_markup=markup)
-
-
-async def _show_closed(target: Message | CallbackQuery) -> None:
-    """Заглушка на время подготовки: деньги не принимаем."""
-    text = texts.SALES_CLOSED.format(note=settings.sales_closed_note)
-    markup = keyboards.back_to_menu_kb()
+        promo_row = await promo.available(session, user) if user is not None else None
+        percent = promo_row.percent if promo_row else 0
+        if percent:
+            text = texts.PLANS_HEADER_DISCOUNT.format(percent=percent)
+        else:
+            text = texts.PLANS_HEADER + texts.REFERRAL_TEASER.format(
+                percent=settings.referral_discount_percent,
+                referrer_days=settings.referral_bonus_days_referrer,
+            )
+        markup = keyboards.plans_kb(
+            plans,
+            show_stars=settings.stars_enabled,
+            discount_percent=percent,
+            max_discount_rub=promo_row.max_discount_rub if promo_row else 0,
+            show_promo_button=percent == 0,
+        )
     if isinstance(target, CallbackQuery):
         await target.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
         await target.answer()
@@ -66,18 +77,37 @@ async def _show_closed(target: Message | CallbackQuery) -> None:
         await target.answer(text, reply_markup=markup, disable_web_page_preview=True)
 
 
+async def show_payment_soon(target: Message | CallbackQuery, plan) -> None:  # noqa: ANN001 - Plan
+    """Заглушка «оплата по СБП скоро будет доступна».
+
+    Показывается после выбора тарифа и нажатия СБП, пока канал не подключён:
+    клиент видит путь оплаты целиком, но денег мы не берём и заявок не создаём.
+    """
+    text = texts.PAYMENT_SOON.format(
+        title=plan.title,
+        price=texts.format_rub(plan.price_rub),
+        days=plan.days,
+        support=settings.support_contact or "кнопка «☎️ Поддержка»",
+    )
+    markup = keyboards.docs_back_kb()
+    if isinstance(target, CallbackQuery):
+        await target.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+    else:
+        await target.answer(text, reply_markup=markup, disable_web_page_preview=True)
+
+
 @router.callback_query(F.data == "plans")
-async def cb_plans(call: CallbackQuery, session: AsyncSession) -> None:
-    await send_plans(call, session)
+async def cb_plans(call: CallbackQuery, session: AsyncSession, user: User) -> None:
+    await send_plans(call, session, user)
 
 
 @router.message(F.text == keyboards.BTN_PLANS)
-async def msg_plans(message: Message, session: AsyncSession) -> None:
-    await send_plans(message, session)
+async def msg_plans(message: Message, session: AsyncSession, user: User) -> None:
+    await send_plans(message, session, user)
 
 
 @router.callback_query(F.data.startswith("plan:"))
-async def cb_plan_card(call: CallbackQuery, session: AsyncSession) -> None:
+async def cb_plan_card(call: CallbackQuery, session: AsyncSession, user: User) -> None:
     plan_id = int(call.data.split(":", 1)[1])
     plan = await orders.get_plan(session, plan_id)
     if plan is None or not plan.is_active:
@@ -85,37 +115,101 @@ async def cb_plan_card(call: CallbackQuery, session: AsyncSession) -> None:
         return
 
     available = payments.available()
+    # Пока оплата не подключена, показываем карточку тарифа и путь оплаты
+    # целиком: тариф → СБП → заглушка «скоро». Деньги не принимаем.
+    if not settings.sales_enabled:
+        await _show_plan_card(call, plan, providers=[], sbp_soon=True)
+        return
+
     if not available:
         await call.answer("Приём оплаты временно недоступен", show_alert=True)
         return
 
+    await _show_plan_card(
+        call,
+        plan,
+        providers=[(p.code, PROVIDER_TITLES.get(p.code, p.title)) for p in available],
+        session=session,
+        user=user,
+    )
+
+
+async def _show_plan_card(
+    call: CallbackQuery,
+    plan,  # noqa: ANN001 - Plan
+    *,
+    providers: list[tuple[str, str]],
+    sbp_soon: bool = False,
+    session: AsyncSession | None = None,
+    user: User | None = None,
+) -> None:
+    """Карточка тарифа с ценами, скидкой и способами оплаты."""
+    promo_row = await promo.available(session, user) if (session is not None and user is not None) else None
+    discount = promo.make_discount(promo_row, plan.price_rub) if promo_row else None
+    price = discount.amount_rub if discount else plan.price_rub
+
     stars_line = ""
-    if settings.stars_enabled and plan.price_stars:
-        stars_line = texts.STARS_LINE.format(stars=plan.price_stars)
+    if settings.stars_enabled and plan.price_stars and not sbp_soon:
+        if discount and discount.discount_rub:
+            stars_line = texts.STARS_LINE_DISCOUNT.format(
+                stars=discount.stars_for(plan.price_stars), base_stars=plan.price_stars
+            )
+        else:
+            stars_line = texts.STARS_LINE.format(stars=plan.price_stars)
+
+    if discount and discount.discount_rub:
+        price_line = texts.PRICE_LINE_DISCOUNT.format(
+            base=plan.price_rub,
+            price=price,
+            per_month=round(price / max(1, plan.days) * 30),
+            percent=discount.percent,
+            stars_line=stars_line,
+        )
+    else:
+        price_line = texts.PRICE_LINE.format(
+            price=price,
+            per_month=round(price / max(1, plan.days) * 30),
+            stars_line=stars_line,
+        )
 
     text = texts.PLAN_CARD.format(
         title=plan.title,
-        price=plan.price_rub,
-        per_month=round(plan.price_rub / max(1, plan.days) * 30),
+        price_line=price_line,
         days=plan.days,
         devices=plan.devices_limit,
-        stars_line=stars_line,
     )
-    markup = keyboards.providers_kb(plan.id, [(p.code, PROVIDER_TITLES.get(p.code, p.title)) for p in available])
+    if sbp_soon:
+        text += texts.PLAN_CARD_SOON_NOTE
+
+    markup = keyboards.providers_kb(plan.id, providers, sbp_soon=sbp_soon)
     await call.message.edit_text(text, reply_markup=markup)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("sbp:soon:"))
+async def cb_sbp_soon(call: CallbackQuery, session: AsyncSession) -> None:
+    """СБП выбран, но канал ещё не подключён — показываем заглушку."""
+    plan = await orders.get_plan(session, int(call.data.rsplit(":", 1)[1]))
+    if plan is None:
+        await call.answer("Тариф недоступен", show_alert=True)
+        return
+    await show_payment_soon(call, plan)
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("pay:"))
 async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None:
+    _, plan_id_raw, provider_code = call.data.split(":")
+
     if not settings.sales_enabled:
         # Защита от старых кнопок: даже если у клиента осталось сообщение
-        # с тарифом, деньги не принимаем.
-        await call.answer("Продажи ещё не открыты", show_alert=True)
-        await _show_closed(call)
+        # с тарифом, деньги не принимаем — показываем заглушку «скоро».
+        plan = await orders.get_plan(session, int(plan_id_raw))
+        await call.answer("Оплата по СБП скоро будет доступна")
+        if plan is not None:
+            await show_payment_soon(call, plan)
         return
 
-    _, plan_id_raw, provider_code = call.data.split(":")
     plan = await orders.get_plan(session, int(plan_id_raw))
     provider = payments.get(provider_code)
     if plan is None or provider is None:
@@ -124,16 +218,18 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
 
     order = await orders.create_order(session, user, plan, provider=provider.code)
     title = f"{texts.BRAND}: {plan.title}"
+    # Точная цена в звёздах для этого заказа: со скидкой она ниже тарифной.
+    stars_price = order.stars_amount or plan.price_stars
 
     try:
         invoice = await provider.create_invoice(
             order.id,
             order.amount_rub,
             title,
-            # У Stars своя сетка цен — берём цену из тарифа;
+            # У Stars своя сетка цен — берём цену заказа (уже со скидкой);
             # ручному переводу нужна точная сумма с уникальными копейками,
             # по которым автоплатёж находит заказ.
-            price_override=plan.price_stars or None,
+            price_override=stars_price or None,
             exact_kopecks=order.pay_amount_kopecks,
         )
     except PaymentError as exc:
@@ -145,6 +241,10 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
     if order.external_id == f"ord-{order.id}":
         order.external_id = invoice.external_id
         await session.flush()
+
+    discount_note = ""
+    if order.discount_rub:
+        discount_note = texts.DISCOUNT_NOTE.format(discount=order.discount_rub, code=order.promo_code)
 
     if provider.code == "manual":
         text = texts.ORDER_CREATED_MANUAL.format(
@@ -170,15 +270,17 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
     else:
         text = texts.ORDER_CREATED_STARS.format(order_id=order.id, amount=order.amount_rub)
         if settings.stars_reseller_url:
-            text += texts.STARS_NO_BALANCE_HINT.format(stars=plan.price_stars)
+            text += texts.STARS_NO_BALANCE_HINT.format(stars=stars_price)
         markup = keyboards.stars_order_kb(
             order.id,
             invoice.pay_url or "",
             reseller_url=settings.stars_reseller_url,
-            stars=plan.price_stars,
+            stars=stars_price,
         )
 
-    await call.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+    await call.message.edit_text(
+        discount_note + text, reply_markup=markup, disable_web_page_preview=True
+    )
     await call.answer()
 
 
@@ -258,9 +360,9 @@ async def cb_check_payment(call: CallbackQuery, session: AsyncSession, user: Use
 
 async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> None:
     """Единая точка выдачи доступа после успешной оплаты."""
-    panel = registry.primary()
+    panel = await subscriptions.all_user_panels(session)
     try:
-        sub, already = await orders.mark_paid(session, order, panel)
+        sub, already = await orders.mark_paid(session, order, panel, bot=bot)
     except PanelError as exc:
         logger.error("Панель не выдала доступ по заказу %s: %s", order.id, exc)
         await events.log_event(session, events.PANEL_ERROR, user_id=user.id, payload={"order_id": order.id})
@@ -268,19 +370,34 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
         return
 
     if already or sub is None:
+        # Заказ мог быть отменён (например, клиент выбрал другой тариф или
+        # способ оплаты, а деньги по старому счёту всё-таки пришли).
+        # Молча терять оплату нельзя — зовём админа.
+        if sub is None and not already:
+            await notifications.notify_admins(
+                bot,
+                f"⚠️ <b>Оплата по отменённому заказу #{order.id}</b>\n"
+                f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>)\n"
+                f"Сумма: {order.amount_rub} ₽, способ: {order.provider}\n\n"
+                "Проверь поступление и выдай доступ вручную (/grant).",
+            )
         return
 
     link = subscriptions.subscription_link(sub.subscription_token)
+    text = texts.order_paid_text(
+        order, expires=_expires_text(sub.expires_at), days=sub.days_left, link=link
+    )
     await bot.send_message(
         user.tg_id,
-        texts.ORDER_PAID.format(expires=_expires_text(sub.expires_at), days=sub.days_left, link=link),
+        text,
         reply_markup=keyboards.connect_kb(link),
         disable_web_page_preview=True,
     )
     plan = await orders.get_plan(session, order.plan_id) if order.plan_id else None
+    discount_note = f", скидка {order.discount_rub} ₽" if order.discount_rub else ""
     await notifications.notify_admins(
         bot,
-        f"💰 Оплата: заказ #{order.id}, {order.amount_rub} ₽, {plan.title if plan else '—'}, "
+        f"💰 Оплата: заказ #{order.id}, {order.amount_rub} ₽{discount_note}, {plan.title if plan else '—'}, "
         f"пользователь {user.display_name} (<code>{user.tg_id}</code>)",
     )
 
@@ -303,13 +420,15 @@ async def on_pre_checkout(query: PreCheckoutQuery, session: AsyncSession) -> Non
         return
 
     plan = await orders.get_plan(session, order.plan_id) if order.plan_id else None
-    if query.currency != "XTR" or (plan and plan.price_stars and query.total_amount != plan.price_stars):
+    # Сверяем со снимком цены в заказе: со скидкой она ниже тарифной.
+    expected = order.stars_amount or (plan.price_stars if plan else 0)
+    if query.currency != "XTR" or (expected and query.total_amount != expected):
         logger.warning(
             "Stars: несовпадение счёта order=%s currency=%s amount=%s expected=%s",
             order.id,
             query.currency,
             query.total_amount,
-            plan.price_stars if plan else None,
+            expected,
         )
         await query.answer(ok=False, error_message="Сумма счёта не совпадает с тарифом. Оформи заказ заново.")
         return

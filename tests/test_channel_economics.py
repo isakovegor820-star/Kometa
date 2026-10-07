@@ -51,6 +51,35 @@ async def test_wata_channel_subtracts_acquiring_fee(session, monkeypatch):
     assert 3.0 < wata.fee_percent < 4.0
 
 
+async def test_sbp_partner_channel_subtracts_eight_percent(session, monkeypatch):
+    """СБП через банк-партнёра: 8 % с оборота (условия партнёра от 06.10.2026)."""
+    monkeypatch.setattr(settings, "fee_percent_sbp", 8.0)
+    await make_paid_order(session, 9940, "platega_sbp")
+    await session.flush()
+
+    channels = await stats.channel_economics(session, days=30)
+    sbp = next(c for c in channels if c.provider == "platega_sbp")
+
+    assert sbp.gross_rub == 199
+    assert sbp.net_rub == 183  # 199 − 8 %
+    assert 7.5 < sbp.fee_percent < 8.5
+    # Прямой перевод на карту комиссии не платит — это разные каналы.
+    assert 183 < 199
+
+
+async def test_crypto_channel_subtracts_five_percent(session, monkeypatch):
+    """Криптоплатежи: 5 % по условиям партнёра."""
+    monkeypatch.setattr(settings, "fee_percent_crypto", 5.0)
+    await make_paid_order(session, 9941, "crypto")
+    await session.flush()
+
+    channels = await stats.channel_economics(session, days=30)
+    crypto = next(c for c in channels if c.provider == "crypto")
+
+    assert crypto.net_rub == 189  # 199 − 5 %
+    assert 4.5 < crypto.fee_percent < 5.5
+
+
 async def test_stars_channel_counts_telegram_payout(session, monkeypatch):
     """У звёзд комиссия структурная: получаем $0.013 за звезду, а не рубли счёта."""
     monkeypatch.setattr(settings, "stars_payout_usd", 0.013)

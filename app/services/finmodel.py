@@ -130,6 +130,47 @@ def break_even_users(net_per_user: float, costs: Costs) -> float:
     return costs.monthly / net_per_user
 
 
+#: Комиссии каналов оплаты в процентах от оборота — условия партнёра
+#: от 06.10.2026. Процент СБП зависит от объёма оборотов и снижается
+#: по мере роста (пересматривается с партнёром).
+CHANNEL_FEES: dict[str, float] = {
+    "sbp": 8.0,  # СБП НСПК: QR-код или оплата по ссылке из банковского приложения
+    "crypto": 5.0,  # криптоплатежи через платёжный сервис
+    "wata": 3.5,  # карты и СБП через WATA
+    "stars": 5.0,  # вывод звёзд через Fragment
+}
+
+#: Наценка банка на конвертацию рублей в USDT при выплатах (Rapira), %.
+#: Партнёр своей комиссии за конвертацию не берёт — обмен делает банк,
+#: поэтому эта наценка вычитается из каждой выплаты.
+CONVERSION_FEE_PERCENT: float = 2.0
+
+
+def net_after_channel_fee(amount_rub: float, fee_percent: float) -> float:
+    """Сколько остаётся с чека после комиссии канала оплаты.
+
+    Нужно, чтобы «средний чек» в модели не выдавал желаемое за действительное:
+    с тарифа 199 ₽ при комиссии 8 % на руки приходит 183 ₽, а не 199 ₽.
+    """
+    if not 0 <= fee_percent < 100:
+        raise ValueError("комиссия должна быть в диапазоне [0, 100)")
+    return amount_rub * (1 - fee_percent / 100)
+
+
+def net_after_partner_payout(
+    amount_rub: float,
+    channel_fee_percent: float,
+    conversion_percent: float = CONVERSION_FEE_PERCENT,
+) -> float:
+    """Сколько реально доходит до нас: комиссия канала + конвертация в USDT.
+
+    Партнёр удерживает процент с оборота (8 % по СБП), а затем банк конвертирует
+    рубли в USDT с наценкой 2 %. Итог по СБП — около 9,8 % от чека.
+    """
+    after_channel = net_after_channel_fee(amount_rub, channel_fee_percent)
+    return net_after_channel_fee(after_channel, conversion_percent)
+
+
 def capacity_users(nodes: int = 1, *, per_node_min: int = 30, per_node_max: int = 60) -> tuple[int, int]:
     """Сколько клиентов выдержат ноды (по опыту: 1 vCPU ≈ 30–60 активных)."""
     return per_node_min * nodes, per_node_max * nodes

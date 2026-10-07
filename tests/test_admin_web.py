@@ -173,3 +173,95 @@ async def test_login_throttle_blocks_bruteforce(client):
     response = await client.post("/admin/login", data={"password": PASSWORD})
     location = unquote(response.headers["location"])
     assert "Слишком много попыток" in location
+
+
+async def test_referrals_page_shows_program_stats(client, session, panel):
+    from app.services import orders, referral
+
+    referrer, _ = await subscriptions.get_or_create_user(session, tg_id=8901, username="inviter")
+    invited, _ = await subscriptions.get_or_create_user(session, tg_id=8902, username="friend")
+    await subscriptions.start_trial(session, referrer, panel)
+    await referral.attach_referrer(session, invited, referrer.referral_code)
+    plan = (await orders.list_plans(session))[0]
+    order = await orders.create_order(session, invited, plan, provider="manual")
+    await orders.mark_paid(session, order, panel)
+    await session.commit()
+
+    await login(client)
+    response = await client.get("/admin/referrals")
+    page = response.text
+
+    assert response.status_code == 200
+    assert "Рефералы и промокоды" in page
+    assert "inviter" in page  # топ пригласивших
+    assert "friend" in page  # последнее приглашение
+    assert "+30 дн." in page  # награда начислена
+    assert "конверсия 100%" in page
+    assert "99 ₽" in page  # сумма выданных скидок
+
+
+async def test_promo_can_be_created_and_disabled_from_panel(client, session):
+    from app.services import promo
+
+    await login(client)
+    created = await client.post(
+        "/admin/referrals/promo",
+        data={"code": "launch50", "percent": "50", "uses": "10", "days": "30"},
+    )
+    assert created.status_code == 303
+
+    row = await promo.get_by_code(session, "LAUNCH50")
+    assert row is not None and row.is_active and row.percent == 50
+
+    page = await client.get("/admin/referrals")
+    assert "LAUNCH50" in page.text
+
+    off = await client.post(f"/admin/referrals/promo/{row.id}/toggle")
+    assert off.status_code == 303
+
+    await session.refresh(row)
+    assert row.is_active is False
+
+
+async def test_admin_can_add_and_toggle_node(client, session):
+    """Страну (ноду) можно подключить формой в админке — без SQL и перезапуска.
+
+    Смысл для продукта: чтобы сервис работал и во Владивостоке, новая нода
+    должна подключаться за минуту. После сохранения клиенты выдаются и на ней,
+    а ссылка-подписка начинает отдавать её локацию.
+    """
+    from sqlalchemy import select
+
+    from app.db.models import Node
+    from app.panels.registry import registry
+
+    await login(client)
+    response = await client.post(
+        "/admin/nodes",
+        data={
+            "code": "jp",
+            "title": "🇯🇵 Япония",
+            "country": "JP",
+            "host": "203.0.113.99",
+            "panel_url": "http://203.0.113.99:2053/panel",
+            "panel_token": "secret-token",
+            "inbound_ids": "1,2",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = await session.scalar(select(Node).where(Node.code == "jp"))
+    assert saved is not None and saved.is_active is True
+    assert saved.inbound_ids == "1,2"
+
+    # нода появилась в списке панелей, с которых собирается подписка
+    panels = await registry.all_panels(session)
+    assert any(getattr(panel, "base_url", "") == "http://203.0.113.99:2053/panel" for panel in panels)
+
+    # выключенная нода перестаёт участвовать
+    toggled = await client.post(f"/admin/nodes/{saved.id}/toggle", follow_redirects=False)
+    assert toggled.status_code == 303
+    await session.refresh(saved)
+    assert saved.is_active is False
+    registry.invalidate()

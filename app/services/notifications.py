@@ -63,3 +63,48 @@ async def notify_expired(bot: Bot, session: AsyncSession, changed: list[Subscrip
 async def notify_admins(bot: Bot, text: str) -> None:
     for admin_id in settings.admin_id_list:
         await _send(bot, admin_id, text)
+
+
+async def notify_referral_reward(bot: Bot, reward) -> bool:  # noqa: ANN001 - referral.Reward
+    """Сказать пригласившему, что друг оплатил и бонус начислен.
+
+    Без этого сообщения люди не понимают, что рефералка работает:
+    «я привёл друга, а где мои дни?» — самый частый вопрос в поддержку.
+    """
+    referrer = reward.referrer
+    if referrer.is_blocked:
+        return False
+
+    if reward.referrer_accrued:
+        tail = (
+            f"Дни уже в запасе: <b>{referrer.bonus_days_balance} дн.</b>\n\n"
+            "Как только подключишься (пробный доступ или оплата) — они добавятся к сроку "
+            "автоматически."
+        )
+    else:
+        expires = ""
+        if reward.referrer_sub is not None and reward.referrer_sub.expires_at:
+            expires = f"\nПодписка теперь активна до <b>{reward.referrer_sub.expires_at:%d.%m.%Y}</b>."
+        tail = f"Дни уже начислены.{expires}"
+
+    text = (
+        "🎉 <b>Твой друг оплатил подписку!</b>\n\n"
+        f"Тебе начислено <b>+{reward.referrer_days} дней</b> бесплатно.\n\n"
+        f"{tail}\n\n"
+        "Приглашай ещё — дни копятся: раздел «Пригласить друга»."
+    )
+    return await _send(bot, referrer.tg_id, text)
+
+
+async def notify_referral_limit(bot: Bot, reward) -> bool:  # noqa: ANN001 - referral.Reward
+    """Честно предупредить, что месячный лимит наград исчерпан."""
+    referrer = reward.referrer
+    if referrer.is_blocked:
+        return False
+    text = (
+        "Друг оплатил подписку, но месячный лимит наград исчерпан — "
+        f"бонус за эту оплату не начислен.\n\n"
+        f"Лимит: {settings.referral_max_rewards_per_month} наград в месяц. "
+        "Напиши в поддержку — разберёмся."
+    )
+    return await _send(bot, referrer.tg_id, text)

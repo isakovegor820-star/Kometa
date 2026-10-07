@@ -241,7 +241,7 @@ async def reconcile(
             try:
                 sub, already = await orders_service.mark_paid(
                     session, order, panel, confirmed_by=None,
-                    provider_payment_id=payment.key,
+                    provider_payment_id=payment.key, bot=bot,
                 )
             except Exception as exc:  # noqa: BLE001 - панель могла отвалиться
                 logger.error("Не смог выдать доступ по заказу %s: %s", order.id, exc)
@@ -262,7 +262,7 @@ async def reconcile(
                 },
             )
             if bot is not None and user is not None and sub is not None and not already:
-                await _notify_user(bot, user, sub)
+                await _notify_user(bot, user, sub, order)
                 await notifications.notify_admins(
                     bot,
                     f"🤖 <b>Автоподтверждение оплаты</b>\n"
@@ -309,16 +309,17 @@ async def reconcile(
     return result
 
 
-async def _notify_user(bot: Bot, user: User, sub) -> None:  # noqa: ANN001 - Subscription
+async def _notify_user(bot: Bot, user: User, sub, order=None) -> None:  # noqa: ANN001 - Subscription, Order
     from app.services import subscriptions as subs_service
 
     expires = sub.expires_at.strftime("%d.%m.%Y %H:%M") if sub.expires_at else "—"
     with_link = getattr(sub, "subscription_token", "")
+    text = f"✅ Оплата получена! Подписка активна до <b>{expires}</b> ({sub.days_left} дн.)."
+    reward = getattr(order, "referral_reward", None)
+    if reward is not None and reward.invited_days:
+        text += texts.ORDER_PAID_REFERRAL_BONUS.format(days=reward.invited_days)
     try:
-        await bot.send_message(
-            user.tg_id,
-            f"✅ Оплата получена! Подписка активна до <b>{expires}</b> ({sub.days_left} дн.).",
-        )
+        await bot.send_message(user.tg_id, text)
         if with_link:
             from app.bot import keyboards
 

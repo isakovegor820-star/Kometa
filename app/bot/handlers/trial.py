@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,25 +17,33 @@ from app.services import subscriptions
 
 router = Router(name="trial")
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @router.callback_query(F.data == "trial:start")
 async def cb_start_trial(call: CallbackQuery, session: AsyncSession, user: User) -> None:
-    if not settings.sales_enabled:
-        # Нода не готова — тестовый доступ тоже не выдаём, иначе клиент
-        # получит нерабочий конфиг и уйдёт.
-        await call.answer("Сервис готовится к запуску", show_alert=True)
+    if not settings.trial_enabled:
+        # Закрыт именно пробный доступ (TRIAL_ENABLED). Продажи тут ни при чём:
+        # их закрывает отдельный флаг SALES_ENABLED, и при нём пробный доступ
+        # как раз работает — так пускаем людей на 3 дня, пока нет оплаты.
+        await call.answer("Пробный доступ скоро откроется", show_alert=True)
         await call.message.edit_text(
-            texts.SALES_CLOSED.format(note=settings.sales_closed_note),
+            texts.TRIAL_CLOSED.format(note=settings.trial_closed_note),
             reply_markup=keyboards.back_to_menu_kb(),
             disable_web_page_preview=True,
         )
         return
 
-    panel = registry.primary()
+    panel = await subscriptions.all_user_panels(session)
+    # Заработанные на приглашениях дни добавляются к пробному доступу:
+    # считаем их до вызова, потому что start_trial обнуляет баланс.
+    bonus_days = int(user.bonus_days_balance or 0)
     try:
         sub, granted = await subscriptions.start_trial(session, user, panel)
-    except PanelError:
+    except PanelError as exc:
+        # Пишем в лог: без этого разбор «клиент не получил доступ» упирается
+        # в «Сервис временно недоступен» без единой строчки причины.
+        logger.error("Пробный доступ не выдан пользователю %s: %s", user.tg_id, exc)
         await call.message.edit_text(texts.ERROR_GENERIC, reply_markup=keyboards.back_to_menu_kb())
         await call.answer("Сервис временно недоступен", show_alert=False)
         return
@@ -47,8 +57,12 @@ async def cb_start_trial(call: CallbackQuery, session: AsyncSession, user: User)
         return
 
     link = subscriptions.subscription_link(sub.subscription_token)
+    traffic = "безлимитный трафик" if not settings.trial_gb else f"{settings.trial_gb} ГБ трафика"
+    text = texts.TRIAL_STARTED.format(days=settings.trial_days + bonus_days, traffic=traffic)
+    if bonus_days:
+        text += texts.TRIAL_BONUS_LINE.format(days=bonus_days)
     await call.message.edit_text(
-        texts.TRIAL_STARTED.format(days=settings.trial_days, gb=settings.trial_gb),
+        text,
         reply_markup=keyboards.subscription_kb(has_panel_user=bool(sub.panel_user_uuid)),
     )
     await call.message.answer(
