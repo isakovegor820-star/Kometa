@@ -53,6 +53,7 @@
           <th>Инбаунды</th>
           <th class="right">Приоритет</th>
           <th>Состояние</th>
+          <th>Канал и проба</th>
           {% if can_nodes_act %}<th class="actions">Действия</th>{% endif %}
         </tr>
       </thead>
@@ -94,6 +95,16 @@
             <span class="badge badge-err">нет ответа</span>
             {% endif %}
             {% if node.last_check_at %}<div class="xs dim">{{ ago(node.last_check_at) }}</div>{% endif %}
+          </td>
+          <td class="small">
+            {% if node.channel == 'reserve' %}<span class="badge badge-warn">резерв</span>{% else %}<span class="badge">обычная</span>{% endif %}
+            {% if node.last_probe_at %}
+            <div class="xs {{ 'dim' if node.last_probe_ok else 'text-err' }}">
+              {{ 'проба: ' ~ node.last_probe_ms ~ ' мс' if node.last_probe_ok else 'порт не пускает' }}
+            </div>
+            {% else %}
+            <div class="xs dim">пробы не было</div>
+            {% endif %}
           </td>
           {% if can_nodes_act %}
           <td class="actions">
@@ -193,6 +204,23 @@
           <input type="text" id="inbound_ids" name="inbound_ids" value="{{ edit_node.inbound_ids if edit_node else '' }}"
                  placeholder="1,2" maxlength="64">
           <div class="hint">Через запятую: Reality и AmneziaWG, из них собирается конфиг.</div>
+        </div>
+        <div class="field">
+          <label for="channel">Канал</label>
+          <select id="channel" name="channel">
+            <option value="main" {{ 'selected' if not edit_node or edit_node.channel == 'main' else '' }}>Обычная локация</option>
+            <option value="reserve" {{ 'selected' if edit_node and edit_node.channel == 'reserve' else '' }}>Резервная — профиль «резерв»</option>
+            <option value="cdn" {{ 'selected' if edit_node and edit_node.channel == 'cdn' else '' }}>CDN — профиль «CDN»</option>
+          </select>
+          <div class="hint">Каналы выносятся в отдельные группы автовыбора со своим test-URL: под ограничениями
+            обычные адреса не отвечают, а профиль канала — отвечает. Скорость на резерве ниже — так и пишем клиенту.</div>
+        </div>
+        <div class="field">
+          <label for="test_url">Свой test-URL канала</label>
+          <input type="text" id="test_url" name="test_url" value="{{ edit_node.test_url if edit_node else '' }}"
+                 placeholder="пусто — общий из PUBLIC_BASE_URL/ping" maxlength="255">
+          <div class="hint">Адрес для замера задержки клиентом (Clash url-test). Для CDN — адрес, доступный
+            абоненту, иначе приложение сочтёт профиль мёртвым. Должен отвечать 204 без тела.</div>
         </div>
         <div class="field">
           <label for="priority">Приоритет</label>

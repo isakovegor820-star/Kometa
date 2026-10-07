@@ -40,6 +40,9 @@ class UserSpec:
     traffic_gb: int = 0  # 0 = безлимит
     devices: int = 3
     note: str = ""
+    #: UUID клиента. Пусто — панель сгенерирует сама. Один и тот же uuid на всех
+    #: панелях нужен, чтобы ссылка-подписка собирала конфиги из всех стран.
+    uuid: str = ""
 
 
 @dataclass(slots=True)
@@ -61,6 +64,9 @@ class PanelClient(ABC):
     """Единый интерфейс панели."""
 
     name: str = "base"
+    #: Человеческое имя локации для подписки («🇩🇪 Германия»). Заполняет реестр:
+    #: у основной панели — LOCATION_TITLE, у ноды — её название из админки.
+    location_title: str = ""
 
     @abstractmethod
     async def health(self) -> bool:
@@ -69,6 +75,15 @@ class PanelClient(ABC):
     @abstractmethod
     async def list_inbounds(self) -> list[Inbound]:
         """Список инбаундов, из которых собирается подписка."""
+
+    async def list_users(self) -> list[PanelUser]:
+        """Все клиенты целевых инбаундов.
+
+        Нужен для аудита: раз в сутки сверяем, кто вообще сидит на сервере,
+        сколько скачал за день и нет ли «вечных» доступов без срока действия.
+        Панели, которые не умеют отдавать список, возвращают пустой список.
+        """
+        return []
 
     @abstractmethod
     async def create_user(self, spec: UserSpec) -> PanelUser:

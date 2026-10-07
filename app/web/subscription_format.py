@@ -34,6 +34,20 @@ DEFAULT_PORT = 443
 DEFAULT_FINGERPRINT = "firefox"
 #: URL проверки задержки: лёгкий 204 от Google, не отдаёт контент.
 DEFAULT_TEST_URL = "http://www.gstatic.com/generate_204"
+#: Каналы доступа, которые подписка помечает в имени профиля.
+#:
+#: Код → (метка в имени, человеческое имя группы). Обычные локации (``main``)
+#: метки не имеют. Каждому каналу подписка делает отдельную группу автовыбора
+#: со своим test-URL: под ограничениями обычный адрес не отвечает, а профиль
+#: канала — отвечает, и клиент видит по нему пинг, а не «мёртвые» локации.
+#: Метка видна и в base64-списке (Happ, v2RayTun), где групп нет.
+CHANNELS: dict[str, tuple[str, str]] = {
+    "reserve": (" · резерв", "Резерв"),
+    "cdn": (" · CDN", "CDN"),
+}
+
+#: Метка резервного канала — для обратной совместимости с прежним кодом.
+RESERVE_MARK = CHANNELS["reserve"][0]
 #: Интервал проверки задержки в Clash — секунды.
 DEFAULT_CLASH_INTERVAL = 300
 #: Интервал проверки задержки в sing-box — строка формата "3m".
@@ -41,8 +55,55 @@ DEFAULT_SINGBOX_INTERVAL = "3m"
 #: Разброс задержек (мс), в пределах которого узел не переключается.
 DEFAULT_TOLERANCE = 50
 
+#: Домены, которые обязаны идти напрямую, мимо туннеля: банки, госуслуги,
+#: маркетплейсы, сервисы операторов. Две причины. Первая — клиентская: с
+#: включённым туннелем эти сервисы часто отказывают, антифрод видит чужой
+#: адрес и просит «выключить VPN». Вторая — выживание входного узла: если
+#: через адрес из разрешённой подсети гонять трафик к разрешённым сервисам,
+#: подсеть выгорает для всех (docs/ОБХОД-БЕЛЫХ-СПИСКОВ-ПЛАН.md, §5).
+DIRECT_DOMAINS: tuple[str, ...] = (
+    "gosuslugi.ru",
+    "nalog.gov.ru",
+    "sberbank.ru",
+    "tbank.ru",
+    "vtb.ru",
+    "alfabank.ru",
+    "gazprombank.ru",
+    "psbank.ru",
+    "mtsbank.ru",
+    "vk.com",
+    "vk.ru",
+    "ok.ru",
+    "max.ru",
+    "yandex.ru",
+    "ya.ru",
+    "mail.ru",
+    "ozon.ru",
+    "wildberries.ru",
+    "avito.ru",
+    "2gis.ru",
+    "rzd.ru",
+    "aeroflot.ru",
+)
+
+#: Локальные сети — тоже напрямую: принтеры, NAS и роутер не должны уходить
+#: в туннель. Список в формате CIDR понимают и Clash, и sing-box.
+PRIVATE_CIDRS: tuple[str, ...] = (
+    "127.0.0.0/8",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+    "fc00::/7",
+    "::1/128",
+)
+
 #: Схемы, которые разбираются в VLESS-конфиг.
 VLESS_SCHEMES = ("vless",)
+#: Транспорты VLESS, работающие поверх UDP (в режиме «белых списков» не проходят).
+UDP_NETWORKS = ("kcp", "mkcp", "quic", "hysteria", "hysteria2", "tuic")
+#: Схемы ссылок, которые целиком построены на UDP.
+UDP_SCHEMES = ("hysteria", "hysteria2", "hy2", "tuic", "wireguard", "amneziawg")
 #: Схемы WireGuard-семейства (sing-box понимает их как ``wireguard``).
 WIREGUARD_SCHEMES = ("wireguard", "amneziawg")
 SUPPORTED_SCHEMES = VLESS_SCHEMES + WIREGUARD_SCHEMES
@@ -296,6 +357,7 @@ def build_clash_yaml(
     test_url: str = DEFAULT_TEST_URL,
     interval: int = DEFAULT_CLASH_INTERVAL,
     tolerance: int = DEFAULT_TOLERANCE,
+    test_urls: dict[str, str] | None = None,
 ) -> str:
     """Собрать подписку в формате Clash / Mihomo (YAML).
 
@@ -308,6 +370,8 @@ def build_clash_yaml(
     :param test_url: URL замера задержки.
     :param interval: период замера в секундах.
     :param tolerance: разброс задержек в мс, в пределах которого узел не меняется.
+    :param test_urls: свой test-URL по коду канала (``{"cdn": "..."}``): у канала
+        своя точка замера, иначе под ограничениями клиент считает его мёртвым.
     :return: YAML-текст подписки.
     """
     proxies: list[dict] = []
@@ -323,21 +387,103 @@ def build_clash_yaml(
 
     document = {
         "proxies": proxies,
-        "proxy-groups": [
-            {
-                "name": title,
-                "type": "url-test",
-                "url": test_url,
-                "interval": interval,
-                "tolerance": tolerance,
-                # Пустая группа ломает конфиг — тогда хотя бы DIRECT.
-                "proxies": names or ["DIRECT"],
-            }
-        ],
-        "rules": [f"MATCH,{title}"],
+        "proxy-groups": _clash_groups(
+            names,
+            title=title,
+            test_url=test_url,
+            interval=interval,
+            tolerance=tolerance,
+            test_urls=test_urls,
+        ),
+        "rules": _clash_rules(title),
     }
     body = yaml.safe_dump(document, allow_unicode=True, sort_keys=False)
     return CLASH_HEADER + body
+
+
+def _clash_rules(title: str) -> list[str]:
+    """Правила Clash: разрешённые РФ-сервисы и локальная сеть — напрямую.
+
+    Порядок важен: сначала домены (они не требуют резолва), потом гео-правило
+    по IP, и только в конце — «всё остальное в туннель».
+    """
+    rules = [f"DOMAIN-SUFFIX,{domain},DIRECT" for domain in DIRECT_DOMAINS]
+    rules.append("GEOIP,RU,DIRECT")
+    rules.append(f"MATCH,{title}")
+    return rules
+
+
+def channel_mark(channel: str | None) -> str:
+    """Метка канала для имени локации (пусто — обычная локация)."""
+    code = (channel or "main").strip().lower()
+    return CHANNELS.get(code, ("", ""))[0]
+
+
+def channel_of(name: str | None) -> str:
+    """Код канала по имени профиля (пусто — обычная локация)."""
+    lower = (name or "").lower()
+    for code, (mark, _title) in CHANNELS.items():
+        if mark.strip().lower() in lower:
+            return code
+    return ""
+
+
+def is_reserve_name(name: str | None) -> bool:
+    """Резервная ли локация — по метке :data:`RESERVE_MARK` в имени."""
+    return channel_of(name) == "reserve"
+
+
+def _by_channel(names: list[str]) -> dict[str, list[str]]:
+    """Разложить имена профилей по каналам, сохраняя порядок появления."""
+    grouped: dict[str, list[str]] = {}
+    for name in names:
+        code = channel_of(name)
+        if code:
+            grouped.setdefault(code, []).append(name)
+    return grouped
+
+
+def _clash_groups(
+    names: list[str],
+    *,
+    title: str,
+    test_url: str,
+    interval: int,
+    tolerance: int,
+    test_urls: dict[str, str] | None = None,
+) -> list[dict]:
+    """Группы автовыбора: общая «Авто» и по одной на каждый канал.
+
+    Общая группа включает всё: под ограничениями обычные адреса не отвечают,
+    url-test помечает их мёртвыми и оставляет живой канал — переключение
+    происходит само. Отдельные группы нужны, чтобы клиент мог выбрать канал
+    руками и увидеть пинг именно по нему (у канала свой test-URL).
+    """
+    groups: list[dict] = [
+        {
+            "name": title,
+            "type": "url-test",
+            "url": test_url,
+            "interval": interval,
+            "tolerance": tolerance,
+            # Пустая группа ломает конфиг — тогда хотя бы DIRECT.
+            "proxies": names or ["DIRECT"],
+        }
+    ]
+    urls = test_urls or {}
+    for code, members in _by_channel(names).items():
+        _mark, group_title = CHANNELS[code]
+        groups.append(
+            {
+                "name": f"{title} {group_title}",
+                "type": "url-test",
+                "url": urls.get(code) or test_url,
+                "interval": interval,
+                "tolerance": tolerance,
+                "proxies": members,
+            }
+        )
+    return groups
 
 
 def _singbox_vless_outbound(config: dict) -> dict:
@@ -384,6 +530,10 @@ def _singbox_wireguard_outbound(config: dict) -> dict:
     Берём только те параметры, которые sing-box действительно понимает:
     неизвестные ключи (например ``obfs``) он отвергнет вместе со всем конфигом.
     Если разобрать нечего — остаются базовые поля.
+
+    Следствие: обфускация AmneziaWG через sing-box-подписку недоставима, и это
+    не наша недоработка — ядра её не умеют. Клиентам с AWG нужен родной клиент
+    Amnezia (ссылка в подписке отдаётся как есть).
     """
     params: dict[str, str] = config.get("params", {})
 
@@ -423,12 +573,51 @@ def _singbox_wireguard_outbound(config: dict) -> dict:
     if mtu:
         outbound["mtu"] = mtu
 
-    # Параметры обфускации AmneziaWG — sing-box 1.12+ понимает их как есть.
-    for key in ("jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"):
-        value = _as_int(param(key))
-        if value is not None:
-            outbound[key] = value
+    # Параметры обфускации AmneziaWG (jc/jmin/jmax/s1-s4/h1-h4/i1-i5) сюда НЕ
+    # попадают сознательно: sing-box их не поддерживает — ни endpoint, ни
+    # устаревший outbound (проверено по докам v1.13.0 и v1.14.2: в структуре
+    # WireGuard есть только listen_port, peers, reserved, mtu, workers).
+    # Неизвестный ключ sing-box отвергает вместе со всем конфигом, то есть одна
+    # AWG-ссылка в подписке ломала бы и все VLESS-конфиги рядом.
+    # Обфускацию AmneziaWG применяют родные клиенты Amnezia / AmneziaWG —
+    # в подписке для них ссылка остаётся как есть (``config["raw"]``).
+    keepalive = _as_int(param("persistentkeepalive", "persistent_keepalive", "keepalive"))
+    if keepalive:
+        outbound["persistent_keepalive_interval"] = keepalive
     return outbound
+
+
+def is_udp_based(config: dict) -> bool:
+    """Работает ли конфиг поверх UDP.
+
+    В режиме «белых списков» у оператора проходят только TCP 80/443/22 —
+    любой UDP-транспорт там мёртв: Hysteria2, TUIC, QUIC, AmneziaWG/WireGuard
+    (`.research/lte-operators.md`: под БС UDP не проходит вовсе).
+    Признак нужен, чтобы не отдавать клиенту заведомо нерабочий профиль:
+    приложение будет долбиться в него и показывать «VPN не подключается».
+
+    :param config: разобранный конфиг из :func:`parse_config_link`.
+    :return: ``True``, если транспорт UDP.
+    """
+    if config.get("kind") == "wireguard":
+        return True
+    network = str(config.get("network") or "").lower()
+    if network in UDP_NETWORKS:
+        return True
+    # Ссылки hysteria2/tuic парсер не разбирает (kind не vless/wireguard), но
+    # если такая строка появится, распознаём её по схеме.
+    scheme = str(config.get("raw") or "").split("://", 1)[0].lower()
+    return scheme in UDP_SCHEMES
+
+
+def is_udp_link(link: str) -> bool:
+    """Проверить по строке ссылки, что транспорт UDP (см. :func:`is_udp_based`)."""
+    config = parse_config_link(link)
+    if config is None:
+        # Неразобранный мусор: смотрим на схему, чтобы hysteria2/tuic не просочились.
+        scheme = str(link or "").split("://", 1)[0].strip().lower()
+        return scheme in UDP_SCHEMES
+    return is_udp_based(config)
 
 
 def build_singbox_json(
@@ -438,6 +627,8 @@ def build_singbox_json(
     test_url: str = DEFAULT_TEST_URL,
     interval: str = DEFAULT_SINGBOX_INTERVAL,
     tolerance: int = DEFAULT_TOLERANCE,
+    tcp_only: bool = False,
+    test_urls: dict[str, str] | None = None,
 ) -> str:
     """Собрать подписку в формате sing-box (JSON).
 
@@ -450,11 +641,15 @@ def build_singbox_json(
     :param test_url: URL замера задержки.
     :param interval: период замера строкой (``"3m"``).
     :param tolerance: разброс задержек в мс, в пределах которого узел не меняется.
+    :param tcp_only: режим «белых списков» — выбросить UDP-профили
+        (WireGuard/AmneziaWG, Hysteria2, TUIC), которые оператор не пропускает.
     :return: JSON-текст подписки.
     """
     outbounds: list[dict] = []
     tags: list[str] = []
     for config in _collect(configs):
+        if tcp_only and is_udp_based(config):
+            continue
         if config["kind"] == "vless":
             outbound = _singbox_vless_outbound(config)
         elif config["kind"] == "wireguard":
@@ -474,9 +669,34 @@ def build_singbox_json(
             "tolerance": tolerance,
         }
     )
+    # Группы каналов: та же логика, что в Clash — автовыбор общий, но каждый
+    # канал можно выбрать руками и увидеть по нему пинг со своим test-URL.
+    urls = test_urls or {}
+    for code, members in _by_channel(tags).items():
+        _mark, group_title = CHANNELS[code]
+        outbounds.append(
+            {
+                "type": "urltest",
+                "tag": f"{title} {group_title}",
+                "outbounds": members,
+                "url": urls.get(code) or test_url,
+                "interval": interval,
+                "tolerance": tolerance,
+            }
+        )
     outbounds.append({"type": "direct", "tag": "direct"})
     outbounds.append({"type": "block", "tag": "block"})
-    return json.dumps({"outbounds": outbounds}, ensure_ascii=False, indent=2)
+    # Маршрутизация: разрешённые РФ-сервисы и локальная сеть — напрямую,
+    # остальное — в авто-группу. Правила записаны доменами и CIDR, без
+    # внешних geoip-файлов: подписка должна работать в любом клиенте.
+    route = {
+        "rules": [
+            {"domain_suffix": list(DIRECT_DOMAINS), "outbound": "direct"},
+            {"ip_cidr": list(PRIVATE_CIDRS), "outbound": "direct"},
+        ],
+        "final": f"{title} Auto",
+    }
+    return json.dumps({"outbounds": outbounds, "route": route}, ensure_ascii=False, indent=2)
 
 
 def detect_client_format(user_agent: str | None, requested: str | None = None) -> str:

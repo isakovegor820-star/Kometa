@@ -70,6 +70,63 @@ def _rename(configs: list[str], title: str) -> list[str]:
     return rename_locations(configs, title)
 
 
+def _test_url() -> str:
+    """URL для замера задержки в клиенте (Clash ``url-test``, sing-box ``urltest``).
+
+    Свой ``/ping`` вместо внешнего ``generate_204`` нужен из-за ограничений
+    связи: если тест-URL недоступен, клиент помечает мёртвыми **все** профили,
+    включая живые, и клиент видит «нет пинга» вместо рабочего подключения.
+    Поэтому по умолчанию берём наш адрес, а внешний оставляем запасным
+    вариантом для локальной разработки.
+    """
+    from app.web.subscription_format import DEFAULT_TEST_URL
+
+    configured = (settings.subscription_test_url or "").strip()
+    if configured:
+        return configured
+
+    base = (settings.public_base_url or "").strip().rstrip("/")
+    if base.startswith("https://") or (base.startswith("http://") and "127.0.0.1" not in base and "localhost" not in base):
+        return f"{base}/ping"
+    return DEFAULT_TEST_URL
+
+
+def _locations_html(nodes: list[object]) -> str:
+    """Список локаций с задержкой пробы для страницы подключения.
+
+    Пинг здесь — задержка **от сервиса до ноды**, а не пинг телефона (его
+    клиент считает сам по test-URL). Подписываем это словами, чтобы цифра
+    не создавала ложных ожиданий.
+    """
+    from app.web.subscription_format import CHANNELS
+
+    #: Человеческие имена каналов: обычные локации без пометки.
+    CHANNEL_TITLES = {code: title for code, (_mark, title) in CHANNELS.items()}
+
+    if not nodes:
+        return ""
+
+    rows: list[str] = []
+    for node in nodes:
+        title = str(getattr(node, "title", "") or getattr(node, "code", "") or "").strip()
+        channel = str(getattr(node, "channel", "main") or "main").strip().lower()
+        label = CHANNEL_TITLES.get(channel, "") if channel != "main" else ""
+        ok = bool(getattr(node, "last_probe_ok", False))
+        measured = getattr(node, "last_probe_at", None) is not None
+        ms = int(getattr(node, "last_probe_ms", 0) or 0)
+        dot = "🟢" if ok else ("⚪" if not measured else "🔴")
+        ping = f"{ms} мс" if ok and ms else ("нет замера" if not measured else "не отвечает")
+        suffix = f" · {label}" if label else ""
+        rows.append(
+            f"<div class='loc'><span>{dot} {title}{suffix}</span>"
+            f"<span class='muted small'>{ping}</span></div>"
+        )
+    return (
+        "<p class='muted small' style='margin:16px 0 6px'>"
+        "Локации и задержка (замер с сервера, не с телефона):</p>" + "".join(rows)
+    )
+
+
 def _subscription_headers(sub: Subscription, used_bytes: int = 0) -> dict[str, str]:
     total = sub.traffic_limit_gb * 1024**3 if sub.traffic_limit_gb else 0
     expire_ts = _expire_timestamp(sub.expires_at)
@@ -151,6 +208,17 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/ping", status_code=204)
+    async def ping() -> Response:
+        """Пустой 204 для замера задержки в клиентах.
+
+        Именно этот адрес приложения используют как test-URL (Clash ждёт 204):
+        по нему клиент показывает пинг и выбирает живую локацию. Внешние
+        ``generate_204`` под ограничениями связи недоступны, и тогда клиент
+        считает мёртвыми все профили сразу.
+        """
+        return Response(status_code=204)
+
     @app.get("/status", response_class=HTMLResponse)
     async def status_page(request: Request) -> Response:
         """Публичная страница состояния сервиса.
@@ -226,6 +294,20 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
             if sub.status == "blocked":
                 raise HTTPException(status_code=403, detail="subscription blocked")
 
+            from sqlalchemy import select
+
+            from app.db.models import Node
+
+            # Локации с замером пробы: клиент видит, что живое, а не гадает,
+            # почему в приложении «нет пинга».
+            nodes = list(
+                (
+                    await session.scalars(
+                        select(Node).where(Node.is_active.is_(True)).order_by(Node.priority, Node.id)
+                    )
+                ).all()
+            )
+
         sub_url = subs_service.subscription_link(token)
         title = (settings.subscription_title or "Kometa").strip() or "Kometa"
         fragment = quote(title, safe="")
@@ -242,6 +324,7 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
             f"id='btn-{key}'>{label}</a>"
             for key, label, url in apps
         )
+        locations = _locations_html(nodes)
         # Автопопытка открыть приложение: пользователь уже нажал кнопку в
         # Telegram, поэтому браузер обычно разрешает переход по схеме.
         auto = next((url for key, _, url in apps if key == chosen), "")
@@ -267,11 +350,14 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
  .copy{{width:100%;padding:12px;border-radius:10px;border:0;background:#2f6ea8;color:#fff;font-weight:600;font-size:15px}}
  .muted{{color:#98a0b3}} .small{{font-size:13px}}
  .ok{{background:#16301f!important;border-color:#2c6b45!important}}
+ .loc{{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #232838}}
+ .loc:last-child{{border-bottom:0}}
 </style></head>
 <body><main><div class="card">
  <h1>🔌 Подключение Kometa</h1>
  <p class="muted small">Нажми название приложения — профиль добавится сам, останется включить VPN.</p>
  {cards}
+ {locations}
  <p class="muted small" style="margin-top:18px">Если приложение не открылось — скопируй ссылку и вставь её в клиенте вручную:</p>
  <input id="sub" value="{sub_url}" readonly onclick="this.select()">
  <button class="copy" id="copy" onclick="copySub()">📋 Скопировать ссылку</button>
@@ -294,6 +380,7 @@ function copySub(){{
     @app.get("/sub/{token}")
     async def get_subscription(token: str, request: Request) -> Response:
         from app.db.session import SessionMaker
+        from app.web.subscription_format import channel_mark
 
         async with SessionMaker() as session:  # type: AsyncSession
             sub = await subs_service.get_subscription_by_token(session, token)
@@ -305,7 +392,9 @@ function copySub(){{
             configs: list[str] = []
             used_bytes = 0
             renamed_per_panel = False
-            for panel in await registry.all_panels(session):
+            # Свой test-URL по каналу: у CDN и входа своя точка замера.
+            channel_urls: dict[str, str] = {}
+            for node, panel in await registry.all_panels_with_nodes(session):
                 if not sub.panel_user_uuid:
                     continue
                 try:
@@ -317,6 +406,21 @@ function copySub(){{
                 # Имя локации у каждой страны своё: у основной панели — из
                 # LOCATION_TITLE, у ноды — её название из админки («🇯🇵 Япония»).
                 title = getattr(panel, "location_title", "") or ""
+                # Канал локации: обычная, резервная или CDN. Метка в имени —
+                # единственный способ передать канал в base64-список
+                # (Happ/v2RayTun групп не умеют), а у канала может быть свой
+                # test-URL: под ограничениями общий адрес замера недоступен.
+                channel = (
+                    (getattr(node, "channel", "main") or "main").strip().lower()
+                    if node is not None
+                    else "main"
+                )
+                mark = channel_mark(channel)
+                if mark:
+                    title = f"{title or panel.name}{mark}"
+                    custom_url = str(getattr(node, "test_url", "") or "").strip()
+                    if custom_url:
+                        channel_urls.setdefault(channel, custom_url)
                 if title:
                     panel_configs, renamed_per_panel = _rename(panel_configs, title), True
                 configs.extend(panel_configs)
@@ -336,6 +440,25 @@ function copySub(){{
         if settings.location_title and not renamed_per_panel:
             # Запасной путь: у панелей нет своих имён (одна страна, старые настройки).
             configs = _rename(configs, settings.location_title)
+
+        # Режим TCP-only: когда провайдер пропускает только TCP 80/443/22,
+        # UDP-профили в подписке бессмысленны — клиент долбится в мёртвый профиль
+        # и решает, что сервис сломался. Выкидываем их из ВСЕХ форматов сразу,
+        # иначе base64-список и sing-box разошлись бы по составу.
+        # Включается флагом SUBSCRIPTION_TCP_ONLY (см. .env.example).
+        if settings.subscription_tcp_only:
+            from app.web.subscription_format import is_udp_link
+
+            before = len(configs)
+            configs = [link for link in configs if not is_udp_link(link)]
+            if len(configs) < before:
+                logger.info(
+                    "Режим TCP-only: убрано UDP-профилей — %d из %d",
+                    before - len(configs),
+                    before,
+                )
+        if not configs:
+            raise HTTPException(status_code=503, detail="no configs available")
 
         body = "\n".join(configs)
         headers = _subscription_headers(sub, used_bytes)
@@ -357,15 +480,16 @@ function copySub(){{
             return PlainTextResponse(body, headers=headers)
 
         client_format = detect_client_format(request.headers.get("user-agent"), requested)
+        test_url = _test_url()
         if client_format == "clash" and build_clash_yaml is not None:
             return Response(
-                content=build_clash_yaml(configs, title="Kometa"),
+                content=build_clash_yaml(configs, title="Kometa", test_url=test_url, test_urls=channel_urls),
                 media_type="text/yaml; charset=utf-8",
                 headers=headers,
             )
         if client_format == "singbox" and build_singbox_json is not None:
             return Response(
-                content=build_singbox_json(configs, title="Kometa"),
+                content=build_singbox_json(configs, title="Kometa", test_url=test_url, test_urls=channel_urls),
                 media_type="application/json; charset=utf-8",
                 headers=headers,
             )

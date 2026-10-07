@@ -29,6 +29,7 @@ SEV_INFO = "info"
 KINDS: dict[str, tuple[str, str]] = {
     "node_down": (SEV_ERR, "Нода не отвечает"),
     "node_degraded": (SEV_WARN, "Нода отвечает с ошибкой"),
+    "node_probe_failed": (SEV_ERR, "Нода не пускает клиента"),
     "payment_unmatched": (SEV_WARN, "Поступление без заказа"),
     "statement_error": (SEV_ERR, "Не читается выписка"),
     "panel_error": (SEV_WARN, "Ошибка панели"),
@@ -239,5 +240,57 @@ async def check_nodes(session: AsyncSession, panels: list[tuple[Node | None, Pan
             await resolve_by_fingerprint(session, fingerprint, note="нода снова отвечает")
             await resolve_by_fingerprint(session, f"{fingerprint}:inbounds")
 
+        results.append(entry)
+    return results
+
+
+async def check_probes(session: AsyncSession, panels: list[tuple[Node | None, PanelClient]]) -> list[dict]:
+    """Проверить ноды «глазами клиента» и завести алерт, если порт не пускает.
+
+    Панель может отвечать по API, а порт инбаунда — нет (закрыли в фаерволе,
+    сгорела подсеть, оператор режет адрес). Это ровно тот случай, когда
+    ``node_down`` молчит, а клиенты уже не подключаются.
+
+    Заодно пишем задержку: она видна в админке и на странице подключения.
+    """
+    from app.config import get_settings
+    from app.services import probe as probe_service
+
+    settings = get_settings()
+    results: list[dict] = []
+    if not settings.node_probe_enabled:
+        return results
+
+    now = _now()
+    for node, panel in panels:
+        if node is None or not node.is_active:
+            continue
+        label = node.title or node.code
+        result = await probe_service.probe_panel(panel, node.host)
+        node.last_probe_at = now
+        node.last_probe_ok = bool(result.ok)
+        node.last_probe_ms = int(result.ms or 0) if result.ok else 0
+
+        entry = {
+            "code": node.code,
+            "title": label,
+            "ok": bool(result.ok),
+            "ms": node.last_probe_ms,
+            "stage": result.stage,
+            "detail": result.detail,
+        }
+        fingerprint = f"node:{node.code}:probe"
+        if result.ok:
+            await resolve_by_fingerprint(session, fingerprint, note="порт снова пускает клиента")
+        else:
+            await raise_alert(
+                session,
+                "node_probe_failed",
+                f"Нода «{label}»: порт не пускает клиента",
+                severity=SEV_ERR,
+                message=result.detail or "TCP-проба не прошла",
+                fingerprint=fingerprint,
+                node_id=node.id,
+            )
         results.append(entry)
     return results

@@ -188,6 +188,8 @@ async def node_save(
     inbound_ids: str = Form(""),
     priority: int = Form(100),
     is_active: str = Form("1"),
+    channel: str = Form("main"),
+    test_url: str = Form(""),
 ):
     """Добавить ноду или обновить существующую (upsert по коду).
 
@@ -234,6 +236,13 @@ async def node_save(
         node.inbound_ids = _clean_ids(inbound_ids)
         node.priority = int(priority or 100)
         node.is_active = str(is_active).strip().lower() not in {"0", "false", "off", "no", ""}
+        # Канал: обычная локация, резервная или CDN. Незнакомое значение не
+        # ломает подписку — считаем локацию обычной.
+        node.channel = (channel or "").strip().lower()
+        if node.channel not in {"main", "reserve", "cdn"}:
+            node.channel = "main"
+        # Свой test-URL канала: пусто — берётся общий из настроек.
+        node.test_url = (test_url or "").strip()[:255]
 
         # Клиент панели кэшируется по коду: без сброса подписка молча ходила бы
         # на старый адрес или со старым токеном.
@@ -246,6 +255,7 @@ async def node_save(
                 "code": code,
                 "created": created,
                 "is_active": node.is_active,
+                "channel": node.channel,
                 "panel_url": node.panel_url,
                 "token_changed": bool(token),
             },

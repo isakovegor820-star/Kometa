@@ -295,12 +295,34 @@ class Node(Base):
     panel_url: Mapped[str] = mapped_column(String(255), default="")
     panel_token: Mapped[str] = mapped_column(String(255), default="")
     inbound_ids: Mapped[str] = mapped_column(String(64), default="")
+    #: Адрес сервиса подписок панели ноды, например
+    #: ``http://1.2.3.4:2096/<subPath>/``. У каждой панели свой subPath, поэтому
+    #: путь задаётся явно: без него бот не соберёт конфиги с этой ноды.
+    sub_base: Mapped[str] = mapped_column(String(255), default="")
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     priority: Mapped[int] = mapped_column(Integer, default=100)
 
     last_check_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
     last_check_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    #: Канал ноды: ``main`` — обычный режим, ``reserve`` — аварийный профиль.
+    #: Резервные локации подписка отдаёт отдельной группой автовыбора: когда
+    #: обычные адреса не отвечают, клиенту нужен живой профиль в один тап.
+    channel: Mapped[str] = mapped_column(String(8), default="main")
+
+    #: Свой test-URL для локаций этого канала (пусто — общий из настроек).
+    #: Нужен каналу CDN: замер идёт через адрес, доступный клиенту, иначе
+    #: приложение считает профиль мёртвым, хотя он рабочий.
+    test_url: Mapped[str] = mapped_column(String(255), default="")
+
+    #: Проба «глазами клиента»: TCP-соединение и TLS-рукопожатие до инбаунда.
+    #: Панель может отвечать, а порт для клиента — нет. Замер нужен, чтобы в
+    #: админке и у клиента был виден реальный пинг, а не «нода активна».
+    last_probe_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    last_probe_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Задержка успешной пробы в миллисекундах (0 — ещё не измеряли).
+    last_probe_ms: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class Event(Base):
@@ -411,3 +433,27 @@ class Broadcast(Base):
     error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow, index=True)
     finished_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+
+
+class Downtime(Base):
+    """Период простоя: дни, когда связь у абонентов не работала.
+
+    Зачем отдельная таблица, а не запись в журнале: компенсация — это деньги
+    (дни подписки), её нужно уметь посчитать, показать и не начислить дважды.
+    Открытый период (``ended_at is None``) в системе может быть только один.
+    """
+
+    __tablename__ = "downtimes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow, index=True)
+    ended_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    #: Сколько полных суток насчитали и начислили (0 — меньше суток или ещё идёт).
+    days: Mapped[int] = mapped_column(Integer, default=0)
+    #: Когда начисление выполнено. Стоит — значит период закрыт и повторно
+    #: ничего не начислится, даже если команду повторить.
+    granted_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    granted_by: Mapped[str] = mapped_column(String(64), default="")
+    note: Mapped[str] = mapped_column(String(160), default="")
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow, index=True)

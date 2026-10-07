@@ -45,6 +45,14 @@ _EXTRA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("events", "actor_tg_id", "BIGINT"),
     ("events", "source", "VARCHAR(8)"),
     ("events", "ip", "VARCHAR(45)"),
+    # Аварийный уровень: канал ноды (main/reserve/cdn) и замер пинга
+    # «глазами клиента» — TCP/TLS-проба до инбаунда.
+    ("nodes", "sub_base", "VARCHAR(255) DEFAULT ''"),
+    ("nodes", "channel", "VARCHAR(8) DEFAULT 'main'"),
+    ("nodes", "test_url", "VARCHAR(255) DEFAULT ''"),
+    ("nodes", "last_probe_at", "DATETIME"),
+    ("nodes", "last_probe_ok", "BOOLEAN DEFAULT 0"),
+    ("nodes", "last_probe_ms", "INTEGER DEFAULT 0"),
 )
 
 #: Индексы для запросов панели: create_all создаёт их только на новых базах.

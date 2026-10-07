@@ -9,14 +9,18 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import unquote
 
 import pytest
 import yaml
 
 from app.web.subscription_format import (
+    rename_locations,
+    DEFAULT_FINGERPRINT,
     build_clash_yaml,
     build_singbox_json,
     detect_client_format,
+    is_udp_link,
     parse_config_link,
 )
 
@@ -38,6 +42,14 @@ XHTTP_LINK = (
 WIREGUARD_LINK = (
     "wireguard://cHJpdmF0ZWtleT09@wg.example.com:51820"
     "?publickey=cHVibGlja2V5&address=10.8.0.2%2F32,fd00::2%2F128&mtu=1420#WG-DE"
+)
+# Ссылка AmneziaWG из 3x-ui: те же поля плюс параметры обфускации, которые
+# понимают только родные клиенты Amnezia, но не sing-box.
+AMNEZIAWG_LINK = (
+    "amneziawg://cHJpdmF0ZWtleT09@awg.example.com:990"
+    "?publickey=cHVibGlja2V5&address=10.9.0.2%2F32&mtu=1280"
+    "&jc=3&jmin=30&jmax=80&s1=20&s2=20&h1=111111&i1=%3Cr%202%3E"
+    "&persistentkeepalive=25#AWG-LTE"
 )
 
 
@@ -211,12 +223,16 @@ def test_clash_vless_fields_and_reality_opts():
     assert proxy["reality-opts"] == {"public-key": "PUBLICKEY123", "short-id": "ab12"}
 
 
-def test_clash_fingerprint_defaults_to_chrome():
-    """Без fp подставляем chrome — иначе Reality не поднимется."""
+def test_clash_fingerprint_defaults_to_passing_one():
+    """Без fp подставляем «проходящий» отпечаток — иначе Reality не поднимется.
+
+    Chrome/Safari/iOS в разборах волн 2026 года числятся подозрительными,
+    поэтому дефолт — Firefox. Клиент со своим fp всё равно переопределяет его.
+    """
     link = "vless://11111111-2222-3333-4444-555555555555@a.example.com:443?security=reality&pbk=K#A"
     proxy = _clash([link])["proxies"][0]
 
-    assert proxy["client-fingerprint"] == "chrome"
+    assert proxy["client-fingerprint"] == DEFAULT_FINGERPRINT == "firefox"
     assert "reality-opts" in proxy
 
 
@@ -237,11 +253,27 @@ def test_clash_xhttp_opts():
 
 
 def test_clash_rules_match():
-    """Правило одно: весь трафик идёт в группу авто-выбора."""
+    """Последнее правило — весь трафик в группу авто-выбора; перед ним РФ-direct."""
     document = _clash([REALITY_LINK], title="Kometa Pro")
 
-    assert document["rules"] == ["MATCH,Kometa Pro"]
+    assert document["rules"][-1] == "MATCH,Kometa Pro"
     assert document["proxy-groups"][0]["name"] == "Kometa Pro"
+
+
+def test_clash_rules_send_allowed_services_direct():
+    """Разрешённые сервисы и локальная сеть идут мимо туннеля.
+
+    Банки с включённым туннелем часто отказывают, а на входном узле такой
+    трафик выжигает адрес — поэтому правила обязаны быть в подписке.
+    """
+    document = _clash([REALITY_LINK])
+
+    rules = document["rules"]
+    assert "DOMAIN-SUFFIX,gosuslugi.ru,DIRECT" in rules
+    assert "DOMAIN-SUFFIX,sberbank.ru,DIRECT" in rules
+    assert "DOMAIN-SUFFIX,vk.com,DIRECT" in rules
+    assert "GEOIP,RU,DIRECT" in rules
+    assert rules.index("GEOIP,RU,DIRECT") < rules.index("MATCH,Kometa")
 
 
 def test_clash_custom_tuning():
@@ -274,7 +306,7 @@ def test_clash_empty_configs_do_not_crash():
 
     assert document["proxies"] == []
     assert document["proxy-groups"][0]["proxies"] == ["DIRECT"]
-    assert document["rules"] == ["MATCH,Kometa"]
+    assert document["rules"][-1] == "MATCH,Kometa"
 
 
 def test_clash_wireguard_only_gives_direct_group():
@@ -363,6 +395,66 @@ def test_singbox_wireguard_outbound():
     assert outbound["peer_public_key"] == "cHVibGlja2V5"
     assert outbound["local_address"] == ["10.8.0.2/32", "fd00::2/128"]
     assert outbound["mtu"] == 1420
+
+
+def test_singbox_wireguard_drops_amneziawg_obfuscation_fields():
+    """Обфускация AmneziaWG не попадает в sing-box-конфиг.
+
+    sing-box не знает полей jc/jmin/jmax/s1-h4/i1 (проверено по докам
+    wireguard-endpoint v1.13.0 и v1.14.2), а неизвестный ключ он отвергает
+    вместе со ВСЕМ конфигом — то есть одна AWG-ссылка в подписке ломала бы
+    и все VLESS-конфиги рядом. Параметры остаются в ``raw`` для родных
+    клиентов Amnezia.
+    """
+    outbound = _by_tag(_singbox([AMNEZIAWG_LINK]), "AWG-LTE")
+
+    forbidden = ("jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "i1", "i2", "i3", "i4", "i5")
+    for key in forbidden:
+        assert key not in outbound, f"поле {key} сломает конфиг sing-box"
+
+    # Обычные поля WireGuard остаются на месте.
+    assert outbound["type"] == "wireguard"
+    assert outbound["server"] == "awg.example.com"
+    assert outbound["server_port"] == 990
+    assert outbound["mtu"] == 1280
+    assert outbound["persistent_keepalive_interval"] == 25
+
+
+def test_singbox_amneziawg_link_does_not_break_other_configs():
+    """AWG-ссылка рядом с VLESS не ломает JSON целиком (регрессия)."""
+    document = _singbox([REALITY_LINK, AMNEZIAWG_LINK])
+
+    assert _by_tag(document, "AWG-LTE")["type"] == "wireguard"
+    assert _by_tag(document, "Москва ⚡")["type"] == "vless"
+
+
+def test_is_udp_link_detects_udp_transports():
+    """UDP-профили распознаются по схеме и по транспорту — их режет режим БС."""
+    assert is_udp_link(WIREGUARD_LINK) is True
+    assert is_udp_link(AMNEZIAWG_LINK) is True
+    assert is_udp_link("hysteria2://pass@h.example.com:443#HY2") is True
+    assert is_udp_link("tuic://uuid:pass@t.example.com:443#TUIC") is True
+    assert is_udp_link(REALITY_LINK) is False
+    assert is_udp_link(WS_LINK) is False
+    # mkcp — UDP-транспорт внутри vless-ссылки.
+    assert is_udp_link("vless://uuid@x.example.com:443?type=kcp&security=none#KCP") is True
+
+
+def test_singbox_tcp_only_drops_udp_outbounds():
+    """В режиме «белых списков» sing-box-подписка остаётся без UDP-профилей."""
+    document = json.loads(build_singbox_json([REALITY_LINK, AMNEZIAWG_LINK], tcp_only=True))
+
+    kinds = {outbound["type"] for outbound in document["outbounds"]}
+    assert "wireguard" not in kinds
+    assert "vless" in kinds
+
+
+def test_singbox_tcp_only_keeps_tcp_by_default():
+    """Без флага поведение не меняется — обратная совместимость."""
+    document = json.loads(build_singbox_json([REALITY_LINK, AMNEZIAWG_LINK]))
+
+    kinds = {outbound["type"] for outbound in document["outbounds"]}
+    assert {"vless", "wireguard"} <= kinds
 
 
 def test_singbox_has_direct_and_block():
@@ -512,3 +604,41 @@ def test_fake_panel_configs_parse_and_reach_both_formats():
     tags = {outbound["tag"]: outbound["type"] for outbound in singbox["outbounds"]}
     assert tags["user@example.com-DE"] == "vless"
     assert tags["user@example.com-DE-WG"] == "wireguard"
+
+
+# ---------------------------------------------------------------- имена локаций
+
+def test_rename_locations_replaces_fragment():
+    """Фрагмент после # — это то, что видит клиент в списке локаций."""
+    configs = ["vless://uuid@1.2.3.4:443?security=reality#DE-REALITY-firefox-u123-10.00GB📊"]
+    out = rename_locations(configs, "🇩🇪 Германия")
+
+    assert out[0].startswith("vless://uuid@1.2.3.4:443?security=reality#")
+    assert unquote(out[0].split("#", 1)[1]) == "🇩🇪 Германия"
+
+
+def test_rename_locations_adds_fragment_when_missing():
+    out = rename_locations(["vless://uuid@1.2.3.4:443"], "Германия")
+
+    assert unquote(out[0].split("#", 1)[1]) == "Германия"
+
+
+def test_rename_locations_empty_name_keeps_panel_names():
+    configs = ["vless://uuid@1.2.3.4:443#DE-REALITY-firefox"]
+    assert rename_locations(configs, "   ") == configs
+
+
+def test_rename_locations_skips_empty_lines():
+    assert rename_locations(["", "  ", "vless://u@1.2.3.4:443#x"], "DE") == [
+        "vless://u@1.2.3.4:443#DE"
+    ]
+
+
+def test_clash_subscription_uses_human_location_name():
+    yaml_text = build_clash_yaml(
+        rename_locations(["vless://uuid@1.2.3.4:443?security=reality&pbk=k&sid=s#ugly"], "🇩🇪 Германия"),
+        title="Kometa",
+    )
+    document = yaml.safe_load(yaml_text)
+
+    assert document["proxies"][0]["name"] == "🇩🇪 Германия"

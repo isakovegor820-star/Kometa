@@ -601,6 +601,52 @@ class XuiPanel(PanelClient):
             )
         return result
 
+    async def list_users(self) -> list[PanelUser]:
+        """Все клиенты целевых инбаундов — для аудита и контроля аномалий.
+
+        Трафик берём из ``clientStats`` того же ответа панели: отдельный запрос
+        на каждого клиента превратил бы суточный аудит в N+1 обращений, а на
+        сотне клиентов это заметная нагрузка.
+        """
+        inbounds = await self._target_inbounds()
+        result: list[PanelUser] = []
+        seen: set[str] = set()
+
+        for inbound in inbounds:
+            settings = _as_json_dict(inbound.get("settings"))
+            stats = {
+                str(item.get("email") or ""): item
+                for item in (inbound.get("clientStats") or [])
+                if isinstance(item, dict)
+            }
+            for client in settings.get("clients") or []:
+                if not isinstance(client, dict):
+                    continue
+                uuid = str(client.get("id") or "")
+                email = str(client.get("email") or "")
+                if not uuid or uuid in seen:
+                    continue
+                seen.add(uuid)
+                stat = stats.get(email) or {}
+                result.append(
+                    PanelUser(
+                        uuid=uuid,
+                        email=email,
+                        enabled=bool(client.get("enable", True)),
+                        expires_at=_ms_to_datetime(client.get("expiryTime")),
+                        traffic_limit_bytes=int(client.get("totalGB") or 0),
+                        devices_limit=int(client.get("limitIp") or 0),
+                        used_bytes=int(stat.get("up") or 0) + int(stat.get("down") or 0),
+                        subscription_url=self._subscription_url(client.get("subId")),
+                        raw={
+                            "client": client,
+                            "inbound_id": int(inbound.get("id") or 0),
+                            "last_online_ms": int(stat.get("lastOnline") or 0),
+                        },
+                    )
+                )
+        return result
+
     async def create_user(self, spec: UserSpec) -> PanelUser:
         """Создать клиента с одним uuid/subId во всех целевых инбаундах.
 
@@ -608,7 +654,7 @@ class XuiPanel(PanelClient):
         (``expiryTime=0`` и ``totalGB=0`` соответственно).
         """
         inbounds = await self._target_inbounds()
-        uid = str(uuid_lib.uuid4())
+        uid = str(spec.uuid or uuid_lib.uuid4())
         sub_id = _random_sub_id()
         expiry_ms = _datetime_to_ms(datetime.now(timezone.utc) + timedelta(days=spec.days)) if spec.days > 0 else 0
         total_bytes = int(spec.traffic_gb) * GIB

@@ -168,6 +168,50 @@ async def job_node_health(bot: Bot) -> None:
         state[label] = ok
 
 
+async def job_node_probe(bot: Bot) -> None:
+    """Проверить ноды «глазами клиента»: TCP-порт и задержка.
+
+    Панель может отвечать, а порт инбаунда — нет: это не видно в
+    ``job_node_health``, зато видно клиенту. Поэтому отдельная проба: она
+    пишет пинг для админки и страницы подключения и поднимает алерт
+    ``node_probe_failed``, когда дозвониться не удалось.
+    """
+    from app.db.models import Node
+    from app.services import alerts as alerts_service
+
+    state: dict[str, bool] = job_node_probe.__dict__.setdefault("state", {})
+    async with SessionMaker() as session:
+        nodes = list(
+            (
+                await session.scalars(
+                    select(Node).where(Node.is_active.is_(True)).order_by(Node.priority, Node.id)
+                )
+            ).all()
+        )
+        pairs: list[tuple[Node | None, object]] = [(node, registry.for_node(node)) for node in nodes]
+        try:
+            results = await alerts_service.check_probes(session, pairs)  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001 - фоновая задача не должна падать молча
+            logger.exception("Проба нод упала: %s", exc)
+            await session.rollback()
+            return
+        await session.commit()
+
+    for entry in results:
+        label = entry["title"]
+        ok = bool(entry["ok"])
+        previous = state.get(label)
+        if (previous is not None and previous != ok) or (previous is None and not ok):
+            text = (
+                f"✅ Нода <b>{label}</b> снова пускает клиента"
+                f" (задержка {entry['ms']} мс)."
+                if ok
+                else f"⚠️ Нода <b>{label}</b>: порт не пускает клиента. {entry['detail']}"
+            )
+            await notifications.notify_admins(bot, text)
+        state[label] = ok
+
+
 # ---------------------------------------------------------------------- запуск
 def setup_logging() -> None:
     logging.basicConfig(
@@ -246,6 +290,9 @@ async def main() -> None:
         id="autopay",
     )
     scheduler.add_job(job_node_health, "interval", minutes=5, args=[bot], id="node_health")
+    # Проба «глазами клиента»: TCP-порт и задержка. Отдельно от проверки
+    # панели — панель отвечает, а порт может не пускать.
+    scheduler.add_job(job_node_probe, "interval", minutes=5, args=[bot], id="node_probe")
     # Сторож аномалий: раз в сутки (09:00 МСК) сверяем клиентов и трафик.
     scheduler.add_job(
         job_watch_clients,

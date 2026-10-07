@@ -47,7 +47,7 @@ class FakePanel(PanelClient):
     async def create_user(self, spec: UserSpec) -> PanelUser:
         if spec.email in self._by_email:
             raise PanelError(f"пользователь {spec.email} уже существует")
-        uid = str(uuid_lib.uuid4())
+        uid = str(spec.uuid or uuid_lib.uuid4())
         user = PanelUser(
             uuid=uid,
             email=spec.email,
@@ -67,6 +67,10 @@ class FakePanel(PanelClient):
     async def find_user_by_email(self, email: str) -> PanelUser | None:
         uuid = self._by_email.get(email)
         return self._users.get(uuid) if uuid else None
+
+    async def list_users(self) -> list[PanelUser]:
+        """Все клиенты — как их отдаёт настоящая панель (для аудита)."""
+        return list(self._users.values())
 
     async def update_user(
         self,
