@@ -44,6 +44,7 @@
         {{ navlink('/admin/orders', 'orders', 'inbox', 'Очередь заказов', nav_counts.pending if nav_counts else 0) }}
         {% endif %}
         {% if 'users.view' in caps %}{{ navlink('/admin/users', 'users', 'users', 'Пользователи') }}{% endif %}
+        {% if 'downtime.manage' in caps %}{{ navlink('/admin/downtime', 'downtime', 'clock', 'Компенсация простоя') }}{% endif %}
         {% if 'orders.refund' in caps %}{{ navlink('/admin/refunds', 'refunds', 'refund', 'Возвраты') }}{% endif %}
       </div>
       <div class="nav-group">

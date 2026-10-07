@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'downtime' %}
+{% block title %}Компенсация простоя — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Компенсация простоя</h1>
+    <div class="sub">
+      Дни, когда связь у абонентов не работала: считаем полные сутки и продлеваем активные
+      подписки. Потолок за один период — {{ max_days }} дней, повторное начисление невозможно.
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <h2>Сейчас</h2>
+    {% if opened %}<span class="badge badge-warn">простой открыт</span>{% else %}<span class="badge">простоя нет</span>{% endif %}
+  </div>
+  <div class="card-body">
+    {% if opened %}
+    <p>
+      Открыт с <b>{{ opened.started_at.strftime('%d.%m.%Y %H:%M') }}</b> UTC
+      {% if opened.note %}· {{ opened.note }}{% endif %}.
+      Когда связь вернётся — закрой период: подписки продлятся на полные сутки.
+    </p>
+    <form method="post" action="/admin/downtime/end" class="inline-form">
+      <div class="field" style="max-width:260px">
+        <label for="end-days">Дней (пусто — посчитать по факту)</label>
+        <input type="text" id="end-days" name="days" inputmode="numeric" placeholder="по факту" maxlength="3">
+      </div>
+      <button class="btn btn-primary" type="submit">{{ icon('check') }} Закрыть и начислить</button>
+    </form>
+    {% else %}
+    <p class="dim">
+      Открытого периода нет. Открывай его, когда заметил, что у абонентов пропала связь:
+      дни считаются от момента открытия до закрытия.
+    </p>
+    <form method="post" action="/admin/downtime/start">
+      <div class="field" style="max-width:420px">
+        <label for="start-note">Заметка (что случилось, где)</label>
+        <input type="text" id="start-note" name="note" maxlength="160" placeholder="например: Москва, перебои у МТС">
+      </div>
+      <button class="btn btn-primary" type="submit">{{ icon('play') }} Открыть период простоя</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head"><h2>Начислить вручную</h2></div>
+  <div class="card-body">
+    <p class="dim small">
+      Разовая компенсация без периода: например, клиент написал, что сутки не работало,
+      а период мы не открывали. Сообщения клиентам из панели не уходят — после начисления
+      отправь рассылку из бота (<code>/broadcast</code>).
+    </p>
+    <form method="post" action="/admin/downtime/grant">
+      <div class="form-grid">
+        <div class="field">
+          <label for="grant-days">Сколько дней</label>
+          <input type="number" id="grant-days" name="days" min="1" max="{{ max_days }}" value="1" required>
+        </div>
+        <div class="field">
+          <label for="grant-note">Причина</label>
+          <input type="text" id="grant-note" name="note" maxlength="160" placeholder="жалоба клиента">
+        </div>
+      </div>
+      <button class="btn" type="submit">{{ icon('check') }} Начислить всем активным</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <h2>История</h2>
+    <div class="actions"><span class="xs dim">время в UTC</span></div>
+  </div>
+  {% if history %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Начало</th>
+        <th>Конец</th>
+        <th class="right">Дней</th>
+        <th>Кто</th>
+        <th>Заметка</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for period in history %}
+      <tr>
+        <td class="small num">{{ period.started_at.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td class="small num">
+          {% if period.ended_at %}{{ period.ended_at.strftime('%d.%m.%Y %H:%M') }}{% else %}<span class="badge badge-warn">идёт</span>{% endif %}
+        </td>
+        <td class="right small num">{{ period.days or '—' }}</td>
+        <td class="small">{{ period.granted_by or period.created_by or '—' }}</td>
+        <td class="small dim">{{ period.note or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="card-body"><p class="dim">Компенсаций ещё не было.</p></div>
+  {% endif %}
+</div>
+
+{% endblock %}

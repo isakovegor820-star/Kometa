@@ -542,3 +542,136 @@ async def audit_page(request: Request):
         actions=ui.ADMIN_ACTION_LABELS,
         page_data=make_page(events, total, page_no, per_page),
     )
+
+
+# ------------------------------------------------- компенсация простоя
+@router.get("/downtime", response_class=HTMLResponse)
+async def downtime_page(request: Request):
+    """Компенсация простоя: открытый период, история и ручное начисление.
+
+    Почему в панели, а не только командой бота: это деньги клиентов, и решать
+    по ним удобнее там же, где смотрят подписки и алерты.
+    """
+    from app.services import downtime as downtime_service
+
+    auth = await require(request, "downtime.manage")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        opened = await downtime_service.current(db)
+        history = await downtime_service.recent(db, 12)
+
+    return await page(
+        request,
+        "downtime.html",
+        auth,
+        title="Компенсация простоя",
+        page="downtime",
+        opened=opened,
+        history=history,
+        max_days=downtime_service.MAX_GRANT_DAYS,
+    )
+
+
+@router.post("/downtime/start")
+async def downtime_start(request: Request, note: str = Form("")):
+    """Открыть период простоя: у абонентов не работает связь."""
+    from app.services import downtime as downtime_service
+
+    auth = await require(request, "downtime.manage")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        period, created = await downtime_service.start(
+            db, note=note, actor=f"web:{auth.name}"
+        )
+        await audit.log_action(
+            db,
+            "admin.downtime_start",
+            actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id, source="web"),
+            payload={"id": period.id, "created": created, "note": period.note},
+        )
+        await db.commit()
+        started = period.started_at
+
+    if not created:
+        return flash_redirect(
+            "/admin/downtime",
+            message=f"Период уже открыт с {started:%d.%m %H:%M} UTC — закрывать его же",
+        )
+    return flash_redirect("/admin/downtime", message=f"Простой открыт ({started:%d.%m %H:%M} UTC)")
+
+
+@router.post("/downtime/end")
+async def downtime_end(request: Request, days: str = Form("")):
+    """Закрыть период и начислить компенсацию всем активным подпискам."""
+    from app.services import downtime as downtime_service
+    from app.services import subscriptions as subscriptions_service
+
+    auth = await require(request, "downtime.manage")
+    if isinstance(auth, Response):
+        return auth
+
+    explicit = int(days) if (days or "").strip().isdigit() else None
+    async with SessionMaker() as db:
+        panels = await subscriptions_service.all_user_panels(db)
+        result = await downtime_service.finish(
+            db,
+            actor=f"web:{auth.name}",
+            days=explicit,
+            panels=panels,
+        )
+        await audit.log_action(
+            db,
+            "admin.downtime_end",
+            actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id, source="web"),
+            payload={"days": result.days, "users": result.users, "ok": result.ok},
+        )
+        await db.commit()
+
+    if not result.ok:
+        return flash_redirect("/admin/downtime", error=result.as_text())
+    note = result.as_text()
+    if result.days > 0:
+        # Из панели сообщения клиентам не уходят: их отправляет бот, чтобы
+        # рассылка шла через живого Bot и попадала в отчёт о доставке.
+        note += " · сообщи клиентам рассылкой из бота (/broadcast)"
+    return flash_redirect("/admin/downtime", message=note)
+
+
+@router.post("/downtime/grant")
+async def downtime_grant(
+    request: Request,
+    days: int = Form(0),
+    note: str = Form(""),
+):
+    """Начислить дни вручную, без периода: разовая компенсация."""
+    from app.services import downtime as downtime_service
+    from app.services import subscriptions as subscriptions_service
+
+    auth = await require(request, "downtime.manage")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        panels = await subscriptions_service.all_user_panels(db)
+        result = await downtime_service.grant(
+            db,
+            days,
+            note=note,
+            actor=f"web:{auth.name}",
+            panels=panels,
+        )
+        await audit.log_action(
+            db,
+            "admin.downtime_grant",
+            actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id, source="web"),
+            payload={"days": result.days, "users": result.users, "ok": result.ok, "note": note},
+        )
+        await db.commit()
+
+    if not result.ok:
+        return flash_redirect("/admin/downtime", error=result.as_text())
+    return flash_redirect("/admin/downtime", message=result.as_text())
