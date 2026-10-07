@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -39,6 +39,16 @@ def csv_env(monkeypatch, tmp_path):
     return statements
 
 
+def csv_time(hours_ago: float = 1) -> str:
+    """Время операции в формате банковской выписки — относительно «сейчас».
+
+    Автоплатёж читает только свежие поступления (окно — сутки), поэтому жёсткая
+    дата вида «05.10.2026» ломала тест на следующий же день: файл читался, но
+    платёж считался старым и в результат не попадал.
+    """
+    return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).strftime("%d.%m.%Y %H:%M")
+
+
 def write_csv(directory, content: str, name: str = "statement.csv"):
     path = directory / name
     path.write_text(content, encoding="utf-8")
@@ -60,7 +70,7 @@ async def test_csv_payment_is_found_and_subscription_issued(session, panel, csv_
     write_csv(
         csv_env,
         "Дата операции;Сумма;Назначение;Плательщик\n"
-        f"05.10.2026 21:30;{order.pay_amount_text};Kometa {order.id};ИВАН И.\n",
+        f"{csv_time()};{order.pay_amount_text};Kometa {order.id};ИВАН И.\n",
     )
 
     bot = RecordingBot()
@@ -84,7 +94,7 @@ async def test_same_csv_row_is_not_confirmed_twice(session, panel, csv_env):
     write_csv(
         csv_env,
         "Дата операции;Сумма;Назначение;Плательщик\n"
-        f"05.10.2026 21:30;{order.pay_amount_text};Kometa {order.id};ИВАН И.\n",
+        f"{csv_time()};{order.pay_amount_text};Kometa {order.id};ИВАН И.\n",
     )
 
     first = await autopay.reconcile(session, panel, None)
@@ -103,7 +113,7 @@ async def test_outgoing_row_is_ignored(session, panel, csv_env):
     write_csv(
         csv_env,
         "Дата операции;Сумма;Направление;Назначение\n"
-        f"05.10.2026 21:30;{order.pay_amount_text};Списание;Kometa {order.id}\n",
+        f"{csv_time()};{order.pay_amount_text};Списание;Kometa {order.id}\n",
     )
 
     result = await autopay.reconcile(session, panel, None)
@@ -122,7 +132,7 @@ async def test_payment_without_kopecks_matches_by_comment(session, panel, csv_en
     write_csv(
         csv_env,
         "Дата операции;Сумма;Назначение;Плательщик\n"
-        f"05.10.2026 21:30;{order.amount_rub};Kometa {order.id};ПЁТР С.\n",
+        f"{csv_time()};{order.amount_rub};Kometa {order.id};ПЁТР С.\n",
     )
 
     result = await autopay.reconcile(session, panel, None)
@@ -137,7 +147,7 @@ async def test_unknown_payment_is_reported_to_admin(session, panel, csv_env):
     write_csv(
         csv_env,
         "Дата операции;Сумма;Назначение;Плательщик\n"
-        "05.10.2026 21:35;500,00;перевод от мамы;МАРИЯ П.\n",
+        f"{csv_time(2)};500,00;перевод от мамы;МАРИЯ П.\n",
     )
 
     bot = RecordingBot()

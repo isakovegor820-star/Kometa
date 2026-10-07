@@ -30,12 +30,24 @@ from app.web.templating import templates
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-#: Подсказка при отказе по IP: панель без домена доступна только через туннель.
-SSH_HINT = (
-    "Админ-панель доступна только с localhost. Открой SSH-туннель: "
-    "ssh -L 8090:127.0.0.1:8090 root@IP — и заходи на http://127.0.0.1:8090/admin. "
-    "Либо добавь свой IP в ADMIN_ALLOWED_IPS."
-)
+def ssh_hint() -> str:
+    """Подсказка при отказе по IP: панель доступна только через туннель.
+
+    Порт и схему берём из настроек: раньше в тексте был зашит 8090, и владелец
+    шёл туннелем на порт, которого на сервере уже нет.
+    """
+    settings = get_settings()
+    scheme = "https" if (settings.web_ssl_cert and settings.web_ssl_key) else "http"
+    port = settings.web_port
+    return (
+        "Админ-панель доступна только с localhost. Открой SSH-туннель: "
+        f"ssh -N -L {port}:127.0.0.1:{port} root@IP — и заходи на {scheme}://127.0.0.1:{port}/admin. "
+        "Либо добавь свой IP в ADMIN_ALLOWED_IPS."
+    )
+
+
+#: Совместимость: раньше это была константа.
+SSH_HINT = ssh_hint()
 
 FLASH_COOKIE = "kometa_flash"
 FLASH_TTL = 30
@@ -89,7 +101,7 @@ def deny_if_foreign(request: Request) -> None:
     if security.local_only_ok(request):
         return
     logger.warning("Отказ в доступе к админ-панели с IP %s", security.client_ip(request))
-    raise HTTPException(status_code=403, detail=SSH_HINT)
+    raise HTTPException(status_code=403, detail=ssh_hint())
 
 
 def deny_if_cross_site(request: Request) -> None:
@@ -310,5 +322,6 @@ __all__ = [
     "nav_counts",
     "PER_PAGE_CHOICES",
     "SSH_HINT",
+    "ssh_hint",
     "settings",
 ]

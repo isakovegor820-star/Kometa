@@ -12,7 +12,7 @@ from app.db.session import SessionMaker
 from app.services import audit
 from app.web import security
 from app.config import get_settings
-from app.web.admin.common import deny_if_cross_site, deny_if_foreign
+from app.web.admin.common import deny_if_cross_site, deny_if_foreign, ssh_hint
 from app.web.security import Session
 from app.web.templating import templates
 
@@ -60,6 +60,8 @@ async def login_form(request: Request):
             # Логин нужен только когда в команде есть учётные записи: один
             # владелец с паролем из .env вводит только пароль.
             "accounts": [account.login for account in accounts] if accounts else [],
+            # Подсказка про туннель с настоящим портом и схемой (https на проде).
+            "tunnel_hint": ssh_hint(),
         },
     )
 

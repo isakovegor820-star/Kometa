@@ -50,8 +50,8 @@
 
           <button class="btn btn-primary btn-block mt-16" type="submit">Войти</button>
           <p class="hint mt-12">
-            Панель по умолчанию доступна только с localhost: подключайся через SSH-туннель
-            <code>ssh -L 8090:127.0.0.1:8090 root@IP</code>.
+            Панель доступна только с localhost или с IP из белого списка.
+            Для входа через туннель: <code>{{ tunnel_hint }}</code>
           </p>
         </div>
       </div>

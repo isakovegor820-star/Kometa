@@ -184,3 +184,32 @@ async def test_forbidden_page_explains_role(client, session):
     assert page.status_code == 403
     assert "Недостаточно прав" in page.text
     assert "Поддержка" in page.text  # роль названа человеческим словом
+
+async def test_foreign_ip_hint_shows_real_port(session, monkeypatch):
+    """В отказе по IP должен быть настоящий порт панели, а не зашитый 8090.
+
+    Иначе владелец открывает туннель на порт, которого на сервере нет, и
+    решает, что панель сломана.
+    """
+    monkeypatch.setattr(settings, "admin_local_only", True)
+    monkeypatch.setattr(settings, "admin_allowed_ips", "")
+    # Порт намеренно не тот, что был зашит в тексте раньше (8090).
+    monkeypatch.setattr(settings, "web_port", 8443)
+
+    app = await build_app(bot=None)
+    transport = httpx.ASGITransport(app=app, client=("203.0.113.9", 12345))
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as foreign:
+        response = await foreign.get("/admin/login")
+
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert "SSH-туннель" in detail
+    assert "8443" in detail
+    assert "8090" not in detail
+
+    # и та же подсказка видна на странице входа с localhost
+    local_transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 12345))
+    async with httpx.AsyncClient(transport=local_transport, base_url="http://testserver") as local:
+        page = await local.get("/admin/login")
+    assert page.status_code == 200
+    assert "-L 8443:127.0.0.1:8443" in page.text
