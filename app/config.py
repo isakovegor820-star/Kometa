@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -32,6 +33,22 @@ class Settings(BaseSettings):
     #: Почта поддержки (необязательно): банк просит контакт, группу не принимает.
     support_email: str = ""
 
+    # --- Обязательная подписка на основной канал ---
+    #: Канал для проверки подписки: @юзернейм или числовой id (приватный — -100…).
+    #: Пусто — берём имя из CHANNEL_URL, если это публичная ссылка t.me/<имя>.
+    channel_id: str = ""
+    #: Требовать подписку на канал, пока у человека нет активной подписки.
+    #: Включать, только когда бот добавлен АДМИНОМ канала: иначе Telegram не
+    #: показывает участников и проверять нечем (см. CHANNEL_GATE_FAIL_OPEN).
+    channel_gate_enabled: bool = False
+    #: Сколько часов доверять успешной проверке, не дёргая Telegram API.
+    #: 0 — проверять каждый раз (точнее, но дороже по лимитам API).
+    channel_gate_cache_hours: int = 12
+    #: Что делать, если проверить не удалось (бот не админ, сеть, лимиты):
+    #: True — пускаем (теряем гейт, но не всех клиентов разом), False — показываем
+    #: экран подписки. О сбое пишем в лог и раз в час — админам.
+    channel_gate_fail_open: bool = True
+
     # --- Подписка ---
     #: Режим «белых списков»: у оператора проходят только TCP 80/443/22, поэтому
     #: UDP-профили (AmneziaWG/WireGuard, Hysteria2, TUIC) в подписке не отдаём —
@@ -51,6 +68,11 @@ class Settings(BaseSettings):
     #: проверки API недостаточно.
     node_probe_enabled: bool = True
     node_probe_timeout: float = 5.0
+
+    #: Домен дежурного DNS-канала (например ``t.example.com``) — нужен только
+    #: для отчёта о готовности: сам туннель живёт отдельным приложением,
+    #: в подписку он не попадает (docs/DNS-ТУННЕЛЬ-2026-10.md).
+    dns_tunnel_domain: str = ""
 
     # --- Юридические документы (политика и соглашение) ---
     #: Исполнитель: ФИО самозанятого или наименование ИП/ООО. Пусто = плейсхолдер,
@@ -248,6 +270,33 @@ class Settings(BaseSettings):
     @property
     def admin_id_list(self) -> list[int]:
         return [int(x) for x in self.admin_ids.replace(" ", "").split(",") if x.strip().isdigit()]
+
+    @property
+    def resolved_channel_id(self) -> str:
+        """Канал для проверки подписки: ``@юзернейм`` или числовой id.
+
+        Пусто — проверять нечего, и гейт не включается совсем. Это осознанно:
+        лучше пустить всех, чем показывать «подпишись» на канал, который бот
+        не видит (приватный канал по ссылке-приглашению так не проверить —
+        ему нужен именно числовой CHANNEL_ID).
+        """
+        raw = self.channel_id.strip()
+        if raw:
+            return raw if raw.lstrip("-").isdigit() else "@" + raw.lstrip("@")
+        # Публичная ссылка https://t.me/имя годится и без отдельного CHANNEL_ID.
+        match = re.fullmatch(
+            r"(?:https?://)?(?:t\.me|telegram\.me)/([A-Za-z0-9_]{4,32})/?",
+            self.channel_url.strip(),
+        )
+        return "@" + match.group(1) if match else ""
+
+    @property
+    def channel_link(self) -> str:
+        """Ссылка на канал для кнопки «Подписаться»."""
+        if self.channel_url.strip():
+            return self.channel_url.strip()
+        chat_id = self.resolved_channel_id
+        return f"https://t.me/{chat_id.lstrip('@')}" if chat_id.startswith("@") else ""
 
     @property
     def inbound_id_list(self) -> list[int]:

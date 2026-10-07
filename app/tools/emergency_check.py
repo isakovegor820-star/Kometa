@@ -30,11 +30,17 @@ CHANNEL_TITLES = {"main": "обычная", "reserve": "резерв", "cdn": "C
 
 @dataclass(slots=True)
 class Report:
-    """Итог проверки: строки для человека и список того, что мешает."""
+    """Итог проверки: строки для человека и список того, что мешает.
+
+    ``issues`` — то, без чего аварийный уровень не работает; ``optional`` —
+    каналы, которые можно добавить (например дежурный DNS-туннель): без них
+    отчёт остаётся «готов», но возможностей меньше.
+    """
 
     ok: bool = False
     lines: list[str] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
+    optional: list[str] = field(default_factory=list)
 
     def as_text(self) -> str:
         head = "✅ Аварийный уровень готов" if self.ok else "⚠️ Аварийный уровень не готов"
@@ -44,7 +50,12 @@ class Report:
             if self.issues
             else ""
         )
-        return f"{head}\n\n{body}{problems}"
+        extra = (
+            "\n\n<b>Можно добавить</b>\n" + "\n".join(f"— {item}" for item in self.optional)
+            if self.optional
+            else ""
+        )
+        return f"{head}\n\n{body}{problems}{extra}"
 
 
 def assess(
@@ -54,6 +65,7 @@ def assess(
     ping_url: str,
     probe_fresh_minutes: int = PROBE_FRESH_MINUTES,
     now: datetime | None = None,
+    dns_domain: str = "",
 ) -> Report:
     """Оценить готовность по списку нод и результату проверки точки замера.
 
@@ -62,6 +74,12 @@ def assess(
     moment = now or datetime.now(timezone.utc)
     active = [node for node in nodes if node.is_active]
     report = Report()
+
+    if not dns_domain.strip():
+        report.optional.append(
+            "дежурный DNS-канал не настроен (DNS_TUNNEL_DOMAIN пуст): он выручает, "
+            "когда не проходит вообще ничего, кроме DNS — см. docs/DNS-ТУННЕЛЬ-2026-10.md"
+        )
 
     if not active:
         report.issues.append("нет ни одной активной локации: сначала нода, потом аварийный уровень")
@@ -157,12 +175,18 @@ async def check_ping(url: str, timeout: float = 3.0) -> bool:
 
 async def run() -> Report:
     """Собрать отчёт: ноды из базы плюс проверка точки замера."""
+    from app.config import get_settings
     from app.web.sub import _test_url
 
     ping_url = _test_url()
     nodes = await load_nodes()
     ping_ok = await check_ping(ping_url)
-    return assess(nodes, ping_ok=ping_ok, ping_url=ping_url)
+    return assess(
+        nodes,
+        ping_ok=ping_ok,
+        ping_url=ping_url,
+        dns_domain=get_settings().dns_tunnel_domain,
+    )
 
 
 def main() -> int:  # pragma: no cover - ручной запуск

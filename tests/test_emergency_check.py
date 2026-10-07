@@ -126,6 +126,22 @@ def test_unreachable_ping_endpoint_is_reported():
     assert any("точка замера" in issue and "/ping" in issue for issue in report.issues)
 
 
+def test_missing_dns_tunnel_is_optional_not_blocking():
+    """DNS-канал — дежурный: без него уровень работает, но возможностей меньше."""
+    without = check.assess([node(channel="reserve")], ping_ok=True, ping_url="https://sub.example/ping")
+    assert without.ok is True
+    assert any("DNS-канал" in item for item in without.optional)
+    assert "Можно добавить" in without.as_text()
+
+    with_dns = check.assess(
+        [node(channel="reserve")],
+        ping_ok=True,
+        ping_url="https://sub.example/ping",
+        dns_domain="t.example.com",
+    )
+    assert with_dns.optional == []
+
+
 async def test_run_uses_assessment(monkeypatch):
     async def fake_nodes():
         return [node(channel="reserve")]
