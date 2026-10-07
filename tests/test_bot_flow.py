@@ -72,7 +72,9 @@ async def test_plans_are_listed_with_prices(bot, dispatcher, session):
     await dispatcher.feed_update(bot, make_update(callback_data="plans", user_id=7401))
 
     sent = bot.session.all_text()
-    assert "199" in sent and "1590" in sent
+    assert "199" in sent
+    # Цены в кнопках с разделителем разрядов: «1 590 ₽» (неразрывный пробел).
+    assert "1\u00a0590" in sent
 
 
 async def test_unknown_text_gets_helpful_answer(bot, dispatcher, session):
@@ -107,8 +109,8 @@ async def test_referral_screen_shows_personal_link(bot, dispatcher, session):
     assert f"ref_{user.referral_code}" in bot.session.all_text()
 
 
-async def test_help_points_to_status_page_and_wifi(bot, dispatcher, session):
-    """Клиент должен знать, как проверить сервис, если Telegram недоступен."""
+async def test_help_points_to_status_page(bot, dispatcher, session):
+    """Клиент должен знать, как проверить сервис, не заходя в Telegram."""
     await dispatcher.feed_update(bot, make_update("/start", user_id=7801))
     bot.session.clear()
 
@@ -116,4 +118,6 @@ async def test_help_points_to_status_page_and_wifi(bot, dispatcher, session):
 
     sent = bot.session.all_text()
     assert "/status" in sent
-    assert "Wi-Fi" in sent
+    # В публичных текстах нет формулировок про ограничения доступа и обход:
+    # их вычищает tests/test_public_texts_clean.py, здесь — точечная проверка.
+    assert "Wi-Fi" not in sent

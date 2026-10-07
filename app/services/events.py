@@ -36,6 +36,10 @@ PROMO_APPLIED = "promo_applied"
 PROMO_REDEEMED = "promo_redeemed"
 PANEL_ERROR = "panel_error"
 ERROR = "error"
+#: Период простоя: открыт, закрыт, компенсация начислена.
+DOWNTIME_STARTED = "downtime_started"
+DOWNTIME_FINISHED = "downtime_finished"
+DOWNTIME_GRANTED = "downtime_granted"
 
 
 async def log_event(

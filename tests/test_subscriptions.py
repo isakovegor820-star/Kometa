@@ -175,6 +175,11 @@ async def test_panel_failure_does_not_break_trial(session):
         async def create_user(self, spec):
             raise PanelError("панель недоступна")
 
+        async def find_user_by_email(self, email):
+            # Панель недоступна целиком: и восстановление по email не работает,
+            # поэтому ошибка обязана дойти до вызывающего кода.
+            raise PanelError("панель недоступна")
+
     user = await make_user(session, 5001)
     with pytest.raises(PanelError):
         await subscriptions.start_trial(session, user, BrokenPanel())

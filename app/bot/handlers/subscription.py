@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+
+from datetime import datetime, timedelta, timezone
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards, texts
 from app.config import get_settings
+from app.db.session import SessionMaker
 from app.db.models import User
 from app.panels.base import PanelError
 from app.panels.registry import registry
@@ -28,6 +33,19 @@ def _expires_text(dt) -> str:
     return dt.strftime("%d.%m.%Y %H:%M") if dt else "—"
 
 
+def _is_forever(dt) -> bool:
+    """Подписка «бессрочная»?
+
+    Бессрочные подписки храним с далёкой датой (иначе фоновые задачи их
+    погасят), а в карточке показываем «бессрочно» — иначе клиент видит
+    «Осталось: 26000 дн.».
+    """
+    if dt is None:
+        return False
+    moment = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return moment - datetime.now(timezone.utc) > timedelta(days=365 * 10)
+
+
 @router.callback_query(F.data == "sub:show")
 @router.message(F.text == keyboards.BTN_MY_SUB)
 async def show_subscription(event: Message | CallbackQuery, session: AsyncSession, user: User) -> None:
@@ -41,10 +59,11 @@ async def show_subscription(event: Message | CallbackQuery, session: AsyncSessio
         text = texts.MY_SUB_EXPIRED.format(ago=f"({_expires_text(sub.expires_at)})")
         markup = keyboards.subscription_kb(has_panel_user=bool(sub.panel_user_uuid))
     else:
+        forever = _is_forever(sub.expires_at)
         text = texts.MY_SUB_ACTIVE.format(
             status=STATUS_LABELS.get(sub.status, sub.status),
-            expires=_expires_text(sub.expires_at),
-            days=sub.days_left,
+            expires="бессрочно" if forever else _expires_text(sub.expires_at),
+            days="∞" if forever else sub.days_left,
             devices=sub.devices_limit,
         )
         markup = keyboards.subscription_kb(has_panel_user=bool(sub.panel_user_uuid))
@@ -120,13 +139,31 @@ async def show_howto(event: Message | CallbackQuery) -> None:
         await event.answer(texts.HOWTO, reply_markup=keyboards.support_kb(), disable_web_page_preview=True)
 
 
+@router.callback_query(F.data == "sub:reserve")
+@router.message(F.text == keyboards.BTN_RESERVE)
+async def show_reserve_help(event: Message | CallbackQuery) -> None:
+    """Инструкция «если локации не открываются».
+
+    Это не реклама, а сервисное сообщение клиенту: рассказываем, что делать,
+    и честно говорим про скорость и про то, что профиль может пропадать.
+    """
+    if isinstance(event, CallbackQuery):
+        await event.message.answer(texts.RESERVE_HELP, reply_markup=keyboards.support_kb())
+        await event.answer()
+    else:
+        await event.answer(texts.RESERVE_HELP, reply_markup=keyboards.support_kb())
+
+
 @router.callback_query(F.data == "sub:locations")
 async def cb_locations(call: CallbackQuery) -> None:
-    panel = registry.primary()
-    try:
-        inbounds = await panel.list_inbounds()
-    except PanelError:
-        inbounds = []
+    """Список локаций: собираем инбаунды со всех панелей (каждая страна — своя)."""
+    inbounds = []
+    async with SessionMaker() as session:
+        for panel in await registry.all_panels(session):
+            try:
+                inbounds.extend(await panel.list_inbounds())
+            except PanelError as exc:
+                logger.warning("Локации: панель %s не ответила: %s", panel.name, exc)
     if not inbounds:
         await call.answer("Локации появятся после настройки нод", show_alert=True)
         return
