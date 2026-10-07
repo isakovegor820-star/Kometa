@@ -14,7 +14,7 @@
 #  проверяет зависимости и правила firewall). Принудительно — флаг --reinstall.
 #
 #  Запуск:   sudo bash scripts/install_panel.sh
-#  Примеры:  sudo bash scripts/install_panel.sh --port 54321 --awg-port 51820
+#  Примеры:  sudo bash scripts/install_panel.sh --port 54321 --awg-port 990
 #            sudo bash scripts/install_panel.sh --no-firewall --listen-ip 127.0.0.1
 #
 #  ВАЖНО: скрипт не хранит секретов. Логин/пароль панели и API-токен печатаются
@@ -35,7 +35,11 @@ PANEL_USER="${PANEL_USER:-kometa_admin}"   # логин в панель
 PANEL_PASSWORD="${PANEL_PASSWORD:-}"       # пусто = сгенерировать случайный
 PANEL_BASE_PATH="${PANEL_BASE_PATH:-}"     # пусто = сгенерировать случайный
 PANEL_SUB_PORT="${PANEL_SUB_PORT:-2096}"   # порт сервиса подписок самой панели
-AWG_PORT="${AWG_PORT:-51820}"              # UDP-порт под AmneziaWG
+# UDP-порт под AmneziaWG. Ниже 1000 осознанно: при детекте WG-рукопожатия
+# оператор блокирует все UDP-порты выше 1000 (NTC 22319, 18.02.2026), а порты
+# ниже 1000 продолжают работать. Держать в одном значении с install_node.sh,
+# иначе фаервол откроет один порт, а нода будет слушать другой.
+AWG_PORT="${AWG_PORT:-990}"
 WEB_PORT="${WEB_PORT:-8080}"              # порт веб-слоя бота (ссылка /sub/<token>)
 LISTEN_IP="${LISTEN_IP:-}"                 # '' = панель слушает все адреса
 DO_FIREWALL=1
@@ -73,7 +77,7 @@ usage() {
   --username NAME     логин в панель (по умолчанию kometa_admin)
   --password PASS     пароль (по умолчанию — случайный, будет напечатан)
   --web-base-path P   секретный путь панели (по умолчанию — случайный)
-  --awg-port N        UDP-порт AmneziaWG, который открыть в firewall (51820)
+  --awg-port N        UDP-порт AmneziaWG, который открыть в firewall (990)
   --sub-port N        порт сервиса подписок панели (2096; 0 = не открывать)
   --web-port N        порт веб-слоя бота для /sub/<token> (8080; 0 = не открывать)
   --listen-ip IP      на каком адресе слушать панель (например 127.0.0.1)

@@ -158,11 +158,22 @@ else
   bad "Бот не запущен: .venv/bin/python -m app.main  (или docker compose up -d)"
 fi
 
-HEALTH="$(curl -s -m 8 "http://127.0.0.1:${WEB_PORT}/health" || true)"
+# Веб-слой может слушать https (так и нужно на боевом сервере: Happ и v2rayNG
+# отказываются добавлять подписку по http). Определяем схему по .env.
+WEB_SSL_CERT="$(env_value WEB_SSL_CERT || true)"
+WEB_SCHEME="http"
+CURL_TLS=()
+if [[ -n "$WEB_SSL_CERT" ]]; then
+  WEB_SCHEME="https"
+  # сертификат Let's Encrypt выпущен на публичное имя, по 127.0.0.1 он не совпадёт
+  CURL_TLS=(--insecure)
+fi
+
+HEALTH="$(curl -s -m 8 "${CURL_TLS[@]}" "${WEB_SCHEME}://127.0.0.1:${WEB_PORT}/health" || true)"
 if grep -q '"status":"ok"' <<<"$HEALTH"; then
-  ok "Веб-слой отвечает на порту ${WEB_PORT}"
+  ok "Веб-слой отвечает на ${WEB_SCHEME}://127.0.0.1:${WEB_PORT}"
 else
-  bad "Веб-слой не отвечает на http://127.0.0.1:${WEB_PORT}/health — ссылки-подписки не будут открываться"
+  bad "Веб-слой не отвечает на ${WEB_SCHEME}://127.0.0.1:${WEB_PORT}/health — ссылки-подписки не будут открываться"
 fi
 
 head_ "3. Панель VPN"

@@ -24,16 +24,32 @@
 #            sudo bash scripts/install_node.sh --dry-run
 #
 #  Идемпотентность: повторный запуск не создаёт дубликаты — инбаунды ищутся
-#  по remark (Kometa-Reality-443 / Kometa-AWG-51820).
+#  по remark (Kometa-Reality-443 / Kometa-AWG; старые установки — Kometa-AWG-51820).
 # =============================================================================
 
 set -euo pipefail
 
 # ---------------------------------------------------------------- настройки ---
 REALITY_PORT="${REALITY_PORT:-443}"
-AWG_PORT="${AWG_PORT:-51820}"
+# Порт AmneziaWG. 51820 (дефолт WireGuard) — плохой выбор для LTE: полевой замер
+# (NTC 22319, 18.02.2026, Дом.ру Сибирь) показал, что при детекте WG-рукопожатия
+# оператор блокирует ВСЕ UDP-порты выше 1000 на 10 минут — сутки, а порты ниже
+# 1000 продолжают работать. Рабочие кейсы сообщества: 990/udp и <600/udp.
+# Компромисс: 443/udp маскируется под QUIC, но попадает в зону блокировки.
+# Совместить нельзя — см. docs/LTE-ВАРИАНТЫ-2026-10.md, §3.1 и §8.3.
+AWG_PORT="${AWG_PORT:-990}"
+# uTLS-фингерпринт Reality. Дефолт Xray — chrome, и в июне 2026 именно chrome
+# попал под эвристику «IP → фингерпринт → >3 параллельных TLS». Рабочие
+# значения: firefox, edge, android (OkHttp), randomized.
+# См. docs/LTE-ВАРИАНТЫ-2026-10.md, §6.1.
+REALITY_FP="${REALITY_FP:-firefox}"
 REALITY_REMARK="${REALITY_REMARK:-Kometa-Reality-443}"
-AWG_REMARK="${AWG_REMARK:-Kometa-AWG-51820}"
+# Remark AWG не содержит порта: порт — это параметр инбаунда, а не его имя.
+# Иначе смена --awg-port на уже настроенной ноде создала бы второй инбаунд.
+AWG_REMARK="${AWG_REMARK:-Kometa-AWG}"
+# Имена, под которыми инбаунд мог быть создан раньше (до 07.10.2026) —
+# ищем и их, чтобы повторный запуск оставался идемпотентным.
+AWG_REMARK_LEGACY="Kometa-AWG-51820"
 PANEL_URL="${PANEL_URL:-}"
 PANEL_TOKEN="${PANEL_TOKEN:-}"
 SNI="${SNI:-}"
@@ -95,12 +111,18 @@ usage() {
 
 Флаги:
   --reality-port N   порт VLESS+Reality (по умолчанию 443)
-  --awg-port N       порт AmneziaWG, UDP (по умолчанию 51820)
+  --reality-fp FP    uTLS-фингерпринт Reality: firefox|edge|android|randomized
+                     (по умолчанию firefox — chrome под эвристикой июня 2026)
+  --awg-port N       порт AmneziaWG, UDP (по умолчанию 990 — ниже 1000, чтобы
+                     не попадать под блокировку UDP-портов >1000 на LTE)
   --sni DOMAIN       домен маскировки Reality (по умолчанию — автоподбор)
   --whitelist        режим «белых списков»: маскироваться под разрешённый
                      российский домен (yandex.ru, ozon.ru, vk.com, …)
   --no-reality       не создавать VLESS+Reality
   --no-awg           не создавать AmneziaWG
+  --no-mss           не настраивать MSS-clamp (по умолчанию настраивается:
+                     MTU 1280 → MSS 1240/IPv4 и 1220/IPv6 в mangle/FORWARD)
+  --lte-mtu N        MTU для расчёта MSS (по умолчанию 1280; домашним сетям 1420)
   --panel-url URL    адрес панели (по умолчанию PANEL_URL из .env)
   --panel-token T    API-токен панели (по умолчанию PANEL_TOKEN из .env)
   --env FILE         путь к .env (по умолчанию <проект>/.env)
@@ -223,6 +245,52 @@ rand_shortid() { openssl rand -hex 8 2>/dev/null || true; }
 rand_uuid()    { cat /proc/sys/kernel/random/uuid 2>/dev/null || openssl rand -hex 16; }
 
 # -------------------------------------------------------------------- сеть ----
+# MSS-clamping под LTE. На мобильных сетях MTU меньше (туннели оператора,
+# GTP-U), и без подрезки MSS крупные сегменты молча дропаются — это классический
+# PMTUD-блэкхол: «сервер пингуется, SSH работает, а сайты висят».
+# Правило живёт на СЕРВЕРЕ, в таблице mangle цепочки FORWARD, и работает только
+# для транзитного трафика VPN (сам сервер не затрагивается).
+#   MTU 1280 (RFC 8200, минимум для IPv6, проходит через любую сеть)
+#   → MSS 1240 для IPv4 (1280 − 20 IP − 20 TCP)
+#   → MSS 1220 для IPv6 (1280 − 40 IP − 20 TCP)
+# См. docs/LTE-ВАРИАНТЫ-2026-10.md, §7.7 и .research/lte-clients.md, §5.4.
+LTE_MTU="${LTE_MTU:-1280}"
+LTE_MSS_V4="${LTE_MSS_V4:-1240}"
+LTE_MSS_V6="${LTE_MSS_V6:-1220}"
+DO_MSS=1
+
+mss_rule() { # mss_rule <iptables|ip6tables> <MSS> → одна строка правила
+    printf '%s -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %s' "$1" "$2"
+}
+
+apply_mss_clamp() {
+    local table bin mss rule removed=0
+    for table in "iptables ${LTE_MSS_V4}" "ip6tables ${LTE_MSS_V6}"; do
+        set -- $table
+        bin="$1"; mss="$2"
+        have "$bin" || continue
+        rule="$(mss_rule "$bin" "$mss")"
+
+        # Сначала убрать прежние правила скрипта (идемпотентность и чистка дублей):
+        # при повторном запуске иначе копились бы одинаковые строки.
+        while $rule -D >/dev/null 2>&1; do removed=$((removed + 1)); done
+
+        if $rule -I >/dev/null 2>&1; then
+            if [[ "$removed" -gt 0 ]]; then
+                ok "MSS-clamp ${bin}: переставлен (снято дублей: ${removed}, MSS ${mss})."
+            else
+                ok "MSS-clamp ${bin}: MSS ${mss} для транзитного TCP (FORWARD)."
+            fi
+        else
+            warn "MSS-clamp ${bin}: не удалось применить (нет прав или другой backend)."
+            warn "Проверь вручную на ноде и добавь в автозагрузку:"
+            warn "  ${rule} -I"
+        fi
+    done
+
+    log "Проверка на ноде: iptables -t mangle -S FORWARD | grep TCPMSS"
+}
+
 api_get() { # api_get <путь>
     curl -sS --max-time 25 "${CURL_OPTS[@]+"${CURL_OPTS[@]}"}" \
         -H "Authorization: Bearer ${PANEL_TOKEN}" \
@@ -276,7 +344,9 @@ check_sni() { # check_sni <домен> → 0 если TLS 1.3 + h2 + валид�
         -tls1_3 -alpn h2 </dev/null 2>/dev/null || true)"
     [[ -n "$out" ]] || return 1
     printf '%s' "$out" | grep -q 'ALPN protocol: h2' || return 1
-    printf '%s' "$out" | grep -Eq 'Protocol *: *TLSv1\.3' || return 1
+    # openssl с -alpn h2 печатает версию в строке «New, TLSv1.3, Cipher is …»,
+    # а не в «Protocol  : TLSv1.3» — принимаем оба формата.
+    printf '%s' "$out" | grep -Eq 'Protocol *: *TLSv1\.3|New, TLSv1\.3' || return 1
     printf '%s' "$out" | grep -q 'Verify return code: 0' || return 1
     # домен не должен указывать на этот же сервер (иначе маскировка бессмысленна)
     local ip; ip="$(local_ip)"
@@ -342,11 +412,12 @@ create_reality_inbound() {
     settings='{"clients":[],"decryption":"none","fallbacks":[]}'
     stream="$(jq -nc \
         --arg sni "$SNI" --arg priv "$priv" --arg pub "$pub" --arg sid "$sid" \
+        --arg fp "$REALITY_FP" \
         '{network:"tcp",security:"reality",externalProxy:[],
           realitySettings:{show:false,xver:0,target:($sni+":443"),serverNames:[$sni],
             privateKey:$priv,minClientVer:"",maxClientVer:"",maxTimediff:0,
             shortIds:[$sid],
-            settings:{publicKey:$pub,fingerprint:"chrome",serverName:"",spiderX:"/"}}}')"
+            settings:{publicKey:$pub,fingerprint:$fp,serverName:"",spiderX:"/"}}}')"
     sniffing='{"enabled":true,"destOverride":["http","tls","quic"],"metadataOnly":false,"routeOnly":false}'
 
     payload="$(jq -nc --arg remark "$remark" --argjson port "$port" \
@@ -360,7 +431,7 @@ create_reality_inbound() {
         return 0
     fi
 
-    log "Создаю инбаунд VLESS+Reality (порт ${port}, SNI ${SNI})..."
+    log "Создаю инбаунд VLESS+Reality (порт ${port}, SNI ${SNI}, fp ${REALITY_FP})..."
     resp="$(api_post /panel/api/inbounds/add "$payload")"
     if [[ "$(printf '%s' "$resp" | jq -r '.success // false')" != "true" ]]; then
         die "Панель не создала инбаунд: $(printf '%s' "$resp" | jq -r '.msg // "нет сообщения"')"
@@ -519,7 +590,7 @@ print_port_checks() {
   # снаружи, с другого компьютера (TCP-порт Reality должен отвечать):
     nc -vz <IP_СЕРВЕРА> ${REALITY_PORT}
 
-  # если портов нет в firewall (install_panel.sh открывает 443/tcp и 51820/udp):
+  # если портов нет в firewall (install_panel.sh открывает 443/tcp и ${AWG_PORT}/udp):
     ufw allow ${REALITY_PORT}/tcp
     ufw allow ${AWG_PORT}/udp
     ufw status numbered
@@ -556,7 +627,7 @@ EOF
   SNI (dest) : ${SNI:-<не определён>}:443
   shortId    : ${REALITY_SHORTID:-<см. панель>}
   publicKey  : ${REALITY_PUBKEY:-<см. панель: Inbounds → инбаунд → клиент>}
-  fingerprint: chrome, spiderX: /
+  fingerprint: ${REALITY_FP}, spiderX: /
 
   Клиентов создаёт бот (по одному на подписку) — вручную добавлять не нужно.
   Если понадобится вручную: панель → Inbounds → ${REALITY_REMARK} → «+» у клиента.
@@ -595,11 +666,14 @@ main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --reality-port) REALITY_PORT="${2:?}"; shift 2 ;;
+            --reality-fp)   REALITY_FP="${2:?}"; shift 2 ;;
             --awg-port)     AWG_PORT="${2:?}"; shift 2 ;;
             --sni)          SNI="${2:?}"; shift 2 ;;
             --whitelist)    SNI_CANDIDATES="$WHITELIST_SNI_CANDIDATES"; shift ;;
             --no-reality)   DO_REALITY=0; shift ;;
             --no-awg)       DO_AWG=0; shift ;;
+            --no-mss)       DO_MSS=0; shift ;;
+            --lte-mtu)      LTE_MTU="${2:?}"; LTE_MSS_V4=$((LTE_MTU - 40)); LTE_MSS_V6=$((LTE_MTU - 60)); shift 2 ;;
             --panel-url)    PANEL_URL="${2:?}"; shift 2 ;;
             --panel-token)  PANEL_TOKEN="${2:?}"; shift 2 ;;
             --env)          ENV_FILE="${2:?}"; shift 2 ;;
@@ -612,6 +686,14 @@ main() {
             *) die "Неизвестный флаг: $1 (см. --help)" ;;
         esac
     done
+
+    # Фингерпринт: chrome/safari/ios попадают под эвристику ТСПУ (июнь 2026).
+    # Не запрещаем — иногда нужен для отладки, — но предупреждаем громко.
+    case "$REALITY_FP" in
+        chrome | safari | ios | ios14 | ios15)
+            warn "Фингерпринт '${REALITY_FP}' входит в чёрный список эвристики июня 2026."
+            warn "Рекомендуется firefox, edge, android или randomized." ;;
+    esac
 
     box "KOMETA • ПОДГОТОВКА VPN-НОДЫ"
     require_root
@@ -662,6 +744,16 @@ main() {
     # ---- AmneziaWG ----
     if [[ "$DO_AWG" -eq 1 ]]; then
         awg_id="$(find_inbound_by_remark "$existing" "$AWG_REMARK")"
+        if [[ -z "$awg_id" && -n "${AWG_REMARK_LEGACY:-}" ]]; then
+            # Нода, настроенная до 07.10.2026: инбаунд назывался Kometa-AWG-51820.
+            awg_id="$(find_inbound_by_remark "$existing" "$AWG_REMARK_LEGACY")"
+            if [[ -n "$awg_id" ]]; then
+                warn "Найден старый инбаунд «${AWG_REMARK_LEGACY}» (id=${awg_id})."
+                warn "Он слушает прежний порт. Для LTE перенеси его на порт ${AWG_PORT}/udp:"
+                warn "  панель → инбаунды → «${AWG_REMARK_LEGACY}» → порт ${AWG_PORT}, затем перезапуск xray."
+                warn "Либо запусти скрипт с AWG_REMARK=${AWG_REMARK_LEGACY}, чтобы не создавать дубль."
+            fi
+        fi
         if [[ -n "$awg_id" ]]; then
             ok "AmneziaWG уже есть (id=${awg_id}) — пропускаю (идемпотентность)."
             AWG_ID="$awg_id"
@@ -671,6 +763,13 @@ main() {
     fi
 
     if [[ "$DRY_RUN" -eq 0 ]]; then
+        if [[ "$DO_MSS" -eq 1 ]]; then
+            log "Настраиваю MSS-clamp под LTE (MTU ${LTE_MTU})..."
+            apply_mss_clamp
+        else
+            warn "MSS-clamp пропущен (--no-mss). На LTE это частая причина «сайты висят»."
+        fi
+
         log "Жду, пока панель поднимет порты..."
         if [[ -n "${REALITY_ID:-}" ]]; then
             wait_for_port "$REALITY_PORT" tcp 15 \
