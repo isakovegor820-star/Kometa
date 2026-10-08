@@ -499,3 +499,138 @@ async def test_nodes_check_reports_not_ready_panel(client, session, monkeypatch)
 
     opened = await alerts_service.list_alerts(session, status="open")
     assert [alert.kind for alert in opened] == ["node_degraded"]
+
+
+# ------------------------------------------ адрес сервиса подписок у ноды
+async def test_active_node_without_subscription_address_is_rejected(client, session):
+    """Активная нода без адреса подписок — это локация, которая молча пропадёт.
+
+    Бот не сможет забрать у панели готовые конфиги (``get_configs`` требует
+    адрес сервиса подписок), и страна исчезнет из подписки клиента без единой
+    ошибки на экране. Поэтому форма такую ноду не сохраняет.
+    """
+    from sqlalchemy import select
+
+    from app.db.models import Node
+
+    await login(client)
+    response = await client.post(
+        "/admin/nodes",
+        data={
+            "code": "nl",
+            "title": "🇳🇱 Нидерланды",
+            "host": "",
+            "sub_base": "",
+            "panel_url": "http://203.0.113.5:2053",
+            "panel_token": "secret-token",
+            "inbound_ids": "1,2",
+            "is_active": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert await session.scalar(select(Node).where(Node.code == "nl")) is None, "нода не сохраняется"
+
+    page = await client.get("/admin/nodes")
+    assert "не попадёт в подписку" in page.text
+
+
+async def test_draft_node_without_address_can_be_saved(client, session):
+    """Черновик (нода выключена) сохранить можно: адрес впишут позже."""
+    from sqlalchemy import select
+
+    from app.db.models import Node
+
+    await login(client)
+    response = await client.post(
+        "/admin/nodes",
+        data={
+            "code": "nl",
+            "title": "🇳🇱 Нидерланды",
+            "host": "",
+            "sub_base": "",
+            "panel_url": "http://203.0.113.5:2053",
+            "panel_token": "secret-token",
+            "inbound_ids": "1,2",
+            "is_active": "0",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = await session.scalar(select(Node).where(Node.code == "nl"))
+    assert saved is not None and saved.is_active is False
+
+
+async def test_node_saves_explicit_subscription_address(client, session):
+    """Свой порт или путь подписки у панели ноды задаётся полем «Адрес сервиса подписок»."""
+    from sqlalchemy import select
+
+    from app.db.models import Node
+    from app.panels.registry import registry
+
+    await login(client)
+    response = await client.post(
+        "/admin/nodes",
+        data={
+            "code": "nl",
+            "title": "🇳🇱 Нидерланды",
+            "host": "",
+            "sub_base": "http://203.0.113.5:8443/custom-sub/",
+            "panel_url": "http://203.0.113.5:2053",
+            "panel_token": "secret-token",
+            "inbound_ids": "1,2",
+            "is_active": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = await session.scalar(select(Node).where(Node.code == "nl"))
+    assert saved is not None and saved.sub_base == "http://203.0.113.5:8443/custom-sub/"
+    # Без host нода всё равно рабочая: адрес подписок задан явно.
+    assert saved.subscription_base == "http://203.0.113.5:8443/custom-sub/"
+
+    page = await client.get("/admin/nodes")
+    assert "нет адреса подписки" not in page.text
+
+
+async def test_nodes_page_warns_about_node_without_subscription_address(client, session):
+    """Старая нода без адреса (например из SQL) видна в списке, а не молчит."""
+    from app.db.models import Node
+
+    session.add(
+        Node(
+            code="old",
+            title="🇸🇪 Швеция",
+            panel_type="xui",
+            panel_url="http://203.0.113.9:2053",
+            inbound_ids="1",
+            host="",
+            sub_base="",
+            is_active=True,
+        )
+    )
+    await session.commit()
+
+    await login(client)
+    page = await client.get("/admin/nodes")
+
+    assert page.status_code == 200
+    assert "нет адреса подписки" in page.text
+
+
+async def test_subscription_address_is_derived_from_host(session):
+    """Пустой sub_base не ломает ноду: адрес собирается из host (как раньше)."""
+    from app.db.models import Node
+
+    node = Node(code="nl", title="NL", host="203.0.113.5", sub_base="")
+    assert node.subscription_base == "http://203.0.113.5:2096/sub/"
+
+    node.sub_base = "https://sub.example/nl/"
+    assert node.subscription_base == "https://sub.example/nl/"
+
+    node.sub_base = ""
+    node.host = ""
+    assert node.subscription_base == ""

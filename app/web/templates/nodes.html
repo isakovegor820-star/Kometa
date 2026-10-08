@@ -68,6 +68,16 @@
           <td>
             <code class="trunc" title="{{ node.panel_url }}">{{ node.panel_url or '—' }}</code>
             <div class="xs dim">{{ node.panel_type }}</div>
+            {% if node.subscription_base %}
+            <div class="xs dim" title="Адрес сервиса подписок этой панели">
+              подписка: <code>{{ node.subscription_base }}</code>
+            </div>
+            {% elif node.panel_type == 'xui' and node.is_active %}
+            {# Без адреса подписок бот не заберёт у панели конфиги: локация молча потеряется. #}
+            <div class="xs text-err" title="Заполни «Адрес сервиса подписок» или «Адрес сервера»">
+              нет адреса подписки — локация не попадёт в подписку
+            </div>
+            {% endif %}
           </td>
           <td>
             {% if not node.panel_token %}
@@ -192,7 +202,16 @@
           <label for="host">Адрес сервера</label>
           <input type="text" id="host" name="host" value="{{ edit_node.host if edit_node else '' }}"
                  placeholder="203.0.113.99" maxlength="128">
-          <div class="hint">Для справки: по этому адресу владелец заходит на сервер.</div>
+          <div class="hint">Для справки: по этому адресу владелец заходит на сервер. Из него же
+            собирается адрес подписок, если поле ниже пустое.</div>
+        </div>
+        <div class="field span-2">
+          <label for="sub_base">Адрес сервиса подписок</label>
+          <input type="text" id="sub_base" name="sub_base" value="{{ edit_node.sub_base if edit_node else '' }}"
+                 placeholder="http://203.0.113.99:2096/sub/" maxlength="255">
+          <div class="hint">Пусто — подставится <code>http://&lt;адрес сервера&gt;:2096/sub/</code>.
+            Если у панели ноды свой порт или путь подписки, впиши его здесь: без адреса подписок
+            локация не попадёт в подписку клиента.</div>
         </div>
         <div class="field">
           <label for="panel_type">Тип панели</label>

@@ -59,7 +59,7 @@ class PanelRegistry:
                 username="",
                 password="",
                 inbound_ids=parse_inbound_ids(node.inbound_ids),
-                sub_base=node.sub_base or (f"http://{node.host}:2096/sub/" if node.host else ""),
+                sub_base=node.subscription_base,
             )
         return self._cache[key]
 

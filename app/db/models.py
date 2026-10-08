@@ -304,6 +304,19 @@ class Node(Base):
     #: путь задаётся явно: без него бот не соберёт конфиги с этой ноды.
     sub_base: Mapped[str] = mapped_column(String(255), default="")
 
+    @property
+    def subscription_base(self) -> str:
+        """Адрес сервиса подписок: явный ``sub_base`` или собранный из ``host``.
+
+        Пусто — конфиги этой локации собрать нечем (``get_configs`` панели
+        требует адрес подписок), и страна **молча** пропадёт из подписки
+        клиента. Поэтому значение видно в админке, а включить такую ноду форма
+        не даёт: пустой адрес — это не «мелочь», а потерянная локация.
+        """
+        if self.sub_base:
+            return self.sub_base
+        return f"http://{self.host}:2096/sub/" if self.host else ""
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     priority: Mapped[int] = mapped_column(Integer, default=100)
 

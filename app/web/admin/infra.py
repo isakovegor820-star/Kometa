@@ -229,6 +229,7 @@ async def node_save(
     is_active: str = Form("1"),
     channel: str = Form("main"),
     test_url: str = Form(""),
+    sub_base: str = Form(""),
 ):
     """Добавить ноду или обновить существующую (upsert по коду).
 
@@ -245,6 +246,9 @@ async def node_save(
     kind = (panel_type or "").strip().lower() or "xui"
     url = (panel_url or "").strip()
     token = (panel_token or "").strip()
+    node_host = (host or "").strip()
+    node_sub_base = (sub_base or "").strip()
+    wants_active = str(is_active).strip().lower() not in {"0", "false", "off", "no", ""}
 
     if not code:
         return flash_redirect("/admin/nodes", error="Укажи код ноды: латиницей, например jp")
@@ -254,12 +258,28 @@ async def node_save(
         return flash_redirect("/admin/nodes", error="Неизвестный тип панели: поддерживаются xui и fake")
     if kind == "xui" and not url:
         return flash_redirect("/admin/nodes", error="Укажи адрес панели: http://IP:2053/путь")
+    if node_sub_base and not node_sub_base.startswith(("http://", "https://")):
+        return flash_redirect(
+            "/admin/nodes",
+            error="Адрес сервиса подписок должен начинаться с http:// или https:// (например http://IP:2096/sub/)",
+        )
     # Пустое поле = «все инбаунды панели», поэтому опечатку («3x», «3 ,»)
     # нельзя пропускать молча: иначе выдача расширится на все инбаунды, а
     # оператор будет уверен, что ограничил ноду одним.
     cleaned_ids, ids_problem = normalize_inbound_ids(inbound_ids)
     if ids_problem:
         return flash_redirect("/admin/nodes", error=ids_problem)
+    # Активная нода без адреса подписок — это локация, которая молча пропадёт
+    # из подписки клиента: бот не сможет забрать у панели готовые конфиги.
+    # Пока нода черновик (выключена), сохранить её можно.
+    if kind == "xui" and wants_active and not (node_sub_base or node_host):
+        return flash_redirect(
+            "/admin/nodes",
+            error=(
+                "У ноды не заполнены «Адрес сервера» и «Адрес сервиса подписок» — "
+                "без них локация не попадёт в подписку. Заполни адрес или сними галочку «Включена»"
+            ),
+        )
 
     async with SessionMaker() as db:
         node = await db.scalar(select(Node).where(Node.code == code))
@@ -270,7 +290,7 @@ async def node_save(
 
         node.title = title[:64]
         node.country = (country or "").strip().upper()[:8]
-        node.host = (host or "").strip()[:128]
+        node.host = node_host[:128]
         node.panel_type = kind
         node.panel_url = url[:255]
         # Пустой токен в форме — «не менять». Иначе правка названия затирала бы
@@ -280,7 +300,10 @@ async def node_save(
             node.panel_token = token[:255]
         node.inbound_ids = cleaned_ids
         node.priority = int(priority or 100)
-        node.is_active = str(is_active).strip().lower() not in {"0", "false", "off", "no", ""}
+        node.is_active = wants_active
+        # Адрес сервиса подписок: пусто — соберётся из host в модели
+        # (``Node.subscription_base``), поэтому храним только явное значение.
+        node.sub_base = node_sub_base[:255]
         # Канал: обычная локация, резервная или CDN. Незнакомое значение не
         # ломает подписку — считаем локацию обычной.
         node.channel = (channel or "").strip().lower()
