@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Alert, Node
-from app.panels.base import PanelClient, PanelError
+from app.panels.base import PanelClient, PanelError, PanelInboundMissing
 
 STATUS_OPEN = "open"
 STATUS_ACK = "ack"
@@ -70,8 +70,15 @@ async def raise_alert(
     fingerprint: str = "",
     node_id: int | None = None,
     user_id: int | None = None,
+    reopen_ack: bool = True,
 ) -> Alert:
-    """Поднять алерт. Повтор с тем же отпечатком не плодит строк, а обновляет её."""
+    """Поднять алерт. Повтор с тем же отпечатком не плодит строк, а обновляет её.
+
+    :param reopen_ack: переоткрывать ли алерт, который человек взял в работу.
+        Для одноразовых событий (платёж без заказа) это осмысленно, для
+        повторяющихся проверок состояния — нет: карточка «в работе» теряла
+        владельца через пять минут после того, как её взяли.
+    """
     default_sev, default_title = KINDS.get(kind, (SEV_WARN, kind))
     fingerprint = fingerprint or kind
     alert = await session.scalar(
@@ -83,7 +90,8 @@ async def raise_alert(
     if alert is not None:
         alert.repeat_count = int(alert.repeat_count or 1) + 1
         alert.last_seen_at = _now()
-        alert.status = STATUS_OPEN if alert.status == STATUS_ACK else alert.status
+        if reopen_ack and alert.status == STATUS_ACK:
+            alert.status = STATUS_OPEN
         if message:
             alert.message = message
         return alert
@@ -184,11 +192,61 @@ async def summary(session: AsyncSession) -> AlertCounts:
 
 
 # ------------------------------------------------------------------ проверки
+#: Отпечатки, которые относятся к ноде целиком. Основной — доступность,
+#: дальше по видам проблем: инбаунды, панель, проба «глазами клиента».
+NODE_FINGERPRINT_SUFFIXES: tuple[str, ...] = ("", ":inbounds", ":panel", ":probe")
+
+
+def node_fingerprints(code: str) -> list[str]:
+    """Все отпечатки алертов ноды: доступность, инбаунды, панель, проба."""
+    return [f"node:{code}{suffix}" for suffix in NODE_FINGERPRINT_SUFFIXES]
+
+
+async def resolve_node_alerts(
+    session: AsyncSession,
+    code: str,
+    *,
+    note: str = "нода убрана из проверки",
+    by: str = "система",
+) -> int:
+    """Закрыть все алерты ноды. Возвращает число закрытых.
+
+    Нужно при удалении и выключении ноды: автозакрытие срабатывает только на
+    успешной проверке, а выключенную ноду никто не проверяет — алерты
+    «нет инбаундов» и «порт не пускает клиента» оставались в «Открытых»
+    навсегда, и закрыть их штатной кнопкой было нельзя.
+    """
+    closed = 0
+    for fingerprint in node_fingerprints(code):
+        if await resolve_by_fingerprint(session, fingerprint, note=note, by=by) is not None:
+            closed += 1
+    return closed
+
+
+async def _panel_health(panel: PanelClient) -> tuple[bool, str]:
+    """``(отвечает, текст ошибки)`` — с запасным вариантом для чужих панелей.
+
+    Реальные клиенты наследуют ``PanelClient.check_health``; заглушки и
+    сторонние реализации могут уметь только ``health()``.
+    """
+    checker = getattr(panel, "check_health", None)
+    if callable(checker):
+        ok, error = await checker()
+        return bool(ok), str(error or "")
+    try:
+        return bool(await panel.health()), ""
+    except Exception as exc:  # noqa: BLE001 - health чужой панели может упасть
+        return False, str(exc)
+
+
 async def check_nodes(session: AsyncSession, panels: list[tuple[Node | None, PanelClient]]) -> list[dict]:
     """Проверить доступность нод и завести/закрыть алерты.
 
-    Пишем ``Node.last_check_at``/``last_check_ok`` — на дашборде видно, когда
-    ноду проверяли в последний раз, и не нужно гадать, свежие ли данные.
+    Пишем ``Node.last_check_at``/``last_check_ok``/``last_check_error`` — на
+    дашборде видно, когда ноду проверяли в последний раз, и не нужно гадать,
+    свежие ли данные. ``last_check_ok`` истинно только если панель ответила
+    **и** выдала пригодный список инбаундов: иначе получается зелёный бейдж
+    «отвечает» рядом с алертом «нет инбаундов».
 
     :param panels: пары (нода из БД или None для основной панели, клиент панели).
     """
@@ -197,22 +255,40 @@ async def check_nodes(session: AsyncSession, panels: list[tuple[Node | None, Pan
     for node, panel in panels:
         label = node.title if node is not None else (panel.location_title or "Основная панель")
         code = node.code if node is not None else "primary"
-        entry = {"code": code, "title": label, "ok": False, "error": "", "inbounds": 0}
+        entry = {"code": code, "title": label, "ok": False, "error": "", "inbounds": 0, "cause": ""}
+
+        if node is not None and not node.is_active:
+            # Выключенную ноду не проверяем, но и алерты за ней не оставляем.
+            await resolve_node_alerts(session, code, note="нода выключена")
+            continue
+
         try:
-            entry["ok"] = await panel.health()
+            entry["ok"], health_error = await _panel_health(panel)
+            entry["error"] = health_error
             if entry["ok"]:
                 inbounds = await panel.list_inbounds()
                 entry["inbounds"] = len(inbounds)
                 if not inbounds:
                     entry["error"] = "панель отвечает, но инбаундов нет — клиенты не получат конфиг"
+                    entry["cause"] = "inbounds"
+        except PanelInboundMissing as exc:
+            # Панель жива и ответила — выдать конфиг нечем: расходятся настройки.
+            entry["error"] = str(exc)
+            entry["cause"] = "inbounds"
         except PanelError as exc:
             entry["error"] = str(exc)
+            entry["cause"] = "panel"
         except Exception as exc:  # noqa: BLE001 - чужая панель может ответить чем угодно
             entry["error"] = str(exc)
+            entry["cause"] = "panel"
 
         if node is not None:
             node.last_check_at = now
-            node.last_check_ok = bool(entry["ok"])
+            node.last_check_ok = bool(entry["ok"]) and not entry["error"]
+            node.last_check_error = (entry["error"] or "")[:300]
+        #: Панель готова выдать конфиг — по этому признаку считают живые ноды
+        #: админка и Telegram: «ответила, но инбаунды разошлись» это не «жива».
+        entry["ready"] = bool(entry["ok"]) and not entry["error"]
 
         fingerprint = f"node:{code}"
         if not entry["ok"]:
@@ -224,21 +300,45 @@ async def check_nodes(session: AsyncSession, panels: list[tuple[Node | None, Pan
                 message=entry["error"] or "панель не ответила на проверку",
                 fingerprint=fingerprint,
                 node_id=node.id if node is not None else None,
+                reopen_ack=False,
             )
+            # Нода недоступна — про инбаунды и ошибки панели ничего не известно:
+            # противоречивая пара «не отвечает» + «нет инбаундов» не нужна.
+            await resolve_by_fingerprint(session, f"{fingerprint}:inbounds", note="нода не отвечает")
+            await resolve_by_fingerprint(session, f"{fingerprint}:panel", note="нода не отвечает")
         elif entry["error"]:
-            await raise_alert(
-                session,
-                "node_degraded",
-                f"Нода «{label}»: нет инбаундов",
-                severity=SEV_WARN,
-                message=entry["error"],
-                fingerprint=f"{fingerprint}:inbounds",
-                node_id=node.id if node is not None else None,
-            )
+            if entry["cause"] == "inbounds":
+                await raise_alert(
+                    session,
+                    "node_degraded",
+                    f"Нода «{label}»: нет инбаундов",
+                    severity=SEV_WARN,
+                    message=entry["error"],
+                    fingerprint=f"{fingerprint}:inbounds",
+                    node_id=node.id if node is not None else None,
+                    reopen_ack=False,
+                )
+                await resolve_by_fingerprint(session, f"{fingerprint}:panel", note="причина — инбаунды")
+            else:
+                # Панель отвечает, но с ошибкой (формат ответа, HTTP 500 на
+                # втором запросе): это не «нет инбаундов» — заголовок и
+                # действие оператора другие.
+                await raise_alert(
+                    session,
+                    "panel_error",
+                    f"Нода «{label}»: панель отвечает с ошибкой",
+                    severity=SEV_WARN,
+                    message=entry["error"],
+                    fingerprint=f"{fingerprint}:panel",
+                    node_id=node.id if node is not None else None,
+                    reopen_ack=False,
+                )
+                await resolve_by_fingerprint(session, f"{fingerprint}:inbounds", note="причина — панель")
             await resolve_by_fingerprint(session, fingerprint)
         else:
             await resolve_by_fingerprint(session, fingerprint, note="нода снова отвечает")
             await resolve_by_fingerprint(session, f"{fingerprint}:inbounds")
+            await resolve_by_fingerprint(session, f"{fingerprint}:panel")
 
         results.append(entry)
     return results
@@ -252,6 +352,12 @@ async def check_probes(session: AsyncSession, panels: list[tuple[Node | None, Pa
     ``node_down`` молчит, а клиенты уже не подключаются.
 
     Заодно пишем задержку: она видна в админке и на странице подключения.
+
+    Важно: пробу надо ещё **суметь поставить**. Если панель не отдала список
+    инбаундов, до порта дело не дошло — состояние порта неизвестно, и писать
+    «порт не пускает клиента» нельзя. Такой случай не поднимает свой алерт
+    (причину панели показывает :func:`check_nodes`) и не стирает замер молча:
+    текст причины остаётся в ``Node.last_probe_error``.
     """
     from app.config import get_settings
     from app.services import probe as probe_service
@@ -267,22 +373,32 @@ async def check_probes(session: AsyncSession, panels: list[tuple[Node | None, Pa
             continue
         label = node.title or node.code
         result = await probe_service.probe_panel(panel, node.host)
+        measured = bool(result.measured)
         node.last_probe_at = now
-        node.last_probe_ok = bool(result.ok)
-        node.last_probe_ms = int(result.ms or 0) if result.ok else 0
+        # Шаг нужен интерфейсам: по нему отличают «порт не пускает» (tcp/tls)
+        # от «пробу не удалось поставить» (panel/config).
+        node.last_probe_stage = str(result.stage or "")[:16]
+        node.last_probe_error = "" if result.ok else (result.detail or "")[:300]
 
         entry = {
             "code": node.code,
             "title": label,
             "ok": bool(result.ok),
-            "ms": node.last_probe_ms,
+            "ms": int(result.ms or 0) if result.ok else 0,
             "stage": result.stage,
             "detail": result.detail,
+            #: Порт реально проверялся (TCP/TLS), а не «проба не дошла».
+            "probed": measured,
+            "verdict": probe_service.probe_verdict(node),
         }
         fingerprint = f"node:{node.code}:probe"
         if result.ok:
+            node.last_probe_ok = True
+            node.last_probe_ms = int(result.ms or 0)
             await resolve_by_fingerprint(session, fingerprint, note="порт снова пускает клиента")
-        else:
+        elif measured:
+            node.last_probe_ok = False
+            node.last_probe_ms = 0
             await raise_alert(
                 session,
                 "node_probe_failed",
@@ -291,6 +407,16 @@ async def check_probes(session: AsyncSession, panels: list[tuple[Node | None, Pa
                 message=result.detail or "TCP-проба не прошла",
                 fingerprint=fingerprint,
                 node_id=node.id,
+                reopen_ack=False,
+            )
+        else:
+            # Проба не дошла до порта: утверждать про порт нечего. Раньше здесь
+            # рождался ложный «порт не пускает клиента» (err + Telegram), и
+            # оператор шёл проверять фаервол вместо настроек панели.
+            node.last_probe_ok = False
+            node.last_probe_ms = 0
+            await resolve_by_fingerprint(
+                session, fingerprint, note=f"проба не выполнена: {result.detail}"
             )
         results.append(entry)
     return results

@@ -55,6 +55,12 @@ _EXTRA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("nodes", "last_probe_at", "DATETIME"),
     ("nodes", "last_probe_ok", "BOOLEAN DEFAULT 0"),
     ("nodes", "last_probe_ms", "INTEGER DEFAULT 0"),
+    # Причины последних неудач: без них админка не отличала «порт закрыт» от
+    # «панель не отдала инбаунды» и показывала неверное действие.
+    ("nodes", "last_check_error", "VARCHAR(300) DEFAULT ''"),
+    ("nodes", "last_probe_error", "VARCHAR(300) DEFAULT ''"),
+    # Шаг последней пробы: tcp/tls — порт проверен, panel/config — не состоялась.
+    ("nodes", "last_probe_stage", "VARCHAR(16) DEFAULT ''"),
 )
 
 #: Индексы для запросов панели: create_all создаёт их только на новых базах.

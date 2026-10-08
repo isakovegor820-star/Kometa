@@ -240,8 +240,13 @@
                 {% if not node.is_active %}<span class="badge">выключена</span>
                 {% elif node.last_check_at is none %}<span class="badge">не проверялась</span>
                 {% elif node.last_check_ok %}<span class="badge badge-ok">отвечает</span>
+                {# Панель ответила, но выдать конфиг нечем: «нет ответа» здесь врало. #}
+                {% elif node.last_check_error %}<span class="badge badge-warn">отвечает с ошибкой</span>
                 {% else %}<span class="badge badge-err">нет ответа</span>{% endif %}
                 {% if node.last_check_at %}<div class="xs dim">{{ ago(node.last_check_at) }}</div>{% endif %}
+                {% if node.last_check_error %}
+                <div class="xs dim" title="{{ node.last_check_error }}">{{ node.last_check_error|truncate(60) }}</div>
+                {% endif %}
               </td>
               <td class="actions">
                 <a class="btn btn-sm btn-ghost" href="/admin/nodes">Открыть</a>

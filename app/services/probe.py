@@ -23,6 +23,41 @@ from app.config import get_settings
 #: так не проверить: открытый порт ничего не говорит о работоспособности.
 TCP_NETWORKS: tuple[str, ...] = ("tcp", "raw", "ws", "xhttp", "grpc", "httpupgrade", "splithttp")
 
+#: Шаги, на которых порт реально проверялся (TCP-соединение и рукопожатие).
+#: Всё остальное («panel», «config») — проба не состоялась: сказать про порт
+#: нечего, и делать вывод «порт не пускает клиента» нельзя.
+MEASURED_STAGES: tuple[str, ...] = ("tcp", "tls")
+
+#: Шаг «поставить пробу нечем»: у ноды не заполнен host или нет TCP-инбаундов
+#: (например канал только на AmneziaWG). Это не авария порта.
+CONFIG_STAGE = "config"
+
+#: Что известно о порте ноды — единый словарь состояний для интерфейсов.
+PROBE_OK = "ok"
+PROBE_PORT_FAILED = "port"
+PROBE_UNAVAILABLE = "unavailable"
+PROBE_NOT_CONFIGURED = "not_configured"
+PROBE_UNKNOWN = "unknown"
+
+
+def probe_verdict(node: object) -> str:
+    """Что известно о порте ноды по последней пробе.
+
+    Одно место вместо разбора текста ошибки в шаблонах и отчётах: и таймаут
+    TCP, и «панель не отдала инбаунды» пишут текст, но означают разное —
+    первое «порт не пускает», второе «проба не состоялась».
+    """
+    if getattr(node, "last_probe_at", None) is None:
+        return PROBE_UNKNOWN
+    if bool(getattr(node, "last_probe_ok", False)):
+        return PROBE_OK
+    stage = str(getattr(node, "last_probe_stage", "") or "")
+    if stage in MEASURED_STAGES:
+        return PROBE_PORT_FAILED
+    if stage == CONFIG_STAGE:
+        return PROBE_NOT_CONFIGURED
+    return PROBE_UNAVAILABLE
+
 
 @dataclass(slots=True)
 class ProbeResult:
@@ -32,6 +67,15 @@ class ProbeResult:
     ms: int = 0
     stage: str = ""
     detail: str = ""
+
+    @property
+    def measured(self) -> bool:
+        """Порт проверялся по-настоящему (TCP/TLS), а не «не дошли».
+
+        Нужно вызывающему коду, чтобы не превращать «панель не отдала
+        инбаунды» в диагноз «порт закрыт».
+        """
+        return self.stage in MEASURED_STAGES
 
 
 @dataclass(slots=True)
@@ -142,6 +186,10 @@ async def probe_panel(panel, host: str) -> ProbeResult:
 
     Возвращаем первый успешный результат. Если не ответил ни один порт —
     последний результат с ошибкой (по нему и поднимается алерт).
+
+    Если список инбаундов получить не удалось, проба вообще не состоялась:
+    ``stage="panel"`` и в тексте прямо сказано, что порт не проверялся —
+    иначе эту ошибку легко принять за закрытый порт.
     """
     if not (host or "").strip():
         return ProbeResult(False, stage="config", detail="у ноды не заполнен host")
@@ -149,7 +197,7 @@ async def probe_panel(panel, host: str) -> ProbeResult:
     try:
         inbounds = await panel.list_inbounds()
     except Exception as exc:  # noqa: BLE001 - чужая панель отвечает чем угодно
-        return ProbeResult(False, stage="panel", detail=f"панель не отдала инбаунды: {exc}")
+        return ProbeResult(False, stage="panel", detail=f"панель не отдала инбаунды, порт не проверялся: {exc}")
 
     targets = probe_targets(list(inbounds or []), host)
     if not targets:

@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db.models import Subscription
-from app.panels.base import PanelError
+from app.panels.base import PanelError, panel_label
 from app.panels.registry import registry
 from app.services import subscriptions as subs_service
 
@@ -98,6 +98,13 @@ def _locations_html(nodes: list[object]) -> str:
     клиент считает сам по test-URL). Подписываем это словами, чтобы цифра
     не создавала ложных ожиданий.
     """
+    from app.services.probe import (
+        PROBE_NOT_CONFIGURED,
+        PROBE_OK,
+        PROBE_PORT_FAILED,
+        PROBE_UNKNOWN,
+        probe_verdict,
+    )
     from app.web.subscription_format import CHANNELS
 
     #: Человеческие имена каналов: обычные локации без пометки.
@@ -111,11 +118,20 @@ def _locations_html(nodes: list[object]) -> str:
         title = str(getattr(node, "title", "") or getattr(node, "code", "") or "").strip()
         channel = str(getattr(node, "channel", "main") or "main").strip().lower()
         label = CHANNEL_TITLES.get(channel, "") if channel != "main" else ""
-        ok = bool(getattr(node, "last_probe_ok", False))
-        measured = getattr(node, "last_probe_at", None) is not None
+        # Порт проверялся только на шагах tcp/tls: если проба не состоялась,
+        # красный «не отвечает» — выдумка, честнее «нет данных».
+        verdict = probe_verdict(node)
         ms = int(getattr(node, "last_probe_ms", 0) or 0)
-        dot = "🟢" if ok else ("⚪" if not measured else "🔴")
-        ping = f"{ms} мс" if ok and ms else ("нет замера" if not measured else "не отвечает")
+        if verdict == PROBE_OK:
+            dot, ping = "🟢", (f"{ms} мс" if ms else "замер без цифры")
+        elif verdict == PROBE_PORT_FAILED:
+            dot, ping = "🔴", "не отвечает"
+        elif verdict == PROBE_UNKNOWN:
+            dot, ping = "⚪", "нет замера"
+        elif verdict == PROBE_NOT_CONFIGURED:
+            dot, ping = "⚪", "проба не настроена"
+        else:  # PROBE_UNAVAILABLE — проба не состоялась
+            dot, ping = "⚪", "нет данных пробы"
         suffix = f" · {label}" if label else ""
         rows.append(
             f"<div class='loc'><span>{dot} {title}{suffix}</span>"
@@ -159,11 +175,11 @@ async def _service_status() -> dict:
     nodes: list[dict] = []
     async with SessionMaker() as session:
         for panel in await registry.all_panels(session):
-            entry = {"title": panel.name, "ok": False}
+            entry = {"title": panel_label(panel), "ok": False}
             try:
                 entry["ok"] = await panel.health()
             except Exception as exc:  # noqa: BLE001 - панель может быть недоступна
-                logger.warning("Статус: панель %s не ответила: %s", panel.name, exc)
+                logger.warning("Статус: панель %s не ответила: %s", panel_label(panel), exc)
             nodes.append(entry)
 
     # Источник подписок доступен, если жива хотя бы одна панель
@@ -400,7 +416,7 @@ function copySub(){{
                 try:
                     panel_configs = await panel.get_configs(sub.panel_user_uuid)
                 except PanelError as exc:
-                    logger.warning("Панель %s не отдала конфиги: %s", panel.name, exc)
+                    logger.warning("Панель %s не отдала конфиги: %s", panel_label(panel), exc)
                     continue
 
                 # Имя локации у каждой страны своё: у основной панели — из
@@ -417,7 +433,7 @@ function copySub(){{
                 )
                 mark = channel_mark(channel)
                 if mark:
-                    title = f"{title or panel.name}{mark}"
+                    title = f"{title or panel_label(panel)}{mark}"
                     custom_url = str(getattr(node, "test_url", "") or "").strip()
                     if custom_url:
                         channel_urls.setdefault(channel, custom_url)
@@ -430,7 +446,7 @@ function copySub(){{
                     if panel_user is not None:
                         used_bytes += panel_user.used_bytes or 0
                 except PanelError as exc:
-                    logger.warning("Панель %s не отдала статистику: %s", panel.name, exc)
+                    logger.warning("Панель %s не отдала статистику: %s", panel_label(panel), exc)
 
             if not configs:
                 raise HTTPException(status_code=503, detail="no configs available")

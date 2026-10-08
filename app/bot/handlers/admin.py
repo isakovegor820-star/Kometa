@@ -17,6 +17,7 @@ from app.bot import keyboards, texts
 from app.bot.filters import IsAdmin
 from app.config import get_settings
 from app.db.models import Order, PromoCode, Subscription, User
+from app.panels.base import panel_label
 from app.panels.registry import registry
 from app.services import (
     downtime,
@@ -490,15 +491,18 @@ async def cmd_sync(message: Message, session: AsyncSession) -> None:
 async def cmd_nodes(event: Message | CallbackQuery, session: AsyncSession) -> None:
     lines = ["🖥 <b>Панели и ноды</b>\n"]
     for panel in await registry.all_panels(session):
+        # Имя панели — страна: у всех xui-панелей name одинаковый («xui»), и по
+        # выводу нельзя было понять, какая локация сломалась.
+        title = panel_label(panel)
         try:
             inbounds = await panel.list_inbounds()
             ok = await panel.health()
             status = "✅" if ok else "⚠️"
-            lines.append(f"{status} <b>{panel.name}</b>: инбаундов {len(inbounds)}")
+            lines.append(f"{status} <b>{title}</b>: инбаундов {len(inbounds)}")
             for ib in inbounds:
                 lines.append(f"   • {ib.remark} ({ib.protocol}, {ib.port})")
         except Exception as exc:  # noqa: BLE001
-            lines.append(f"❌ <b>{panel.name}</b>: ошибка — <code>{exc}</code>")
+            lines.append(f"❌ <b>{title}</b>: ошибка — <code>{exc}</code>")
     text = "\n".join(lines)
     if isinstance(event, CallbackQuery):
         await event.message.edit_text(text, reply_markup=keyboards.back_to_menu_kb())

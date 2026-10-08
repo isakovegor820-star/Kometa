@@ -19,6 +19,16 @@ class PanelError(RuntimeError):
     """Ошибка при обращении к панели (сеть, авторизация, валидация)."""
 
 
+class PanelInboundMissing(PanelError):
+    """Панель ответила, но выдать конфиг нечем: инбаундов нет или нужных ID нет.
+
+    Отдельный класс — потому что это **не** «панель сломалась»: авторизация
+    прошла, список получен, дело в настройке (``inbound_ids`` разошлись с
+    панелью). У этого состояния другой текст алерта и другое действие
+    оператора, поэтому вызывающий код обязан различать его от ``PanelError``.
+    """
+
+
 @dataclass(slots=True)
 class Inbound:
     """Входящее подключение (инбаунд) в панели."""
@@ -72,9 +82,32 @@ class PanelClient(ABC):
     async def health(self) -> bool:
         """Панель отвечает и авторизация проходит."""
 
+    async def check_health(self) -> tuple[bool, str]:
+        """Панель отвечает? Возвращает ``(ok, текст ошибки)``.
+
+        Нужен отдельно от :meth:`health`: упавшая проверка должна объяснять
+        причину, иначе в алерте остаётся «панель не ответила на проверку» — по
+        такому тексту не отличить таймаут от 401 и от «нет маршрута», хотя
+        исключение с текстом было секундой раньше.
+        """
+        try:
+            return await self.health(), ""
+        except Exception as exc:  # noqa: BLE001 - чужая панель отвечает чем угодно
+            return False, str(exc)
+
     @abstractmethod
     async def list_inbounds(self) -> list[Inbound]:
         """Список инбаундов, из которых собирается подписка."""
+
+    async def list_all_inbounds(self) -> list[Inbound]:
+        """Все инбаунды панели, без фильтра по ``inbound_ids``.
+
+        Нужен админке и диагностике: когда настроенные ID разошлись с панелью,
+        фильтрованный список падает, и показать оператору фактические ID
+        больше неоткуда. По умолчанию совпадает с :meth:`list_inbounds` —
+        панели, которым нечего фильтровать, ничего не переопределяют.
+        """
+        return await self.list_inbounds()
 
     async def list_users(self) -> list[PanelUser]:
         """Все клиенты целевых инбаундов.
@@ -125,3 +158,64 @@ class PanelClient(ABC):
 
     async def close(self) -> None:  # pragma: no cover - переопределяется при необходимости
         """Освободить ресурсы (HTTP-клиент и т.п.)."""
+
+
+# ------------------------------------------------------------------ ID инбаундов
+# Разбор и проверку строки с ID держим в одном месте: раньше парсеров было три
+# (форма, реестр, настройки), и они расходились в мелочах — например, «1 2» без
+# запятой превращалось в двенадцатый инбаунд.
+
+
+def panel_label(panel: object) -> str:
+    """Имя панели для логов и сообщений: страна, если она известна.
+
+    Все xui-панели называются ``xui``, поэтому по журналу было нельзя понять,
+    какая страна не приняла клиента. ``location_title`` проставляет реестр
+    («🇩🇪 Германия»); у основной панели это ``LOCATION_TITLE`` из настроек.
+    """
+    title = str(getattr(panel, "location_title", "") or "").strip()
+    return title or str(getattr(panel, "name", "") or "").strip() or "панель"
+
+#: Разделители, которые встречаются в строке ID: форму заполняют и «1, 2», и «1 2».
+_ID_SEPARATORS = (",", ";", " ", "\t", "\n")
+
+
+def parse_inbound_ids(raw: str) -> list[int]:
+    """«1, 2 3» → ``[1, 2, 3]``: ID инбаундов из строки.
+
+    Нечисловые токены отбрасываются, повторы схлопываются: строка живёт и в
+    форме админки, и в БД, куда её правят руками.
+    """
+    tokens = (raw or "")
+    for separator in _ID_SEPARATORS[1:]:
+        tokens = tokens.replace(separator, _ID_SEPARATORS[0])
+    result: list[int] = []
+    for chunk in tokens.split(_ID_SEPARATORS[0]):
+        token = chunk.strip()
+        if token.isdigit() and int(token) not in result:
+            result.append(int(token))
+    return result
+
+
+def normalize_inbound_ids(raw: str, *, limit: int = 64) -> tuple[str, str]:
+    """Строка ID для сохранения: ``(«1,2,3», текст проблемы или пусто)``.
+
+    Пустое значение означает «все инбаунды панели», поэтому мусор и обрезку
+    нельзя пропускать молча: оператор, написавший «3x», иначе **расширит**
+    выдачу на все инбаунды, будучи уверенным, что ограничил ноду одним.
+    """
+    tokens = (raw or "")
+    bad: list[str] = []
+    for separator in _ID_SEPARATORS[1:]:
+        tokens = tokens.replace(separator, _ID_SEPARATORS[0])
+    for chunk in tokens.split(_ID_SEPARATORS[0]):
+        token = chunk.strip()
+        if token and not token.isdigit() and token not in bad:
+            bad.append(token)
+    if bad:
+        return "", f"ID инбаундов должны быть числами: убери {', '.join(bad[:5])}"
+
+    value = ",".join(str(item) for item in parse_inbound_ids(raw))
+    if len(value) > limit:
+        return "", f"Слишком много ID инбаундов: строка длиннее {limit} символов"
+    return value, ""

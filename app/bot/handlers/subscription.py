@@ -14,7 +14,7 @@ from app.bot import keyboards, texts
 from app.config import get_settings
 from app.db.session import SessionMaker
 from app.db.models import User
-from app.panels.base import PanelError
+from app.panels.base import PanelError, panel_label
 from app.panels.registry import registry
 from app.services import subscriptions
 
@@ -163,7 +163,7 @@ async def cb_locations(call: CallbackQuery) -> None:
             try:
                 inbounds.extend(await panel.list_inbounds())
             except PanelError as exc:
-                logger.warning("Локации: панель %s не ответила: %s", panel.name, exc)
+                logger.warning("Локации: панель %s не ответила: %s", panel_label(panel), exc)
     if not inbounds:
         await call.answer("Локации появятся после настройки нод", show_alert=True)
         return

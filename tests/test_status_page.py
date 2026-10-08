@@ -40,7 +40,11 @@ async def test_status_json(client):
     payload = response.json()
     assert payload["ok"] is True
     assert payload["subscriptions_available"] is True
-    assert payload["nodes"][0]["title"] == "fake"
+    # Показываем страну или название локации, а не служебное имя панели:
+    # у всех xui-панелей name одинаковый («xui»), и клиент не мог понять, где что.
+    from app.config import get_settings
+
+    assert payload["nodes"][0]["title"] == (get_settings().location_title or "fake")
     assert "payments" in payload
     assert payload["checked_at"]
 

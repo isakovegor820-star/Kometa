@@ -300,7 +300,11 @@ class Settings(BaseSettings):
 
     @property
     def inbound_id_list(self) -> list[int]:
-        return [int(x) for x in self.panel_inbound_ids.replace(" ", "").split(",") if x.strip().isdigit()]
+        # Разбор общий с нодами: три разных парсера одной строки расходились
+        # в мелочах — «1 2» без запятой давало двенадцатый инбаунд.
+        from app.panels.base import parse_inbound_ids
+
+        return parse_inbound_ids(self.panel_inbound_ids)
 
     @property
     def platega_method_list(self) -> list[int]:

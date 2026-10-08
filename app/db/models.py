@@ -309,6 +309,10 @@ class Node(Base):
 
     last_check_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
     last_check_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Причина последней неудачной проверки: «в панели не найдены инбаунды [3]…»,
+    #: «HTTP 401». Без неё админка показывала зелёное «отвечает» рядом с
+    #: алертом и не давала понять, что именно чинить.
+    last_check_error: Mapped[str] = mapped_column(String(300), default="")
 
     #: Канал ноды: ``main`` — обычный режим, ``reserve`` — аварийный профиль.
     #: Резервные локации подписка отдаёт отдельной группой автовыбора: когда
@@ -327,6 +331,15 @@ class Node(Base):
     last_probe_ok: Mapped[bool] = mapped_column(Boolean, default=False)
     #: Задержка успешной пробы в миллисекундах (0 — ещё не измеряли).
     last_probe_ms: Mapped[int] = mapped_column(Integer, default=0)
+    #: Шаг, на котором остановилась последняя проба: ``tcp``/``tls`` — порт
+    #: проверен, ``panel``/``config`` — проба не состоялась (панель не отдала
+    #: инбаунды, не заполнен host, нет TCP-инбаундов). По нему интерфейсы
+    #: отличают «порт не пускает» от «проба не выполнена»: по тексту ошибки это
+    #: делать нельзя — таймаут TCP тоже пишет текст.
+    last_probe_stage: Mapped[str] = mapped_column(String(16), default="")
+    #: Причина последней неудачной пробы — и «порт не пускает», и «проба не
+    #: состоялась». Пусто — проба прошла.
+    last_probe_error: Mapped[str] = mapped_column(String(300), default="")
 
 
 class Event(Base):

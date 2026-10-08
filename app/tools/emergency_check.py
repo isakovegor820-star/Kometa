@@ -19,6 +19,8 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from app.db.models import Node
+from app.services import probe as probe_service
+from app.services.probe import probe_verdict
 
 #: Через сколько минут считать замер пробы устаревшим. Задача пробы идёт
 #: каждые 5 минут, так что 20 — это «три пропуска подряд».
@@ -89,6 +91,8 @@ def assess(
     freshest: datetime | None = None
     alive = 0
     emergency = 0
+    unprobed = 0
+    not_configured = 0
     for node in sorted(
         active, key=lambda item: ((item.channel or "main"), item.priority or 100, item.id or 0)
     ):
@@ -103,21 +107,44 @@ def assess(
                 probed = probed.replace(tzinfo=timezone.utc)
             freshest = max(freshest, probed) if freshest else probed
 
-        if node.last_probe_ok:
+        # Текст ошибки у «порт не пускает» и «пробу не поставить» одинаковый по
+        # форме, поэтому состояние берём из шага пробы, а не из строки.
+        verdict = probe_verdict(node)
+        reason = str(getattr(node, "last_probe_error", "") or "")
+        if verdict == probe_service.PROBE_OK:
             alive += 1
             age = _age_text(node.last_probe_at, moment)
             report.lines.append(f"🟢 {node.title} · {title} · {node.last_probe_ms} мс{age}")
-        elif node.last_probe_at is None:
+        elif verdict == probe_service.PROBE_UNKNOWN:
             report.lines.append(f"⚪ {node.title} · {title} · пробы ещё не было")
-        else:
+        elif verdict == probe_service.PROBE_PORT_FAILED:
             report.lines.append(f"🔴 {node.title} · {title} · порт не пускает")
+        elif verdict == probe_service.PROBE_NOT_CONFIGURED:
+            # UDP-only канал или не заполнен host: проба к порту неприменима.
+            not_configured += 1
+            report.lines.append(f"⚪ {node.title} · {title} · проба не настроена: {reason}")
+        else:
+            unprobed += 1
+            report.lines.append(f"⚪ {node.title} · {title} · проба не выполнена: {reason}")
 
     if emergency == 0:
         report.issues.append(
             "нет ни одного аварийного канала: добавь ноду и поставь ей канал «резервная» или «CDN»"
         )
     if alive == 0:
-        report.issues.append("ни одна проба не проходит: проверь порты и firewall на нодах")
+        if not_configured == len(active):
+            # Ни одна проба не применима: это не сеть нод и не настройка ID.
+            report.issues.append(
+                "пробы не умеют проверять эти каналы: у нод нет TCP-инбаундов (только UDP) "
+                "или не заполнен host — проверь порты и firewall руками"
+            )
+        elif unprobed == len(active):
+            report.issues.append(
+                "ни одну пробу не удалось выполнить: смотри причину в строках выше "
+                "(чаще всего панель не отдаёт инбаунды — сверь ID в /admin/nodes)"
+            )
+        else:
+            report.issues.append("ни одна проба не проходит: проверь порты и firewall на нодах")
     if freshest is None:
         report.issues.append("пробы ни разу не запускались: подожди 5 минут после старта бота")
     elif moment - freshest > timedelta(minutes=probe_fresh_minutes):

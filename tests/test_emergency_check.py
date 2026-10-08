@@ -24,7 +24,12 @@ from tests.fakes import make_update
 
 
 def node(**kwargs) -> Node:
-    """Нода для проверки: заполняем всё, что читает отчёт."""
+    """Нода для проверки: заполняем всё, что читает отчёт.
+
+    ``last_probe_stage="tcp"`` — состояние, которое пишет настоящая проба:
+    порт проверялся. По этому шагу отчёт отличает «порт не пускает» от
+    «пробу не удалось поставить».
+    """
     data = {
         "code": "de",
         "title": "🇩🇪 Германия",
@@ -34,6 +39,7 @@ def node(**kwargs) -> Node:
         "last_probe_at": datetime.now(timezone.utc),
         "last_probe_ok": True,
         "last_probe_ms": 48,
+        "last_probe_stage": "tcp",
     }
     data.update(kwargs)
     instance = Node(**data)

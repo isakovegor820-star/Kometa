@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.models import Plan, Subscription, User
-from app.panels.base import PanelClient, PanelError, PanelUser, UserSpec
+from app.panels.base import PanelClient, PanelError, PanelUser, UserSpec, panel_label
 from app.services import events
 
 settings = get_settings()
@@ -162,13 +162,13 @@ async def _ensure_client(panel: PanelClient, spec: UserSpec, canonical_uuid: str
             raise
         if target and existing.uuid != target:
             logger.warning(
-                "Панель %s знает %s с другим uuid — пересоздаю подписку", panel.name, spec.email
+                "Панель %s знает %s с другим uuid — пересоздаю подписку", panel_label(panel), spec.email
             )
             await panel.delete_user(existing.uuid)
             return await panel.create_user(attempt)
         logger.warning(
             "Панель %s уже знает клиента %s — переиспользую %s (%s)",
-            panel.name,
+            panel_label(panel),
             spec.email,
             existing.uuid,
             exc,
@@ -201,8 +201,8 @@ async def _create_on_panels(panels: Sequence[PanelClient], spec: UserSpec) -> tu
         except PanelError as exc:
             if index == 0:
                 raise
-            logger.error("Нода %s не приняла клиента %s: %s", panel.name, spec.email, exc)
-            failed.append(panel.name)
+            logger.error("Нода %s не приняла клиента %s: %s", panel_label(panel), spec.email, exc)
+            failed.append(panel_label(panel))
             continue
         if not canonical:
             canonical, primary_user = user.uuid, user
@@ -239,7 +239,7 @@ async def _update_on_panels(
         except PanelError as exc:
             if index == 0:
                 raise
-            logger.error("Нода %s не обновила клиента %s: %s", panel.name, uuid, exc)
+            logger.error("Нода %s не обновила клиента %s: %s", panel_label(panel), uuid, exc)
             continue
         result = result or user
     return result
@@ -382,16 +382,16 @@ async def sync_subscription_to_panels(
         try:
             existing = await panel.find_user_by_email(email)
         except PanelError as exc:
-            logger.error("Панель %s недоступна при синхронизации: %s", panel.name, exc)
-            failed.append(panel.name)
+            logger.error("Панель %s недоступна при синхронизации: %s", panel_label(panel), exc)
+            failed.append(panel_label(panel))
             continue
         if existing is not None:
             continue
         try:
             await panel.create_user(replace(spec, uuid=sub.panel_user_uuid))
         except PanelError as exc:
-            logger.error("Нода %s не приняла клиента %s: %s", panel.name, email, exc)
-            failed.append(panel.name)
+            logger.error("Нода %s не приняла клиента %s: %s", panel_label(panel), email, exc)
+            failed.append(panel_label(panel))
     return failed
 
 

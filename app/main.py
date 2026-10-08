@@ -159,18 +159,26 @@ async def job_node_health(bot: Bot) -> None:
     for entry in results:
         label = entry["title"]
         ok = bool(entry["ok"])
+        # «Готова» — не то же, что «ответила»: панель может отвечать и при этом
+        # не мочь выдать конфиг (разошлись ID инбаундов). Раньше такое состояние
+        # не давало сообщения вообще, а бейдж в админке горел зелёным.
+        ready = bool(entry.get("ready", ok))
         previous = state.get(label)
         # Сообщаем о смене состояния, а также если проблема обнаружена на первой
         # проверке после запуска: молчать о мёртвой ноде только потому, что бот
         # перезапустился минуту назад, — плохая идея.
-        if (previous is not None and previous != ok) or (previous is None and not ok):
-            text = (
-                f"✅ Нода <b>{label}</b> снова отвечает."
-                if ok
-                else f"⚠️ Нода <b>{label}</b> недоступна — проверь сервер и панель."
-            )
+        if (previous is not None and previous != ready) or (previous is None and not ready):
+            if ready:
+                text = f"✅ Нода <b>{label}</b> снова отвечает."
+            elif ok:
+                text = (
+                    f"⚠️ Нода <b>{label}</b>: панель отвечает с ошибкой — "
+                    f"{entry['error']}"
+                )
+            else:
+                text = f"⚠️ Нода <b>{label}</b> недоступна — проверь сервер и панель."
             await notifications.notify_admins(bot, text)
-        state[label] = ok
+        state[label] = ready
 
 
 async def job_node_probe(bot: Bot) -> None:
@@ -204,17 +212,25 @@ async def job_node_probe(bot: Bot) -> None:
 
     for entry in results:
         label = entry["title"]
-        ok = bool(entry["ok"])
+        verdict = entry.get("verdict", "ok" if entry["ok"] else "unavailable")
         previous = state.get(label)
-        if (previous is not None and previous != ok) or (previous is None and not ok):
-            text = (
-                f"✅ Нода <b>{label}</b> снова пускает клиента"
-                f" (задержка {entry['ms']} мс)."
-                if ok
-                else f"⚠️ Нода <b>{label}</b>: порт не пускает клиента. {entry['detail']}"
-            )
-            await notifications.notify_admins(bot, text)
-        state[label] = ok
+        if verdict != previous:
+            if verdict == "ok" and previous is not None:
+                text = (
+                    f"✅ Нода <b>{label}</b> снова пускает клиента"
+                    f" (задержка {entry['ms']} мс)."
+                )
+                await notifications.notify_admins(bot, text)
+            elif verdict == "port":
+                # Порт реально проверялся и не пустил — это авария.
+                await notifications.notify_admins(
+                    bot,
+                    f"⚠️ Нода <b>{label}</b>: порт не пускает клиента. {entry['detail']}",
+                )
+            # «Проба не состоялась» (panel/config) сюда не попадает: причина —
+            # панель или настройка, о ней сообщает проверка нод (job_node_health).
+            # Иначе на одну причину уходило бы два разных сообщения.
+        state[label] = verdict
 
 
 # ---------------------------------------------------------------------- запуск

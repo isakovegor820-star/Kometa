@@ -93,6 +93,48 @@ env_get() { # значение переменной из .env без выпол�
 }
 
 # --------------------------------------------------------------- проверки ----
+# ID инбаундов верхнего уровня из ответа панели (JSON читается со stdin).
+# Разбор — scripts/panel_inbound_ids.py: у элементов clientStats есть СВОЁ поле
+# id, и грепом по сырому JSON проверка находила «инбаунд» в статистике клиента.
+panel_inbound_ids() {
+    local helper="${ROOT_DIR}/scripts/panel_inbound_ids.py"
+    if [[ -f "$helper" ]] && command -v python3 >/dev/null 2>&1; then
+        python3 "$helper" 2>/dev/null || true
+        return 0
+    fi
+    if command -v jq >/dev/null 2>&1; then
+        jq -r '.obj[]?.id' 2>/dev/null || true
+        return 0
+    fi
+    return 1
+}
+
+# Ноды мультигео: у каждой своя панель и свои ID инбаундов, поэтому проверки
+# основной панели о них не говорят ничего. Сверяем их тем же кодом, что и бот
+# (app/tools/check_nodes.py): иначе «всё на месте» остаётся правдой при
+# сломанной ноде — так и случилось 07-08.10.2026 с нодой Нидерландов.
+check_node_inbounds() {
+    local python_bin="${ROOT_DIR}/.venv/bin/python"
+    local tool="${ROOT_DIR}/app/tools/check_nodes.py"
+    if [[ ! -x "$python_bin" || ! -f "$tool" ]]; then
+        soft "Ноды не проверены: нет ${python_bin} — запусти .venv/bin/python -m app.tools.check_nodes"
+        return 0
+    fi
+    if [[ ! -w "${ROOT_DIR}/data" ]]; then
+        # Инструмент доводит схему БД до текущей (init_db): без прав на data/
+        # ему нельзя ходить в базу, иначе останутся root-овые файлы журнала.
+        soft "Ноды не проверены: нет прав на ${ROOT_DIR}/data — запусти инструмент под владельцем бота"
+        return 0
+    fi
+    local out
+    if out="$( cd "$ROOT_DIR" && "$python_bin" -m app.tools.check_nodes 2>&1 )"; then
+        ok "Инбаунды нод сходятся с их панелями"
+    else
+        problem "Инбаунды нод разошлись с панелями (клиенты не получат локацию):
+$(printf '%s' "$out" | sed 's/^/      /')"
+    fi
+}
+
 check_config() {
     if [[ ! -f "$ENV_FILE" ]]; then
         problem "Нет файла .env (${ENV_FILE}) — бот не сможет запуститься. Скопируй: cp .env.example .env"
@@ -146,20 +188,24 @@ check_panel() {
     ok "API панели отвечает (${latency}s): ${url}"
 
     local count
-    count="$(printf '%s' "$resp" | { grep -o '"id":' || true; } | wc -l | tr -d ' ')"
+    count="$(printf '%s' "$resp" | panel_inbound_ids | wc -l | tr -d ' ')"
     log "Инбаундов в панели: ${count}"
 
     ids="$(env_get PANEL_INBOUND_IDS || true)"
     if [[ -z "$ids" ]]; then
         soft "PANEL_INBOUND_IDS пустой — бот не сможет собрать ссылку-подписку."
+        check_node_inbounds
         return 0
     fi
-    local id missing=""
+    local id missing="" panel_ids
+    panel_ids="$(printf '%s' "$resp" | panel_inbound_ids | sort -n | tr '\n' ' ')"
     ids="$(printf '%s' "$ids" | tr -d ' ')"
     local IFS_OLD="$IFS"; IFS=','
     for id in $ids; do
         [[ -n "$id" ]] || continue
-        printf '%s' "$resp" | grep -q "\"id\":${id}[,}]" || missing="${missing} ${id}"
+        # Сверяем с РАЗОБРАННЫМ списком: греп по сырому JSON находил «инбаунд»
+        # в clientStats, где поле id — это статистика клиента.
+        printf ' %s ' "$panel_ids" | grep -q " ${id} " || missing="${missing} ${id}"
     done
     IFS="$IFS_OLD"
     if [[ -n "$missing" ]]; then
@@ -167,6 +213,7 @@ check_panel() {
     else
         ok "Все инбаунды из PANEL_INBOUND_IDS на месте (${ids})."
     fi
+    check_node_inbounds
 
     # Локальная панель: служба или контейнер (если панель на этом же сервере).
     if [[ -f /etc/x-ui/x-ui.db ]] || [[ -x /usr/local/x-ui/x-ui ]]; then
@@ -219,14 +266,22 @@ check_bot() {
         problem "Бот не найден: ни контейнера ${BOT_CONTAINER}, ни службы ${BOT_SERVICE}, ни процесса app.main."
     fi
 
-    # Веб-слой ссылки-подписки (порт 8080).
+    # Веб-слой ссылки-подписки. С сертификатом он слушает https (клиенты не
+    # принимают http), поэтому схему берём из .env — иначе проверка ругается на
+    # живом сервисе.
     web_port="$(env_get WEB_PORT || true)"
     web_port="${web_port:-8080}"
-    health="$(curl -sS --max-time 8 "http://127.0.0.1:${web_port}/health" 2>&1 || true)"
+    local scheme="http" web_extra=()
+    if [[ -n "$(env_get WEB_SSL_CERT || true)" && -n "$(env_get WEB_SSL_KEY || true)" ]]; then
+        scheme="https"
+        # -k: сертификат может быть самоподписанным, нам важен ответ 200/ok.
+        web_extra=(-k)
+    fi
+    health="$(curl -sS "${web_extra[@]}" --max-time 8 "${scheme}://127.0.0.1:${web_port}/health" 2>&1 || true)"
     if printf '%s' "$health" | grep -q 'ok'; then
-        ok "Веб-слой подписки отвечает: http://127.0.0.1:${web_port}/health"
+        ok "Веб-слой подписки отвечает: ${scheme}://127.0.0.1:${web_port}/health"
     else
-        problem "Веб-слой подписки не отвечает на порту ${web_port} — клиенты не смогут обновить подписку (/sub/<token>)."
+        problem "Веб-слой подписки не отвечает на порту ${web_port} (${scheme}) — клиенты не смогут обновить подписку (/sub/<token>)."
     fi
 
     [[ "$running" -eq 1 ]] || log "Способ запуска бота: ${how:-не определён}"

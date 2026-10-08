@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.models import Node
-from app.panels.base import PanelClient
+from app.panels.base import PanelClient, parse_inbound_ids
 from app.panels.fake import FakePanel
 
 
@@ -58,7 +58,7 @@ class PanelRegistry:
                 token=node.panel_token,
                 username="",
                 password="",
-                inbound_ids=[int(x) for x in node.inbound_ids.replace(" ", "").split(",") if x.strip().isdigit()],
+                inbound_ids=parse_inbound_ids(node.inbound_ids),
                 sub_base=node.sub_base or (f"http://{node.host}:2096/sub/" if node.host else ""),
             )
         return self._cache[key]
@@ -75,7 +75,15 @@ class PanelRegistry:
         локацию помечать резервной — а от этого зависит группа автовыбора
         в подписке.
         """
-        nodes = (await session.scalars(select(Node).where(Node.is_active.is_(True)).order_by(Node.priority))).all()
+        # Порядок обязан совпадать с планировщиком и админкой (priority, id):
+        # страница «Ноды» сопоставляет карточки панелей с нодами по индексу, и
+        # при равных приоритетах разный ORDER BY приклеил бы инбаунды одной
+        # страны к другой.
+        nodes = (
+            await session.scalars(
+                select(Node).where(Node.is_active.is_(True)).order_by(Node.priority, Node.id)
+            )
+        ).all()
         pairs: list[tuple[Node | None, PanelClient]] = [(None, self.primary())]
         pairs.extend((node, self.for_node(node)) for node in nodes)
         return pairs

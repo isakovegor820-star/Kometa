@@ -91,17 +91,32 @@
             <span class="badge">не проверялась</span>
             {% elif node.last_check_ok %}
             <span class="badge badge-ok">отвечает</span>
+            {% elif node.last_check_error %}
+            {# Панель ответила, но выдать конфиг нечем: «нет ответа» здесь врало. #}
+            <span class="badge badge-warn">отвечает с ошибкой</span>
             {% else %}
             <span class="badge badge-err">нет ответа</span>
             {% endif %}
             {% if node.last_check_at %}<div class="xs dim">{{ ago(node.last_check_at) }}</div>{% endif %}
+            {% if node.last_check_error %}
+            <div class="xs dim" title="{{ node.last_check_error }}">{{ node.last_check_error|truncate(70) }}</div>
+            {% endif %}
           </td>
           <td class="small">
             {% if node.channel == 'reserve' %}<span class="badge badge-warn">резерв</span>{% else %}<span class="badge">обычная</span>{% endif %}
             {% if node.last_probe_at %}
-            <div class="xs {{ 'dim' if node.last_probe_ok else 'text-err' }}">
-              {{ 'проба: ' ~ node.last_probe_ms ~ ' мс' if node.last_probe_ok else 'порт не пускает' }}
-            </div>
+              {% if node.last_probe_ok %}
+            <div class="xs dim" title="{{ node.last_probe_error }}">проба: {{ node.last_probe_ms }} мс</div>
+              {% elif node.last_probe_stage in ('tcp', 'tls') %}
+              {# Порт проверялся и не пустил — это сеть/фаервол. #}
+            <div class="xs text-err" title="{{ node.last_probe_error }}">порт не пускает</div>
+              {% elif node.last_probe_stage == 'config' %}
+              {# Ставить пробу нечем: нет host или TCP-инбаундов (например один AWG). #}
+            <div class="xs dim" title="{{ node.last_probe_error }}">проба не настроена</div>
+              {% else %}
+              {# Панель не отдала инбаунды: о порте ничего не известно. #}
+            <div class="xs dim" title="{{ node.last_probe_error }}">проба не выполнена</div>
+              {% endif %}
             {% else %}
             <div class="xs dim">пробы не было</div>
             {% endif %}
@@ -265,6 +280,8 @@
         {% if panel.node and not panel.node.is_active %}<span class="badge">выключена</span>{% endif %}
         {% if panel.error %}
         <span class="badge badge-warn">нет данных</span>
+        {% elif panel.missing %}
+        <span class="badge badge-err">нет ID {{ panel.missing|join(', ') }}</span>
         {% elif panel.inbounds %}
         <span class="badge badge-ok">{{ panel.inbounds|length }} инбаунда</span>
         {% else %}
@@ -299,7 +316,15 @@
     <div class="empty">
       {{ icon('server') }}
       <div class="t">Инбаунды не видны</div>
-      <div class="small">Проверь адрес и токен панели, затем нажми «Проверить ноды». Без инбаундов клиенты не получат конфиг.</div>
+      <div class="small">Панель не отдала список — причина ниже. Без инбаундов клиенты не получат конфиг.</div>
+    </div>
+    {% endif %}
+    {% if panel.missing %}
+    <div class="card-foot">
+      {{ icon('alert') }}
+      Настроены ID <b>{{ panel.configured|join(', ') }}</b>, в панели их нет: <b>{{ panel.missing|join(', ') }}</b>.
+      Клиенты на этой локации не создаются — впиши фактические ID в форму выше
+      (список инбаундов панели — в таблице).
     </div>
     {% endif %}
     {% if panel.error %}<div class="card-foot">{{ icon('alert') }} {{ panel.error }}</div>{% endif %}

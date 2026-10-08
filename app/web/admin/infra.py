@@ -17,11 +17,12 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
+from app.config import get_settings
 from app.db.models import Alert, Event, Node, User
 from app.db.session import SessionMaker
-from app.panels.base import Inbound, PanelClient
+from app.panels.base import Inbound, PanelClient, PanelError, normalize_inbound_ids, parse_inbound_ids
 from app.panels.registry import registry
 from app.services import alerts as alerts_service
 from app.services import audit
@@ -74,24 +75,52 @@ def _parse_date(value: str, *, end: bool = False) -> datetime | None:
 
 
 # ------------------------------------------------------------------- ноды
-def _clean_ids(raw: str) -> str:
-    """«1, 2 3» → «1,2,3»: реестр панелей разбирает строку по запятым."""
-    parts = [chunk.strip() for chunk in (raw or "").replace(" ", ",").split(",")]
-    return ",".join(part for part in parts if part)[:64]
-
-
 async def _load_inbounds(panel: PanelClient) -> list[Inbound]:
-    """Инбаунды панели с жёстким таймаутом: страница не ждёт сеть бесконечно."""
-    return list(await asyncio.wait_for(panel.list_inbounds(), timeout=INBOUNDS_TIMEOUT))
+    """Инбаунды панели с жёстким таймаутом: страница не ждёт сеть бесконечно.
+
+    Берём **сырой** список, без фильтра по ``inbound_ids``: фильтр падает как
+    раз тогда, когда настройки разошлись с панелью, и показать оператору
+    реальные ID стало бы неоткуда — а именно они и нужны для починки.
+    """
+    # Сторонняя панель может не уметь сырой список — тогда фильтрованный
+    # (базовый ``PanelClient.list_all_inbounds`` и так делегирует в него).
+    lister = getattr(panel, "list_all_inbounds", None) or panel.list_inbounds
+    return list(await asyncio.wait_for(lister(), timeout=INBOUNDS_TIMEOUT))
+
+
+def _panel_error_text(exc: BaseException) -> str:
+    """Человеческий текст ошибки панели вместо общего «панель не ответила».
+
+    Таймаут на странице короткий (``INBOUNDS_TIMEOUT``), поэтому медленная, но
+    живая панель выглядит мёртвой. Текст нужен, чтобы это было видно: раньше
+    сюда попадало и «в панели не найдены инбаунды [3]», и оно же превращалось
+    в «проверь адрес и токен панели».
+    """
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return f"панель не ответила за {INBOUNDS_TIMEOUT:g} с"
+    if isinstance(exc, PanelError):
+        return str(exc)
+    return f"ошибка при обращении к панели: {exc}"
+
+
+def _configured_ids(node: Node | None) -> list[int]:
+    """Настроенные ID инбаундов: у ноды — из её строки, у основной — из .env."""
+    if node is None:
+        return list(get_settings().inbound_id_list)
+    if (node.panel_type or "").lower() != "xui":
+        # Заглушка (fake) игнорирует inbound_ids: сверять нечего, иначе на
+        # странице появится ложное «нет ID 3» и совет править рабочие настройки.
+        return []
+    return parse_inbound_ids(node.inbound_ids)
 
 
 async def _panel_views(panels: list[PanelClient], nodes: list[Node]) -> list[dict]:
     """Карточки панелей для страницы нод: подпись, адрес и список инбаундов.
 
     Инбаунды нужны, чтобы модератор видел, из чего собирается подписка
-    («DE-Reality» или пусто). Берём их из короткого кэша, а если кэша нет —
-    одним параллельным запросом с таймаутом: одна медленная нода не должна
-    задерживать отрисовку остальных.
+    («DE-Reality» или пусто) и какие настроенные ID в панели отсутствуют.
+    Берём их из короткого кэша, а если кэша нет — одним параллельным запросом
+    с таймаутом: одна медленная нода не должна задерживать отрисовку остальных.
     """
     now = time.monotonic()
     views: list[dict] = []
@@ -108,6 +137,7 @@ async def _panel_views(panels: list[PanelClient], nodes: list[Node]) -> list[dic
         entry: dict = {
             "code": code, "title": title, "url": url, "node": node,
             "inbounds": [], "error": "", "fresh": False,
+            "configured": _configured_ids(node), "missing": [],
         }
         views.append(entry)
 
@@ -123,19 +153,28 @@ async def _panel_views(panels: list[PanelClient], nodes: list[Node]) -> list[dic
         )
         for (key, _panel, entry), result in zip(pending, results):
             if isinstance(result, BaseException):
+                reason = _panel_error_text(result)
                 logger.info("Инбаунды панели %s не получены: %s", key, result)
                 stale = _inbounds_cache.get(key)
                 if stale:
                     # Старые данные лучше пустоты: конфиг собирается из этих
                     # инбаундов, и модератору важно видеть, из каких именно.
                     entry["inbounds"] = stale[1]
-                    entry["error"] = "панель не ответила — показаны данные прошлой проверки"
+                    entry["error"] = f"{reason} — показаны данные прошлой проверки"
                 else:
-                    entry["error"] = "панель не ответила — нажми «Проверить ноды»"
+                    entry["error"] = reason
                 continue
             entry["inbounds"] = result
             entry["fresh"] = True
             _inbounds_cache[key] = (time.monotonic(), result, "")
+
+    # Какие настроенные ID в панели отсутствуют — это и есть причина алерта
+    # «нет инбаундов»; показываем её рядом со списком, а не только в логе.
+    for entry in views:
+        if not entry["inbounds"]:
+            continue
+        actual = {item.id for item in entry["inbounds"]}
+        entry["missing"] = [item for item in entry["configured"] if item not in actual]
 
     return views
 
@@ -215,6 +254,12 @@ async def node_save(
         return flash_redirect("/admin/nodes", error="Неизвестный тип панели: поддерживаются xui и fake")
     if kind == "xui" and not url:
         return flash_redirect("/admin/nodes", error="Укажи адрес панели: http://IP:2053/путь")
+    # Пустое поле = «все инбаунды панели», поэтому опечатку («3x», «3 ,»)
+    # нельзя пропускать молча: иначе выдача расширится на все инбаунды, а
+    # оператор будет уверен, что ограничил ноду одним.
+    cleaned_ids, ids_problem = normalize_inbound_ids(inbound_ids)
+    if ids_problem:
+        return flash_redirect("/admin/nodes", error=ids_problem)
 
     async with SessionMaker() as db:
         node = await db.scalar(select(Node).where(Node.code == code))
@@ -233,7 +278,7 @@ async def node_save(
         # на этом теряла доступ к ноде).
         if token:
             node.panel_token = token[:255]
-        node.inbound_ids = _clean_ids(inbound_ids)
+        node.inbound_ids = cleaned_ids
         node.priority = int(priority or 100)
         node.is_active = str(is_active).strip().lower() not in {"0", "false", "off", "no", ""}
         # Канал: обычная локация, резервная или CDN. Незнакомое значение не
@@ -244,9 +289,21 @@ async def node_save(
         # Свой test-URL канала: пусто — берётся общий из настроек.
         node.test_url = (test_url or "").strip()[:255]
 
+        # Галочка «Включена» в форме — тот же выключатель, что кнопка в списке:
+        # без закрытия алертов они висят в «Открытых» вечно, потому что
+        # выключенную ноду никто не проверяет.
+        if not node.is_active:
+            await alerts_service.resolve_node_alerts(
+                db, code, note="нода выключена", by=auth.name
+            )
+
         # Клиент панели кэшируется по коду: без сброса подписка молча ходила бы
         # на старый адрес или со старым токеном.
         registry.invalidate(code)
+        # Кэш инбаундов держится по «код|адрес», а правка могла поменять только
+        # inbound_ids — тогда на странице остался бы старый расчёт «чего не
+        # хватает», и оператор проверял бы по устаревшему списку.
+        _inbounds_cache.clear()
         await audit.log_action(
             db,
             "admin.node_saved",
@@ -281,6 +338,14 @@ async def node_toggle(node_id: int, request: Request):
         state = "включена" if node.is_active else "выключена"
         title, code, active = node.title, node.code, node.is_active
         registry.invalidate(code)
+        _inbounds_cache.clear()
+        # Выключенную ноду никто не проверяет, значит автозакрытие алертов для
+        # неё уже не сработает: «нет инбаундов» и «порт не пускает клиента»
+        # остались бы в «Открытых» навсегда.
+        if not active:
+            await alerts_service.resolve_node_alerts(
+                db, code, note="нода выключена", by=auth.name
+            )
         await audit.log_action(
             db,
             "admin.node_toggle",
@@ -303,11 +368,18 @@ async def node_delete(node_id: int, request: Request):
         if node is None:
             return flash_redirect("/admin/nodes", error="Нода не найдена")
         title, code = node.title, node.code
+        # Открытые алерты удалённой ноды закрываем сами: иначе «нет инбаундов»
+        # и «порт не пускает клиента» висят в «Открытых» вечно, и настоящие
+        # проблемы тонут в шуме. Закрываем все отпечатки ноды, а не только
+        # доступность — у каждой проблемы свой отпечаток.
+        await alerts_service.resolve_node_alerts(db, code, note="нода удалена", by=auth.name)
+        # Ссылку на ноду снимаем до удаления строки: внешний ключ объявлен без
+        # ON DELETE, и на PostgreSQL (о котором говорит app/db/session.py)
+        # удаление ноды с алертом упало бы с IntegrityError.
+        await db.execute(update(Alert).where(Alert.node_id == node.id).values(node_id=None))
         await db.delete(node)
         registry.invalidate(code)
-        # Открытые алерты удалённой ноды закрываем сами: иначе «нода не
-        # отвечает» висит в списке вечно, и настоящие проблемы тонут в шуме.
-        await alerts_service.resolve_by_fingerprint(db, f"node:{code}", note="нода удалена", by=auth.name)
+        _inbounds_cache.clear()
         await audit.log_action(
             db,
             "admin.node_deleted",
@@ -345,8 +417,10 @@ async def nodes_check(request: Request):
             await db.rollback()
             return flash_redirect("/admin/nodes", error=f"Проверка не удалась: {exc}")
 
-        alive = sum(1 for entry in results if entry["ok"])
-        failed = [entry["code"] for entry in results if not entry["ok"]]
+        # «Живая» — та, что готова выдать конфиг: панель может ответить и при
+        # этом не найти настроенные инбаунды (тогда клиенты локацию не получат).
+        alive = sum(1 for entry in results if entry.get("ready", entry["ok"]))
+        failed = [entry["code"] for entry in results if not entry.get("ready", entry["ok"])]
         await audit.log_action(
             db,
             "admin.node_check",
@@ -359,13 +433,16 @@ async def nodes_check(request: Request):
     _inbounds_cache.clear()
 
     if alive == 0:
-        return flash_redirect("/admin/nodes", error=f"Ни одна панель не ответила (проверено {len(results)})")
+        return flash_redirect(
+            "/admin/nodes",
+            error=f"Ни одна панель не готова выдать конфиг (проверено {len(results)})",
+        )
     if failed:
         return flash_redirect(
             "/admin/nodes",
-            message=f"Отвечают {alive} из {len(results)}. Без ответа: {', '.join(failed[:5])}",
+            message=f"Готовы {alive} из {len(results)}. Проблемы: {', '.join(failed[:5])}",
         )
-    return flash_redirect("/admin/nodes", message=f"Все панели отвечают: {alive} из {len(results)}")
+    return flash_redirect("/admin/nodes", message=f"Все панели готовы: {alive} из {len(results)}")
 
 
 # ----------------------------------------------------------------- алерты

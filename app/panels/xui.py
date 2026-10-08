@@ -50,7 +50,14 @@ from urllib.parse import quote
 
 import httpx
 
-from app.panels.base import Inbound, PanelClient, PanelError, PanelUser, UserSpec
+from app.panels.base import (
+    Inbound,
+    PanelClient,
+    PanelError,
+    PanelInboundMissing,
+    PanelUser,
+    UserSpec,
+)
 
 #: Байт в гибибайте. Панель хранит лимит в поле ``totalGB`` именно в байтах
 #: (см. ``ldap_sync_job.go``: ``TotalGB: int64(defGB) * 1024 * 1024 * 1024``).
@@ -461,15 +468,39 @@ class XuiPanel(PanelClient):
         """Инбаунды, в которые добавляем клиента и из которых собираем подписку."""
         inbounds = await self._fetch_inbounds()
         if not inbounds:
-            raise PanelError("в панели 3x-ui нет ни одного инбаунда")
+            raise PanelInboundMissing("в панели 3x-ui нет ни одного инбаунда")
         if not self.inbound_ids:
             return inbounds
         wanted = set(self.inbound_ids)
         selected = [item for item in inbounds if int(item.get("id") or 0) in wanted]
         missing = sorted(wanted - {int(item.get("id") or 0) for item in selected})
         if missing:
-            raise PanelError(f"в панели не найдены инбаунды {missing} (проверь inbound_ids)")
+            # Фактический список — в текст ошибки: без него оператор видит
+            # «проверь inbound_ids» и идёт в панель руками, потому что
+            # фильтрованный список падает и показать реальные ID неоткуда.
+            raise PanelInboundMissing(
+                f"в панели не найдены инбаунды {missing} (проверь inbound_ids); "
+                f"панель отдаёт: {self._describe(inbounds)}"
+            )
         return selected
+
+    @staticmethod
+    def _describe(inbounds: list[dict[str, Any]], limit: int = 8) -> str:
+        """Короткое описание инбаундов панели: ``1 «Reality-443»``.
+
+        В сообщении алерта список нужен целиком постольку, поскольку он
+        помогает вписать правильный ID; дальше — многоточие, чтобы ошибка
+        оставалась читаемой.
+        """
+        parts: list[str] = []
+        for item in inbounds[:limit]:
+            remark = str(item.get("remark") or "").strip()
+            port = int(item.get("port") or 0)
+            name = remark or (f"порт {port}" if port else "без имени")
+            parts.append(f"{int(item.get('id') or 0)} «{name}»")
+        if len(inbounds) > limit:
+            parts.append(f"и ещё {len(inbounds) - limit}")
+        return ", ".join(parts) or "пусто"
 
     @staticmethod
     def _find_client(
@@ -575,31 +606,48 @@ class XuiPanel(PanelClient):
     # ------------------------------------------------------------------
     async def health(self) -> bool:
         """Панель отвечает и авторизация проходит (дешёвый список инбаундов)."""
+        return (await self.check_health())[0]
+
+    async def check_health(self) -> tuple[bool, str]:
+        """Панель отвечает? Возвращает ``(ok, текст ошибки)``.
+
+        Тот же запрос, что у :meth:`health`, но причина сбоя не теряется:
+        ``health()`` обязан вернуть ``bool`` и потому глотает текст — из-за
+        этого в алерте о падении ноды оставалось «панель не ответила на
+        проверку», и отличить таймаут от 401 было нельзя.
+        """
         try:
             await self._request("GET", "/panel/api/inbounds/list")
-        except PanelError:
-            return False
-        except Exception:  # noqa: BLE001 - health обязан вернуть bool, а не упасть
-            return False
-        return True
+        except PanelError as exc:
+            return False, str(exc)
+        except Exception as exc:  # noqa: BLE001 - панель может ответить чем угодно
+            return False, str(exc)
+        return True, ""
 
     async def list_inbounds(self) -> list[Inbound]:
         """Инбаунды, из которых собирается подписка (с учётом ``inbound_ids``)."""
-        inbounds = await self._target_inbounds()
-        result: list[Inbound] = []
-        for item in inbounds:
-            stream = _as_json_dict(item.get("streamSettings"))
-            result.append(
-                Inbound(
-                    id=int(item.get("id") or 0),
-                    remark=str(item.get("remark") or ""),
-                    protocol=str(item.get("protocol") or ""),
-                    port=int(item.get("port") or 0),
-                    network=str(stream.get("network") or ""),
-                    security=str(stream.get("security") or ""),
-                )
-            )
-        return result
+        return [self._to_inbound(item) for item in await self._target_inbounds()]
+
+    async def list_all_inbounds(self) -> list[Inbound]:
+        """Все инбаунды панели — без фильтра по ``inbound_ids``.
+
+        Нужен админке и диагностике: при расхождении настроенных ID
+        фильтрованный список падает, и показать оператору реальные ID неоткуда.
+        """
+        return [self._to_inbound(item) for item in await self._fetch_inbounds()]
+
+    @staticmethod
+    def _to_inbound(item: dict[str, Any]) -> Inbound:
+        """Сырой элемент ответа панели → :class:`Inbound`."""
+        stream = _as_json_dict(item.get("streamSettings"))
+        return Inbound(
+            id=int(item.get("id") or 0),
+            remark=str(item.get("remark") or ""),
+            protocol=str(item.get("protocol") or ""),
+            port=int(item.get("port") or 0),
+            network=str(stream.get("network") or ""),
+            security=str(stream.get("security") or ""),
+        )
 
     async def list_users(self) -> list[PanelUser]:
         """Все клиенты целевых инбаундов — для аудита и контроля аномалий.

@@ -36,6 +36,22 @@ env_value() {
   grep -E "^${1}=" "$ENV_FILE" | tail -1 | cut -d= -f2- | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
+# ID инбаундов верхнего уровня из ответа панели (JSON читается со stdin).
+# Разбор — scripts/panel_inbound_ids.py: у элементов clientStats есть СВОЁ поле
+# id, поэтому греп по сырому JSON считал статистику клиента за инбаунд.
+panel_inbound_ids() {
+  local helper="${PROJECT_DIR}/scripts/panel_inbound_ids.py"
+  if [[ -f "$helper" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 "$helper" 2>/dev/null || true
+    return 0
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '.obj[]?.id' 2>/dev/null || true
+    return 0
+  fi
+  return 1
+}
+
 [[ $QUIET -eq 1 ]] || echo "${BOLD}🛰  Kometa — проверка готовности к запуску${NC}"
 
 head_ "1. Конфигурация (.env)"
@@ -189,14 +205,16 @@ else
     RESPONSE="$(curl -sk -m 15 -H "Authorization: Bearer ${PANEL_TOKEN}" "$API" || true)"
     if grep -q '"success":true' <<<"$RESPONSE"; then
       ok "Панель отвечает и токен принят"
-      IDS_IN_PANEL="$(grep -o '"id":[0-9]*' <<<"$RESPONSE" | cut -d: -f2 | sort -n | tr '\n' ' ')"
+      # Только id верхнего уровня: у элементов clientStats своё поле id, и
+      # грепом по сырому JSON проверка находила «инбаунд» в статистике клиента.
+      IDS_IN_PANEL="$(printf '%s' "$RESPONSE" | panel_inbound_ids | sort -n | tr '\n' ' ')"
       ok "Инбаунды в панели: ${IDS_IN_PANEL:-нет}"
       if [[ -z "$PANEL_INBOUNDS" ]]; then
         bad "PANEL_INBOUND_IDS пуст — бот не знает, куда добавлять клиентов"
       else
         MISSING=""
         for id in ${PANEL_INBOUNDS//,/ }; do
-          grep -q "\"id\":${id}[,}]" <<<"$RESPONSE" || MISSING="${MISSING} ${id}"
+          printf ' %s ' "$IDS_IN_PANEL" | grep -q " ${id} " || MISSING="${MISSING} ${id}"
         done
         if [[ -n "$MISSING" ]]; then
           bad "В панели нет инбаундов с ID:${MISSING} — проверь PANEL_INBOUND_IDS"
@@ -207,6 +225,21 @@ else
     else
       bad "Панель не ответила или токен неверный (проверь PANEL_URL, PANEL_TOKEN, что панель запущена)"
     fi
+  fi
+fi
+
+# Ноды мультигео: у каждой своя панель и свои ID, поэтому проверка основной
+# панели о них молчит. Сверяем тем же кодом, что и бот.
+if [[ -f "${PROJECT_DIR}/app/tools/check_nodes.py" ]]; then
+  if [[ -x "${PROJECT_DIR}/.venv/bin/python" && -w "${PROJECT_DIR}/data" ]]; then
+    if NODES_OUT="$(cd "$PROJECT_DIR" && ./.venv/bin/python -m app.tools.check_nodes 2>&1)"; then
+      ok "Инбаунды нод сходятся с их панелями"
+    else
+      bad "Инбаунды нод разошлись с панелями — клиенты не получат локацию:
+$(printf '%s' "$NODES_OUT" | sed 's/^/     /')"
+    fi
+  else
+    warn "Ноды не проверены: нужен .venv и права на data/ — запусти .venv/bin/python -m app.tools.check_nodes"
   fi
 fi
 

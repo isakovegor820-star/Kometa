@@ -77,7 +77,7 @@ async def test_dashboard_shows_pending_order(client, session):
     response = await client.get("/admin")
 
     assert f"#{order.id}" in response.text
-    assert "199" in response.text
+    assert str(order.amount_rub) in response.text
 
 
 async def test_confirm_order_from_panel(client, session, panel):
@@ -197,7 +197,7 @@ async def test_referrals_page_shows_program_stats(client, session, panel):
     assert "friend" in page  # последнее приглашение
     assert "+30 дн." in page  # награда начислена
     assert "конверсия 100%" in page
-    assert "99 ₽" in page  # сумма выданных скидок
+    assert f"{order.discount_rub} ₽" in page  # сумма выданных скидок
 
 
 async def test_promo_can_be_created_and_disabled_from_panel(client, session):
@@ -265,3 +265,237 @@ async def test_admin_can_add_and_toggle_node(client, session):
     await session.refresh(saved)
     assert saved.is_active is False
     registry.invalidate()
+
+
+# ---------------------------------------------------- ноды: ID инбаундов
+async def test_node_form_rejects_non_numeric_inbound_ids(client, session):
+    """Опечатка в ID не должна молча расширять выдачу на все инбаунды.
+
+    Пустое поле означает «все инбаунды панели», поэтому «3x» нельзя сохранять
+    как пустую строку: оператор будет уверен, что ограничил ноду одним
+    инбаундом, а клиенты пойдут во все.
+    """
+    from sqlalchemy import select
+
+    from app.db.models import Node
+
+    await login(client)
+    response = await client.post(
+        "/admin/nodes",
+        data={
+            "code": "nl",
+            "title": "🇳🇱 Нидерланды",
+            "host": "203.0.113.5",
+            "panel_url": "http://203.0.113.5:2053",
+            "panel_token": "secret-token",
+            "inbound_ids": "3x",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert await session.scalar(select(Node).where(Node.code == "nl")) is None, "нода с опечаткой не сохраняется"
+
+    page = await client.get("/admin/nodes")
+    assert "должны быть числами" in page.text
+
+
+async def test_node_form_normalizes_inbound_ids(client, session):
+    """«1 2» — это два инбаунда, а не двенадцатый (раньше строки склеивались)."""
+    from sqlalchemy import select
+
+    from app.db.models import Node
+
+    await login(client)
+    response = await client.post(
+        "/admin/nodes",
+        data={
+            "code": "nl",
+            "title": "🇳🇱 Нидерланды",
+            "host": "203.0.113.5",
+            "panel_url": "http://203.0.113.5:2053",
+            "panel_token": "secret-token",
+            "inbound_ids": "1 2",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = await session.scalar(select(Node).where(Node.code == "nl"))
+    assert saved is not None and saved.inbound_ids == "1,2"
+
+
+async def test_nodes_page_shows_actual_ids_and_honest_probe_state(client, session, monkeypatch):
+    """Страница нод: видно фактические ID панели и почему проба не состоялась.
+
+    До правок карточка говорила «панель не ответила», хотя панель ответила и
+    объяснила причину, а строка ноды показывала «порт не пускает» там, где порт
+    не проверяли.
+    """
+    from datetime import datetime, timezone
+
+    from app.db.models import Node
+    from app.panels.registry import registry
+    from app.web.admin import infra
+    from tests.test_panel_xui import FakeXui, _vless_inbound, _wireguard_inbound, make_panel
+
+    node = Node(
+        code="nl",
+        title="🇳🇱 Нидерланды",
+        host="203.0.113.5",
+        panel_type="xui",
+        panel_url="http://203.0.113.5:2053/nl",
+        panel_token="secret-token",
+        inbound_ids="3",
+        is_active=True,
+        last_check_at=datetime.now(timezone.utc),
+        last_check_ok=False,
+        last_check_error="в панели не найдены инбаунды [3] (проверь inbound_ids)",
+        last_probe_at=datetime.now(timezone.utc),
+        last_probe_ok=False,
+        last_probe_ms=0,
+        last_probe_error="панель не отдала инбаунды, порт не проверялся: в панели не найдены инбаунды [3]",
+    )
+    session.add(node)
+    await session.commit()
+
+    fake = FakeXui(inbounds=[_vless_inbound(1), _wireguard_inbound(2)])
+    panel, http_client = make_panel(fake, inbound_ids=[3])
+    monkeypatch.setattr(registry, "primary", lambda: panel)
+    monkeypatch.setattr(registry, "for_node", lambda _node: panel)
+    infra._inbounds_cache.clear()
+
+    await login(client)
+    try:
+        response = await client.get("/admin/nodes")
+    finally:
+        await http_client.aclose()
+        infra._inbounds_cache.clear()
+
+    assert response.status_code == 200
+    assert "нет ID 3" in response.text, "карточка панели должна называть отсутствующий ID"
+    assert "DE-Reality" in response.text, "фактические инбаунды панели должны быть видны"
+    assert "отвечает с ошибкой" in response.text, "бейдж не должен врать про «отвечает»"
+    assert "проба не выполнена" in response.text
+    assert "порт не пускает" not in response.text
+
+    # На дашборде та же нода: причина видна и там, а не только «нет ответа».
+    dashboard = await client.get("/admin")
+    assert dashboard.status_code == 200
+    assert "отвечает с ошибкой" in dashboard.text
+
+
+async def test_deleting_node_closes_all_its_alerts(client, session):
+    """Удаление ноды закрывает все её алерты, а не только «не отвечает»."""
+    from sqlalchemy import select
+
+    from app.db.models import Node
+    from app.services import alerts as alerts_service
+
+    node = Node(code="nl", title="🇳🇱 Нидерланды", panel_type="fake", is_active=True)
+    session.add(node)
+    await session.commit()
+
+    for suffix, kind in (
+        ("", "node_down"),
+        (":inbounds", "node_degraded"),
+        (":panel", "panel_error"),
+        (":probe", "node_probe_failed"),
+    ):
+        await alerts_service.raise_alert(session, kind, fingerprint=f"node:nl{suffix}", node_id=node.id)
+    await session.commit()
+    assert int(await alerts_service.count_alerts(session, "open")) == 4
+
+    await login(client)
+    response = await client.post(f"/admin/nodes/{node.id}/delete", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert await session.scalar(select(Node).where(Node.code == "nl")) is None
+    assert int(await alerts_service.count_alerts(session, "open")) == 0
+    assert int(await alerts_service.count_alerts(session, "resolved")) == 4
+
+
+async def test_disabling_node_by_form_closes_its_alerts(client, session):
+    """Галочка «Включена» в форме — тот же выключатель, что кнопка в списке.
+
+    Выключенную ноду никто не проверяет, поэтому автозакрытие для неё уже не
+    сработает: без явного закрытия алерты («нет инбаундов», «порт не пускает»)
+    висят в «Открытых» вечно.
+    """
+    from sqlalchemy import select
+
+    from app.db.models import Node
+    from app.services import alerts as alerts_service
+
+    node = Node(code="nl", title="🇳🇱 Нидерланды", panel_type="fake", is_active=True)
+    session.add(node)
+    await session.commit()
+    for suffix, kind in (
+        ("", "node_down"),
+        (":inbounds", "node_degraded"),
+        (":panel", "panel_error"),
+        (":probe", "node_probe_failed"),
+    ):
+        await alerts_service.raise_alert(session, kind, fingerprint=f"node:nl{suffix}", node_id=node.id)
+    await session.commit()
+
+    await login(client)
+    response = await client.post(
+        "/admin/nodes",
+        data={
+            "code": "nl",
+            "title": "🇳🇱 Нидерланды",
+            "host": "203.0.113.5",
+            "panel_url": "http://203.0.113.5:2053",
+            "panel_token": "secret-token",
+            "inbound_ids": "1",
+            "is_active": "0",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    saved = await session.scalar(select(Node).where(Node.code == "nl"))
+    assert saved is not None
+    await session.refresh(saved)
+    assert saved.is_active is False
+    assert int(await alerts_service.count_alerts(session, "open")) == 0
+    assert int(await alerts_service.count_alerts(session, "resolved")) == 4
+
+
+async def test_nodes_check_reports_not_ready_panel(client, session, monkeypatch):
+    """«Проверить ноды» не должна говорить «все панели отвечают», если выдача сломана."""
+    from app.db.models import Node
+    from app.panels.registry import registry
+    from app.services import alerts as alerts_service
+    from tests.test_node_inbound_diagnosis import ReasonPanel, missing_inbound_error
+
+    session.add(
+        Node(
+            code="nl",
+            title="🇳🇱 Нидерланды",
+            host="203.0.113.5",
+            panel_type="fake",
+            is_active=True,
+            inbound_ids="3",
+        )
+    )
+    await session.commit()
+
+    primary = ReasonPanel()
+    primary.location_title = "🇩🇪 Германия"
+    broken = ReasonPanel(inbound_error=missing_inbound_error())
+    broken.location_title = "🇳🇱 Нидерланды"
+    monkeypatch.setattr(registry, "primary", lambda: primary)
+    monkeypatch.setattr(registry, "for_node", lambda _node: broken)
+
+    await login(client)
+    response = await client.post("/admin/nodes/check", follow_redirects=False)
+    assert response.status_code == 303
+
+    page = await client.get("/admin/nodes")
+    assert "Готовы 1 из 2" in page.text, "flash не должен обещать «все панели готовы»"
+    assert "nl" in page.text
+
+    opened = await alerts_service.list_alerts(session, status="open")
+    assert [alert.kind for alert in opened] == ["node_degraded"]

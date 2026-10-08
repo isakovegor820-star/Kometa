@@ -10,7 +10,8 @@ Telegram-бот продаёт подписку на VPN-сервис: тари�
 
 * Путь: `/Users/egor/Downloads/VPN servise` (ветка `main`).
 * Стек: Python 3.12+, aiogram 3, FastAPI, SQLAlchemy (async), 3x-ui, Docker.
-* Запуск: `.venv/bin/python -m app.main`. Тесты: `.venv/bin/python -m pytest -q` → **1083 зелёных**.
+* Запуск: `.venv/bin/python -m app.main`. Тесты: `.venv/bin/python -m pytest -q` → **1139 зелёных**
+  в закоммиченном состоянии (1152 в рабочем дереве — там же ещё не закоммиченные тесты цен).
 
 ## Что уже сделано (код в репозитории)
 
@@ -21,6 +22,11 @@ Telegram-бот продаёт подписку на VPN-сервис: тари�
   идут напрямую — правила в Clash и sing-box.
 * **Пинг**: TCP-проба нод каждые 5 минут, алерт `node_probe_failed`, задержка в админке и на странице
   подключения; `GET /ping` (204) — точка замера для клиента; ручная проверка `python -m app.tools.ping_node`.
+* **Честные алерты нод** (после инцидента «🇳🇱 порт не пускает клиента», 08.10.2026): проба не объявляет
+  «порт не пускает», если до порта не дошла (причина в `nodes.last_probe_error`); «нет инбаундов» и
+  «ошибка панели» — разные алерты; причина падения панели видна (`check_health`); `ack` не слетает при
+  повторе; удаление/выключение ноды закрывает все её алерты; `python -m app.tools.check_nodes` печатает
+  настроенные ID против фактических. Разбор — `docs/ПЛАН-ПОЧИНКА-НОДА-НЕТ-ИНБАУНДОВ.md`.
 * **Готовность**: `python -m app.tools.emergency_check` (код 1, если не готово) и `/emergency` в боте.
 * **Бот**: инструкция «🛟 Если не открывается», компенсация простоя (`/downtime_start`, `/downtime_end`,
   `/downtime`, `/downtime_grant`, страница `/admin/downtime`).
@@ -64,18 +70,29 @@ Telegram-бот продаёт подписку на VPN-сервис: тари�
 `main.py`, `conftest.py`, `fakes.py`, `.env.example`, `README.md`, `docs/ЗАПУСК.md`, `docs/КАНАЛ.md`.
 Тесты этой фичи зелёные (23). Коммита нет — посмотреть, доработать при необходимости и закоммитить.
 
+Плюс с 08.10.2026 не закоммичена **починка алертов нод** (см. `docs/ПЛАН-ПОЧИНКА-НОДА-НЕТ-ИНБАУНДОВ.md`):
+`app/panels/{base,xui,registry}.py`, `app/services/{alerts,probe,subscriptions}.py`, `app/config.py`,
+`app/db/{models,session}.py`, `app/main.py`, `app/web/admin/infra.py`, `app/web/sub.py`,
+`app/web/templates/{nodes,dashboard}.html`, `app/tools/emergency_check.py`,
+новый `app/tools/check_nodes.py` и тесты `tests/test_node_inbound_diagnosis.py`,
+`tests/test_admin_web.py`. На сервере — выкат по процедуре из `docs/ЗАПУСК.md` (раздел
+«Обновление кода бота»), затем `.venv/bin/python -m app.tools.check_nodes`.
+
 ## Что делать дальше (по порядку)
 
 1. **Сегодня-завтра:** разобраться с незакоммиченной фичей гейта и закоммитить.
-2. **10.10 — автопродление ноды** (249 ₽, тариф DE-R9-2 снят с продажи, терять нельзя; оплачена до 13.10).
-3. **Этап 0 — замеры** (`docs/ЗАМЕРЫ-ЭТАП-0.md`): телефон + симки 3 операторов, Wi-Fi и VPN выключены,
+2. **Нода NL:** выкатить починку алертов и прогнать `python -m app.tools.check_nodes` — он назовёт
+   фактические ID инбаундов панели; вписать их в `/admin/nodes?edit=nl`. Пока ID не сведены, новые
+   клиенты на этой локации не создаются (действующие подписки не страдают).
+3. **10.10 — автопродление ноды** (249 ₽, тариф DE-R9-2 снят с продажи, терять нельзя; оплачена до 13.10).
+4. **Этап 0 — замеры** (`docs/ЗАМЕРЫ-ЭТАП-0.md`): телефон + симки 3 операторов, Wi-Fi и VPN выключены,
    Termux; шаги 1–2 на каждом операторе, затем `--range-list` по 22 хостам. Всё копится в `probes.csv`.
    Прислать `probes.csv` — свести матрицу «оператор × город → что проходит».
-4. **На ноде:** `harden_logs.sh --fix-sniffing --apply`, `add_mtproto_inbound.sh --apply`; при наличии
+5. **На ноде:** `harden_logs.sh --fix-sniffing --apply`, `add_mtproto_inbound.sh --apply`; при наличии
    домена — `add_xhttp_inbound.sh` + CDN.
-5. **Вход в РФ** (только после проверки адреса): аренда IP 0,26 ₽/час → `--deep --repeat 3` → покупка
+6. **Вход в РФ** (только после проверки адреса): аренда IP 0,26 ₽/час → `--deep --repeat 3` → покупка
    VPS (200–2600 ₽/мес) → `add_cascade_exit.sh --apply` → канал «резервная» в админке → `/emergency`.
-6. **Осталось в коде:** self-steal Reality (последний пункт T5), CDN-профиль (нужны домен и деньги),
+7. **Осталось в коде:** self-steal Reality (последний пункт T5), CDN-профиль (нужны домен и деньги),
    при желании — «одно приложение» на Android под DNS-канал (StormDNS/CottenDns — WhiteDNS с dnstt
    не совместим).
 
@@ -99,8 +116,9 @@ Telegram-бот продаёт подписку на VPN-сервис: тари�
 
 ```bash
 cd "/Users/egor/Downloads/VPN servise"
-.venv/bin/python -m pytest -q                     # 1083 теста
+.venv/bin/python -m pytest -q                     # 1139 тестов в коммите (1152 в дереве)
 .venv/bin/python -m app.tools.emergency_check     # готовность аварийного уровня
+.venv/bin/python -m app.tools.check_nodes         # ID инбаундов: настроено против фактических
 git log --oneline -12                             # что делали последним
 ./scripts/lte_probe.sh --help                     # протокол замеров
 ```
