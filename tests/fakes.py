@@ -10,6 +10,11 @@ from aiogram.methods import TelegramMethod
 from aiogram.types import (
     CallbackQuery,
     Chat,
+    ChatMemberAdministrator,
+    ChatMemberLeft,
+    ChatMemberMember,
+    ChatMemberOwner,
+    ChatMemberRestricted,
     Message,
     PreCheckoutQuery,
     SuccessfulPayment,
@@ -18,6 +23,28 @@ from aiogram.types import (
 )
 
 BOT_TOKEN = "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+
+def _chat_member(user_id: int, status: str):
+    """Ответ GetChatMember: подписан / вышел / админ канала.
+
+    У администратора и ограниченного участника десятки обязательных полей,
+    которые тесту не нужны, — собираем их без валидации.
+    """
+    member = TgUser(id=user_id, is_bot=False, first_name="Тест")
+    if status == "creator":
+        return ChatMemberOwner(status="creator", user=member, is_anonymous=False)
+    if status == "administrator":
+        return ChatMemberAdministrator.model_construct(
+            status="administrator", user=member, is_member=True
+        )
+    if status == "restricted":
+        return ChatMemberRestricted.model_construct(
+            status="restricted", user=member, is_member=True
+        )
+    if status == "member":
+        return ChatMemberMember(status="member", user=member)
+    return ChatMemberLeft(status="left", user=member)
 
 
 class FakeSession(BaseSession):
@@ -30,6 +57,11 @@ class FakeSession(BaseSession):
     def __init__(self) -> None:
         super().__init__()
         self.requests: list[TelegramMethod] = []
+        #: Подписчики канала для GetChatMember: {user_id: статус}. Пусто —
+        #: в канале никого; тест добавляет себя, когда «подписался».
+        self.chat_members: dict[int, str] = {}
+        #: Ответ Telegram вместо результата — проверка «а если API молчит».
+        self.chat_member_error: Exception | None = None
 
     async def close(self) -> None:  # pragma: no cover
         return None
@@ -40,6 +72,11 @@ class FakeSession(BaseSession):
     async def make_request(self, bot: Bot, method: TelegramMethod, timeout: int | None = None):
         self.requests.append(method)
         name = type(method).__name__
+        if name == "GetChatMember":
+            if self.chat_member_error is not None:
+                raise self.chat_member_error
+            user_id = int(getattr(method, "user_id", 0) or 0)
+            return _chat_member(user_id, self.chat_members.get(user_id, "left"))
         if name in {"SendMessage", "EditMessageText"}:
             return Message(
                 message_id=len(self.requests),

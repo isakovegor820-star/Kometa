@@ -26,6 +26,10 @@ os.environ["MANUAL_PAYMENT_DETAILS"] = "СБП: +7 900 000-00-00 (тест)"
 # Продажи в тестах открыты по умолчанию: боевой .env может держать их
 # закрытыми до готовности ноды, но это не должно ломать сценарии покупки.
 os.environ["SALES_ENABLED"] = "true"
+# Гейт подписки на канал в тестах выключен: сценарии бота проверяются без
+# Telegram API. Кто проверяет сам гейт — включает его у себя (test_channel_gate).
+os.environ["CHANNEL_GATE_ENABLED"] = "false"
+os.environ["CHANNEL_ID"] = ""
 
 
 @pytest.fixture(autouse=True)
@@ -60,12 +64,17 @@ def dispatcher():
     from aiogram import Dispatcher
 
     from app.bot.handlers import build_router
-    from app.bot.middlewares import DbSessionMiddleware, UserMiddleware
+    from app.bot.middlewares import ChannelGateMiddleware, DbSessionMiddleware, UserMiddleware
 
     dp = Dispatcher()
-    for observer in (dp.message, dp.callback_query, dp.pre_checkout_query):
+    for observer in (dp.message, dp.callback_query):
         observer.middleware(DbSessionMiddleware())
         observer.middleware(UserMiddleware())
+        # Порядок как в проде (app/main.py): гейт — после пользователя,
+        # иначе ему нечего проверять.
+        observer.middleware(ChannelGateMiddleware())
+    dp.pre_checkout_query.middleware(DbSessionMiddleware())
+    dp.pre_checkout_query.middleware(UserMiddleware())
     dp.include_router(build_router())
     return dp
 

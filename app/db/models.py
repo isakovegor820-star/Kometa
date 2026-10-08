@@ -78,6 +78,10 @@ class User(Base):
     #: Накопленные бонусные дни. Нужны тем, у кого ещё нет подписки:
     #: награда за друга не теряется, а «докапывается» до первой подписки.
     bonus_days_balance: Mapped[int] = mapped_column(Integer, default=0)
+    #: Когда последний раз подтвердили подписку на канал (гейт обязательной
+    #: подписки). Кэш, чтобы не спрашивать Telegram API на каждый апдейт;
+    #: пусто — ещё не подтверждали или срок доверия истёк.
+    channel_verified_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
 
     subscription: Mapped["Subscription | None"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"

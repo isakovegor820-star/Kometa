@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import keyboards, texts
+from app.bot import gate, keyboards, texts
 from app.config import get_settings
 from app.db.models import User
 from app.panels.registry import registry
-from app.services import orders, promo, referral, subscriptions
+from app.services import channel_gate, orders, promo, referral, subscriptions
 
 router = Router(name="start")
 settings = get_settings()
@@ -70,20 +70,35 @@ async def send_referral_greeting(
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, session: AsyncSession, user: User) -> None:
+async def cmd_start(message: Message, session: AsyncSession, user: User, bot: Bot) -> None:
     payload = ""
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) > 1:
         payload = parts[1].strip()
 
+    referrer = None
     if payload.startswith("ref_"):
         referrer = await referral.attach_referrer(session, user, payload[4:])
-        if referrer is not None and referrer.id != user.id:
-            await send_referral_greeting(message, session, user, referrer)
+        if referrer is not None and referrer.id == user.id:
+            referrer = None
+
+    # Приветствие со скидкой показываем ДО гейта: ``attach_referrer`` отдаёт
+    # пригласившего только в момент привязки, то есть ровно на этом /start. Если
+    # отложить его до проверки подписки, друг не увидит обещанный подарок
+    # никогда: повторный /start вернёт None, потому что referred_by уже стоит.
+    if referrer is not None:
+        await send_referral_greeting(message, session, user, referrer)
+
+    # Обязательная подписка на канал: пока её нет (и нет активной подписки на
+    # сервис), дальше экрана подписки человек не пройдёт. Пригласившего при
+    # этом уже записали — бонус не теряется.
+    if not (await channel_gate.verdict(session, bot, user)).allowed:
+        await gate.show(message)
+        return
 
     text, markup = await main_menu_view(session, user)
     await message.answer(text, reply_markup=markup)
-    await message.answer("Быстрое меню 👇", reply_markup=keyboards.reply_menu())
+    await message.answer(texts.QUICK_MENU_HINT, reply_markup=keyboards.reply_menu())
 
 
 @router.callback_query(F.data == "menu:main")

@@ -19,7 +19,12 @@ from sqlalchemy import select
 
 from app.bot.handlers import build_router
 from app.bot.handlers.buy import finalize_order
-from app.bot.middlewares import DbSessionMiddleware, ThrottlingMiddleware, UserMiddleware
+from app.bot.middlewares import (
+    ChannelGateMiddleware,
+    DbSessionMiddleware,
+    ThrottlingMiddleware,
+    UserMiddleware,
+)
 from app.config import get_settings
 from app.db.models import User
 from app.db.session import SessionMaker, init_db
@@ -270,11 +275,16 @@ async def main() -> None:
 
     dispatcher = Dispatcher()
     # pre_checkout_query обязателен для оплаты в Stars — ему тоже нужны
-    # сессия БД и наш пользователь.
-    for observer in (dispatcher.message, dispatcher.callback_query, dispatcher.pre_checkout_query):
+    # сессия БД и наш пользователь, но гейт подписки на него не ставим:
+    # подтверждение оплаты не должно зависеть от подписки на канал.
+    for observer in (dispatcher.message, dispatcher.callback_query):
         observer.middleware(ThrottlingMiddleware())
         observer.middleware(DbSessionMiddleware())
         observer.middleware(UserMiddleware())
+        observer.middleware(ChannelGateMiddleware())
+    dispatcher.pre_checkout_query.middleware(ThrottlingMiddleware())
+    dispatcher.pre_checkout_query.middleware(DbSessionMiddleware())
+    dispatcher.pre_checkout_query.middleware(UserMiddleware())
     dispatcher.include_router(build_router())
 
     scheduler = AsyncIOScheduler(timezone="UTC")
@@ -309,6 +319,24 @@ async def main() -> None:
     me = await bot.get_me()
     logger.info("Бот запущен: @%s", me.username)
     await notifications.notify_admins(bot, f"🚀 <b>Kometa запущена</b>\nБот: @{me.username}")
+
+    # Самопроверка гейта подписки: «включил гейт, а бота в канал админом не
+    # добавил» — самая частая ошибка настройки, и узнать о ней лучше сразу.
+    if settings.channel_gate_enabled:
+        from app.services import channel_gate
+
+        gate_ok, gate_detail = await channel_gate.admin_check(bot)
+        logger.info("Гейт подписки: %s", gate_detail)
+        if not gate_ok:
+            await notifications.notify_admins(
+                bot,
+                "⚠️ <b>Гейт подписки на канал не работает</b>\n\n"
+                f"{gate_detail}\n\n"
+                "Что сделать: добавь бота в канал <b>администратором</b> "
+                "(право «Добавлять участников» не нужно, достаточно админки) "
+                "и проверь CHANNEL_ID. Пока проверка не работает, бот ведёт себя "
+                "по CHANNEL_GATE_FAIL_OPEN.",
+            )
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
