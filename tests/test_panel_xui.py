@@ -851,3 +851,43 @@ async def test_constructor_requires_base_url():
         XuiPanel("")
     with pytest.raises(PanelError, match="base_url"):
         XuiPanel("   ")
+
+
+# --------------------------------------- досоздание клиента в новом инбаунде
+async def test_add_existing_client_to_another_inbound_v3():
+    """Расширили набор инбаундов — существующего клиента досоздаём в новом порту.
+
+    Клиент переносится как есть (тот же uuid и subId): новых подписок не
+    появляется, а в приложении у человека появляется запасной порт.
+    """
+    fake = FakeXui(inbounds=[_vless_inbound(1), _vless_inbound(4)], legacy=False)
+    fake.clients_of(1).append({"email": "u1", "id": "uuid-1", "subId": "sub-1"})
+    panel, client = make_panel(fake, inbound_ids=[1, 4])
+
+    async with client:
+        await panel.add_client_to_inbounds({"email": "u1", "id": "uuid-1", "subId": "sub-1"}, [4])
+
+    assert [c["email"] for c in fake.clients_of(4)] == ["u1"]
+    assert fake.clients_of(4)[0]["id"] == "uuid-1"
+    assert fake.clients_of(4)[0]["subId"] == "sub-1"
+    assert panel._legacy_clients_api is False
+
+
+async def test_add_existing_client_falls_back_to_legacy_api():
+    """Панель ≤ v3.0 без маршрута /clients/add: тот же результат старым API."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/panel/api/clients/add":
+            return httpx.Response(404, json={"success": False, "msg": "route not found"})
+        return fake.handle(request)
+
+    fake = FakeXui(inbounds=[_vless_inbound(1), _vless_inbound(4)], legacy=True)
+    fake.clients_of(1).append({"email": "u1", "id": "uuid-1", "subId": "sub-1"})
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    panel = XuiPanel(BASE, token=TOKEN, sub_base=SUB_BASE, inbound_ids=[1, 4], client=client)
+
+    async with client:
+        await panel.add_client_to_inbounds({"email": "u1", "id": "uuid-1", "subId": "sub-1"}, [4])
+
+    assert [c["email"] for c in fake.clients_of(4)] == ["u1"]
+    assert panel._legacy_clients_api is True

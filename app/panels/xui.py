@@ -566,12 +566,20 @@ class XuiPanel(PanelClient):
             legacy_route=True,
         )
 
-    async def _v3_add_client(self, client: dict[str, Any], inbound_ids: list[int]) -> None:
-        """``POST /panel/api/clients/add`` (3x-ui ≥ v3.1.0)."""
+    async def _v3_add_client(
+        self, client: dict[str, Any], inbound_ids: list[int], *, legacy_route: bool = False
+    ) -> None:
+        """``POST /panel/api/clients/add`` (3x-ui ≥ v3.1.0).
+
+        :param legacy_route: помечать отсутствие маршрута как :class:`_RouteMissing`
+            — так вызывающий код может откатиться на старый API (см.
+            :meth:`add_client_to_inbounds`).
+        """
         await self._request(
             "POST",
             "/panel/api/clients/add",
             json_body={"client": client, "inboundIds": [int(item) for item in inbound_ids]},
+            legacy_route=legacy_route,
         )
 
     async def _v3_update_client(self, email: str, client: dict[str, Any]) -> None:
@@ -635,6 +643,28 @@ class XuiPanel(PanelClient):
         фильтрованный список падает, и показать оператору реальные ID неоткуда.
         """
         return [self._to_inbound(item) for item in await self._fetch_inbounds()]
+
+    async def raw_inbounds(self) -> list[dict[str, Any]]:
+        """Сырые инбаунды панели вместе с клиентами (см. ``PanelClient``)."""
+        return await self._fetch_inbounds()
+
+    async def add_client_to_inbounds(self, client: dict[str, Any], inbound_ids: list[int]) -> None:
+        """Добавить существующего клиента в другие инбаунды панели.
+
+        Первым идёт API v3 (3x-ui ≥ v3.1): он принимает готовый объект клиента
+        и список ``inboundIds``. Если новых маршрутов нет (панель ≤ v3.0),
+        повторяем старым способом — по одному инбаунду за вызов.
+        """
+        targets = [int(item) for item in inbound_ids]
+        if not targets:
+            return
+        try:
+            await self._v3_add_client(client, targets, legacy_route=True)
+            self._legacy_clients_api = False
+        except _RouteMissing:
+            self._legacy_clients_api = True
+            for inbound_id in targets:
+                await self._legacy_add_client(inbound_id, client)
 
     @staticmethod
     def _to_inbound(item: dict[str, Any]) -> Inbound:
