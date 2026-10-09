@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from aiogram import Bot
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -496,6 +496,20 @@ async def grant_ungranted_orders(
             await _record_grant_failure(session, order, target, PanelError(problem), bot=bot)
             continue
 
+        # Пока панель отвечала, по заказу мог пройти возврат: чарджбэк приходит
+        # вебхуком в любой момент. Тогда доступ оставлять нельзя.
+        await session.refresh(order)
+        if order.status != "paid":
+            logger.warning("Заказ #%s стал %s во время выдачи — отзываю доступ", order.id, order.status)
+            await subscriptions.revoke_access(
+                session,
+                sub,
+                panels or await subscriptions.all_user_panels(session),
+                reason=f"{order.status} order #{order.id}",
+            )
+            release_grant_claim(order)
+            continue
+
         order.granted_at = datetime.now(timezone.utc)
         order.grant_last_error = ""
         release_grant_claim(order)
@@ -700,6 +714,21 @@ async def mark_paid(
         await _record_grant_failure(session, order, target, PanelError(problem), bot=bot)
         return sub, False
 
+    # Возврат мог прийти, пока панель выдавала доступ: чарджбэк приходит
+    # вебхуком в любой момент, а выдача занимает секунды. Без этой проверки итог
+    # был «деньги вернули И доступ живёт»: заказ refunded, granted_at проставлен,
+    # подписка активна, алертов ноль. Статус читаем из БД, а не из объекта в
+    # памяти: его изменил другой путь, и в памяти он уже устарел.
+    await session.refresh(order)
+    if order.status != "paid":
+        logger.warning("Заказ #%s стал %s во время выдачи — отзываю доступ", order.id, order.status)
+        await subscriptions.revoke_access(
+            session, sub, panel, reason=f"{order.status} order #{order.id}"
+        )
+        release_grant_claim(order)
+        await session.flush()
+        return sub, False
+
     order.granted_at = datetime.now(timezone.utc)
     order.grant_target_at = target
     order.grant_last_error = ""
@@ -762,12 +791,30 @@ async def refund_order(
     order.refund_note = note or None
 
     sub = await subscriptions.get_subscription(session, order.user_id)
+
+    # Ищем оплату ПОЗЖЕ этой. Раньше здесь было «есть хоть какая-то другая
+    # оплата», и это ломало главный сценарий: клиент платит второй раз,
+    # возвращает ПОСЛЕДНИЙ платёж — доступ остаётся (в сообщении при этом
+    # писалось «есть более поздняя оплата», хотя она была раньше). Цикл
+    # «оплатил → чарджбэк → доступ остался» давал до 1440 ₽ в год на одного
+    # злоупотребляющего.
+    #
+    # Ничьи по времени разводим по id: два платежа в одну секунду — редкость,
+    # но порядок должен быть детерминированным.
+    this_paid_at = order.paid_at or order.created_at
     other_paid = await session.scalar(
-        select(Order.id).where(
+        select(Order.id)
+        .where(
             Order.user_id == order.user_id,
             Order.status == "paid",
             Order.id != order.id,
-        ).limit(1)
+            Order.paid_at.is_not(None),
+            or_(
+                Order.paid_at > this_paid_at,
+                and_(Order.paid_at == this_paid_at, Order.id > order.id),
+            ),
+        )
+        .limit(1)
     )
 
     await events.log_event(

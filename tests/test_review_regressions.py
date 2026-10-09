@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.config import get_settings
 from app.db.models import Alert, Event, Order, Subscription
@@ -209,6 +209,111 @@ async def test_short_grant_is_treated_as_failure(session):
     assert order.granted_at is None
     assert "ожидали минимум" in order.grant_last_error or "срок подписки" in order.grant_last_error
     assert sub is not None  # подписка есть, но факт выдачи не подтверждён — ретрай доведёт
+
+
+# ------------- C8 (находка 09.10.2026): возврат и чарджбэк отзывают доступ
+async def test_refunding_the_latest_payment_revokes_access(session, panel):
+    """C8: возврат ПОСЛЕДНЕГО платежа обязан отключить доступ.
+
+    Находка 09.10.2026: условие было «есть любая другая оплата», без даты.
+    Клиент платит второй раз, возвращает последний платёж — доступ остаётся, а в
+    сообщении администратору написано «есть более поздняя оплата», хотя та оплата
+    была раньше. Цикл «оплатил → чарджбэк → доступ остался» давал до 1440 ₽ в год
+    на одного злоупотребляющего.
+    """
+    user, first = await _make_order(session, 9951, provider="manual")
+    await orders.mark_paid(session, first, panel)
+    await session.commit()
+
+    _, second = await _make_order(session, user.tg_id, provider="manual")
+    await orders.mark_paid(session, second, panel)
+    await session.commit()
+
+    ok, message, sub = await orders.refund_order(session, second, [panel])
+    await session.commit()
+    await session.refresh(sub)
+
+    assert ok is True
+    assert "более поздняя оплата" not in message
+    assert sub.status == "blocked", "доступ остался после возврата последнего платежа"
+
+
+async def test_refunding_an_older_payment_keeps_access(session, panel):
+    """Обратный случай не сломан: вернули старый платёж — доступ живёт."""
+    user, first = await _make_order(session, 9952, provider="manual")
+    await orders.mark_paid(session, first, panel)
+    await session.commit()
+
+    _, second = await _make_order(session, user.tg_id, provider="manual")
+    await orders.mark_paid(session, second, panel)
+    await session.commit()
+
+    ok, message, sub = await orders.refund_order(session, first, [panel])
+    await session.commit()
+    await session.refresh(sub)
+
+    assert ok is True
+    assert "сохранён" in message
+    assert sub.status == "active"
+
+
+class _RefundingPanel(FakePanel):
+    """Панель, во время ответа которой по заказу успевает пройти возврат.
+
+    Воспроизводит чарджбэк: вебхук Platega приходит в любой момент, в том числе
+    пока панель выдаёт доступ. Возврат делаем из ОТДЕЛЬНОЙ сессии — как это и
+    происходит в бою, где вебхук живёт своей транзакцией.
+    """
+
+    name = "refunding-panel"
+
+    def __init__(self, order_id: int) -> None:
+        super().__init__()
+        self._order_id = order_id
+        # Возврат ровно один: отзыв доступа тоже зовёт панель, и без флага
+        # повторный вызов пытался бы вернуть деньги второй раз.
+        self._refunded = False
+
+    async def _refund(self) -> None:
+        if self._refunded:
+            return
+        self._refunded = True
+        from app.db.session import SessionMaker
+
+        async with SessionMaker() as other:
+            await other.execute(
+                update(Order).where(Order.id == self._order_id).values(status="refunded")
+            )
+            await other.commit()
+
+    async def create_user(self, spec):  # noqa: ANN001, ANN201
+        user = await super().create_user(spec)
+        await self._refund()
+        return user
+
+    async def update_user(self, uuid: str, **kwargs):  # noqa: ANN003, ANN201
+        user = await super().update_user(uuid, **kwargs)
+        await self._refund()
+        return user
+
+
+async def test_chargeback_during_grant_revokes_access(session):
+    """C8: возврат во время выдачи не оставляет доступ живым.
+
+    Находка 09.10.2026: итог был «деньги вернули И доступ живёт» — заказ
+    refunded, granted_at проставлен, подписка активна, панель включена.
+    """
+    user, order = await _make_order(session, 9953, provider="manual")
+
+    sub, already = await orders.mark_paid(session, order, _RefundingPanel(order.id))
+    await session.commit()
+    await session.refresh(order)
+
+    assert already is False
+    assert order.status == "refunded"
+    assert order.granted_at is None, "выдача подтверждена по возвращённому заказу"
+    sub_row = await subscriptions.get_subscription(session, user.id)
+    assert sub_row is None or sub_row.status != "active", "доступ остался активным после возврата"
 
 
 # ----------------------- C7 (находка 09.10.2026): захват выдачи
