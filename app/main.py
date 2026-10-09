@@ -290,6 +290,43 @@ async def job_grant_paid(bot: Bot) -> None:
             logger.info("Повторная выдача доступа: заказы %s", granted)
 
 
+async def job_retention(bot: Bot) -> None:
+    """Ретенция персональных данных: чистка журналов и анонимизация молчунов.
+
+    Сроки — решение владельца, зафиксированы в одном месте
+    (``app/services/retention.py``) и совпадают с Политикой конфиденциальности:
+    технические журналы — 30 дней, аккаунт без активности 12 месяцев —
+    анонимизация, заказы и платежи — 4 года (их не трогаем).
+    """
+    from app.services import retention
+
+    async with SessionMaker() as session:
+        try:
+            purged = await retention.purge_old_records(session)
+            anonymized = await retention.anonymize_inactive_users(session)
+            await session.commit()
+        except Exception as exc:  # noqa: BLE001 - фоновая задача не должна падать молча
+            logger.exception("Ретенция упала: %s", exc)
+            return
+
+    if not purged.total and not anonymized:
+        logger.info("Ретенция: чистить нечего")
+        return
+    logger.info(
+        "Ретенция: удалено (%s), анонимизировано пользователей: %s",
+        purged.as_text(),
+        len(anonymized),
+    )
+    if bot is not None:
+        await notifications.notify_admins(
+            bot,
+            "🧹 <b>Ретенция данных</b>\n"
+            f"Удалено старше {retention.EVENTS_RETENTION_DAYS} дней — {purged.as_text()}.\n"
+            f"Анонимизировано без активности {retention.INACTIVITY_MONTHS} мес.: {len(anonymized)}.\n"
+            "Заказы и суммы сохранены (налоговый учёт, 4 года).",
+        )
+
+
 async def job_autopay(bot: Bot) -> None:
     """Автоподтверждение переводов по выписке банка."""
     from app.services import autopay
@@ -523,6 +560,16 @@ async def main() -> None:
     # Повторная выдача доступа по оплаченным заказам: панель могла не ответить
     # в момент оплаты. Раз в 3 минуты — клиент не должен ждать человека.
     scheduler.add_job(job_grant_paid, "interval", minutes=3, args=[bot], id="grant_paid")
+    # Ретенция: раз в сутки ночью (03:00 UTC = 06:00 МСК), когда никто не работает.
+    # Задача чистит журналы старше 30 дней и анонимизирует тех, кто молчит 12 месяцев.
+    scheduler.add_job(
+        job_retention,
+        "cron",
+        hour=3,
+        minute=0,
+        args=[bot],
+        id="retention",
+    )
     scheduler.add_job(job_node_health, "interval", minutes=5, args=[bot], id="node_health")
     # Проба «глазами клиента»: TCP-порт и задержка. Отдельно от проверки
     # панели — панель отвечает, а порт может не пускать.

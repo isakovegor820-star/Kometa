@@ -9,6 +9,7 @@
       <span class="avatar" style="width:34px;height:34px;font-size:13px">{{ initials(user.display_name) }}</span>
       {{ user.display_name }}
       {% if user.is_blocked %}<span class="badge badge-err">заблокирован</span>{% endif %}
+      {% if user.is_anonymized %}<span class="badge">персональные данные удалены</span>{% endif %}
     </h1>
     <div class="sub">
       <code>{{ user.tg_id }}</code>
@@ -307,6 +308,39 @@
         </form>
       </div>
     </div>
+
+    {# ------------------------------------- удаление персональных данных #}
+    {# Пункт 6.4 Политики: по запросу клиента данные удаляются, кроме сведений
+       о расчётах. Кнопка видна владельцу и модератору, поддержке — нет. #}
+    {% if 'users.erase' in caps %}
+    <div class="card">
+      <div class="card-head"><h2>Персональные данные</h2></div>
+      <div class="card-body">
+        {% if user.is_anonymized %}
+        <p class="small muted">
+          Данные удалены {{ dt_day(user.anonymized_at) }}. Имя, @username, Telegram-ID,
+          метки, заметки и события клиента стёрты; заказы и суммы сохранены
+          (налоговый учёт). Повторное нажатие ничего не меняет.
+        </p>
+        <form method="post" action="/admin/users/{{ user.id }}/erase" class="inline-form"
+              data-confirm="Данные уже удалены. Нажать ещё раз — безопасно, изменений не будет.">
+          <button class="btn btn-ghost btn-sm" type="submit">Удалить повторно (безопасно)</button>
+        </form>
+        {% else %}
+        <p class="small muted">
+          Запрос клиента на удаление: стираем имя, @username, Telegram-ID, метки,
+          заметки и события. Заказы и суммы остаются — их хранение обязательно
+          4 года (налоговый учёт). Действие необратимо и попадает в аудит.
+        </p>
+        <form method="post" action="/admin/users/{{ user.id }}/erase" class="inline-form"
+              data-confirm="Удалить персональные данные клиента {{ user.display_name }}? Заказы сохранятся, отменить нельзя.">
+          <input type="text" name="reason" placeholder="основание (запрос клиента)" style="width:220px" aria-label="Основание">
+          <button class="btn btn-danger btn-sm" type="submit">Удалить персональные данные</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>
 

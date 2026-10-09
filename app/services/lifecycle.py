@@ -139,6 +139,8 @@ async def _trial_without_payment(session: AsyncSession, now: datetime) -> list[U
         .join(Subscription, Subscription.user_id == User.id)
         .where(
             User.is_blocked.is_(False),
+            # Персональные данные удалены — писать некому и незачем.
+            User.anonymized_at.is_(None),
             Subscription.status == "trial",
             Subscription.expires_at.is_not(None),
             Subscription.expires_at <= threshold,
@@ -164,6 +166,8 @@ async def _winback(session: AsyncSession, now: datetime) -> list[User]:
         .join(Subscription, Subscription.user_id == User.id)
         .where(
             User.is_blocked.is_(False),
+            # Персональные данные удалены — писать некому и незачем.
+            User.anonymized_at.is_(None),
             Subscription.status == "expired",
             Subscription.expires_at.is_not(None),
             Subscription.expires_at <= now - timedelta(days=days),
@@ -188,6 +192,8 @@ async def _upsell(session: AsyncSession, now: datetime) -> list[User]:
         .join(Subscription, Subscription.user_id == User.id)
         .where(
             User.is_blocked.is_(False),
+            # Персональные данные удалены — писать некому и незачем.
+            User.anonymized_at.is_(None),
             Subscription.status == "active",
             Subscription.expires_at.is_not(None),
             Subscription.expires_at > now,
@@ -210,6 +216,8 @@ async def _referral_nudge(session: AsyncSession, now: datetime) -> list[User]:
         .join(Subscription, Subscription.user_id == User.id)
         .where(
             User.is_blocked.is_(False),
+            # Персональные данные удалены — писать некому и незачем.
+            User.anonymized_at.is_(None),
             Subscription.status == "active",
             Subscription.expires_at > now,
             Subscription.starts_at <= threshold,

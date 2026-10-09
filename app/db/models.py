@@ -30,6 +30,11 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+#: Как показываем клиента, чьи персональные данные удалены (анонимизирован).
+#: Единое место: и карточка в панели, и уведомления, и сервис ретенции.
+ANONYMIZED_DISPLAY_NAME = "удалён"
+
+
 class TZDateTime(TypeDecorator):
     """DateTime, который всегда возвращает время с зоной UTC.
 
@@ -105,6 +110,12 @@ class User(Base):
     #: Код последнего отправленного сценария — для отчёта «что сработало».
     last_lifecycle_kind: Mapped[str] = mapped_column(String(32), default="")
 
+    #: Когда персональные данные удалены: по запросу клиента или задачей ретенции
+    #: после 12 месяцев без активности. Стоит — значит имя, @username, tg_id и
+    #: заметки обнулены, а заказы и суммы остались (налоговый учёт, 4 года).
+    #: По этому полю видно и то, что повторное удаление ничего не сделает.
+    anonymized_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+
     subscription: Mapped["Subscription | None"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
@@ -118,7 +129,14 @@ class User(Base):
 
     @property
     def display_name(self) -> str:
+        # Персональные данные удалены — показывать имя нечего и нельзя.
+        if self.anonymized_at is not None:
+            return ANONYMIZED_DISPLAY_NAME
         return self.first_name or (f"@{self.username}" if self.username else f"id{self.tg_id}")
+
+    @property
+    def is_anonymized(self) -> bool:
+        return self.anonymized_at is not None
 
 
 class Plan(Base):

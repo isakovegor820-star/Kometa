@@ -329,6 +329,11 @@ async def notify(request: Request, tg_id: int, text: str) -> bool:
     bot = getattr(request.app.state, "bot", None)
     if bot is None:
         return False
+    # У анонимизированного клиента tg_id синтетический и отрицательный:
+    # отправка всё равно не сработает, но лучше не тратить запрос к Telegram.
+    if int(tg_id or 0) <= 0:
+        logger.info("Сообщение клиенту не отправлено: персональные данные удалены")
+        return False
     try:
         await bot.send_message(tg_id, text, disable_web_page_preview=True)
         return True

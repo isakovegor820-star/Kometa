@@ -26,7 +26,7 @@ from app.db.models import (
 )
 from app.db.session import SessionMaker
 from app.services import attribution, audit, stats as stats_service, subscriptions
-from app.web import ui
+from app.web import security, ui
 from app.web.admin.common import filters, flash_redirect, make_page, notify, page, parse_page, require
 
 logger = logging.getLogger(__name__)
@@ -555,6 +555,58 @@ async def user_delete_note(user_id: int, note_id: int, request: Request):
         await db.commit()
 
     return flash_redirect(f"/admin/users/{user_id}", message="Заметка удалена")
+
+
+@router.post("/users/{user_id}/erase")
+async def user_erase(user_id: int, request: Request, reason: str = Form("")):
+    """Удалить персональные данные по запросу клиента (пункт 6.4 Политики).
+
+    Что важно: кнопка не удаляет заказы и платежи — их хранение обязательно
+    4 года (налоговый учёт). Уходят имя, @username, tg_id, метки, заметки и
+    события клиента; в карточке он остаётся как «удалён», суммы — на месте.
+    Повторное нажатие безопасно: данные уже удалены, второй записи в аудите нет.
+    """
+    auth = await require(request, "users.erase")
+    if isinstance(auth, Response):
+        return auth
+
+    from app.services import retention
+
+    async with SessionMaker() as db:
+        user = await db.get(User, user_id)
+        if user is None:
+            return flash_redirect("/admin/users", error="Пользователь не найден")
+
+        name = user.display_name
+        result = await retention.erase_user(db, user, reason=reason.strip()[:200])
+        if result.already:
+            await db.commit()
+            return flash_redirect(
+                f"/admin/users/{user_id}",
+                message=f"{name}: персональные данные уже удалены (повторно ничего не менялось)",
+            )
+
+        await audit.log_action(
+            db,
+            "admin.user_erased",
+            actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id, ip=security.client_ip(request)),
+            user_id=user.id,
+            payload={
+                "reason": reason.strip()[:200],
+                "orders_kept": result.orders,
+                "events_deleted": result.events,
+                "notes_deleted": result.notes,
+            },
+        )
+        await db.commit()
+
+    return flash_redirect(
+        f"/admin/users/{user_id}",
+        message=(
+            f"Персональные данные удалены. Заказы и суммы сохранены: {result.orders} "
+            f"(налоговый учёт, {retention.FINANCIAL_YEARS} года)."
+        ),
+    )
 
 
 @router.post("/users/{user_id}/message")
