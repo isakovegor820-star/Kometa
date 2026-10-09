@@ -211,6 +211,59 @@ async def test_short_grant_is_treated_as_failure(session):
     assert sub is not None  # подписка есть, но факт выдачи не подтверждён — ретрай доведёт
 
 
+# ---------------- C9 (находка 09.10.2026): лимит активаций промокода
+async def test_promo_uses_limit_counts_unpaid_orders(session):
+    """C9: лимит активаций не обходится неоплаченными заказами.
+
+    Находка 09.10.2026: ``uses_limit`` проверялся при вводе кода, а
+    ``uses_count`` рос только после оплаты. Значит N человек могли взять скидку
+    до того, как заплатит первый, и все N оплатить по сниженной цене —
+    обещанное «первым 50» не работало. Воспроизведение: лимит 1, три аккаунта
+    ввели код и все три получили скидку.
+    """
+    from app.services import promo as promo_service
+
+    await promo_service.create_admin_code(session, "LIMIT1", percent=26, uses_limit=1, days=30)
+    await session.commit()
+    plan = (await orders.list_plans(session))[0]
+
+    discounted = []
+    for tg_id in (9961, 9962, 9963):
+        user, _ = await subscriptions.get_or_create_user(session, tg_id=tg_id, username=f"lim{tg_id}")
+        user.promo_code = "LIMIT1"
+        await session.flush()
+        order = await orders.create_order(session, user, plan, provider="manual")
+        discounted.append(order.discount_rub > 0)
+
+    assert discounted.count(True) == 1, f"скидку при лимите 1 получили {discounted.count(True)} заказа"
+
+
+async def test_promo_limit_allows_reordering_after_abandoning(session):
+    """Свой брошенный заказ не занимает место: переоформить можно.
+
+    Иначе человек, который передумал на экране оплаты, не смог бы применить
+    свой же код второй раз — а его прежний заказ всё равно отменяется при
+    оформлении нового.
+    """
+    from app.services import promo as promo_service
+
+    await promo_service.create_admin_code(session, "LIMIT2", percent=26, uses_limit=1, days=30)
+    await session.commit()
+    plan = (await orders.list_plans(session))[0]
+
+    user, _ = await subscriptions.get_or_create_user(session, tg_id=9971, username="again")
+    user.promo_code = "LIMIT2"
+    await session.flush()
+
+    first = await orders.create_order(session, user, plan, provider="manual")
+    assert first.discount_rub > 0
+
+    second = await orders.create_order(session, user, plan, provider="manual")
+    assert second.discount_rub > 0, "свой же брошенный заказ закрыл лимит"
+    await session.refresh(first)
+    assert first.status == "canceled", "прежний заказ со скидкой не отменён"
+
+
 # ------------- C8 (находка 09.10.2026): возврат и чарджбэк отзывают доступ
 async def test_refunding_the_latest_payment_revokes_access(session, panel):
     """C8: возврат ПОСЛЕДНЕГО платежа обязан отключить доступ.

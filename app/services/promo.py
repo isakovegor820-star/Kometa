@@ -188,7 +188,7 @@ async def _reject_reason(session: AsyncSession, user: User, promo: PromoCode) ->
         return REASON_INACTIVE
     if promo.expires_at is not None and promo.expires_at <= datetime.now(timezone.utc):
         return REASON_EXPIRED
-    if promo.uses_limit and (promo.uses_count or 0) >= promo.uses_limit:
+    if promo.uses_limit and await _slots_taken(session, user, promo) >= promo.uses_limit:
         return REASON_USES_OVER
     if promo.kind == "referral" and promo.owner_user_id == user.id:
         return REASON_SELF
@@ -201,6 +201,29 @@ async def _reject_reason(session: AsyncSession, user: User, promo: PromoCode) ->
         if promo.first_only and await has_paid_order(session, user):
             return REASON_NOT_FIRST
     return None
+
+
+async def _slots_taken(session: AsyncSession, user: User, promo: PromoCode) -> int:
+    """Сколько мест лимита уже занято этим кодом.
+
+    Кроме оплаченных использований (``uses_count``) считаем **неоплаченные**
+    заказы со скидкой. Иначе лимит обходится в один шаг: ``uses_limit``
+    проверялся при вводе кода, а ``uses_count`` рос только после оплаты —
+    значит N человек могли взять скидку до того, как заплатит первый, и все N
+    оплатить по сниженной цене. Обещанное «первым 50» не работало.
+
+    Свои неоплаченные заказы не считаем: при оформлении нового они отменяются
+    (``orders._cancel_other_discounted``), иначе человек не смог бы
+    переоформить заказ, передумав.
+    """
+    pending = await session.scalar(
+        select(func.count(Order.id)).where(
+            Order.promo_code == promo.code,
+            Order.status == "pending",
+            Order.user_id != user.id,
+        )
+    )
+    return int(promo.uses_count or 0) + int(pending or 0)
 
 
 # ------------------------------------------------------------------ применение
