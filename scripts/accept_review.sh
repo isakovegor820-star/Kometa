@@ -12,7 +12,7 @@
 #    B7     — ретенция: tests/test_retention.py (30 дней / 12 месяцев / заказы /
 #             удаление по запросу);
 #    H3/H5/H6/H8 — улучшения спринта (копейки, PRAGMA, сессии, лимиты);
-#    ПОЛНЫЙ НАБОР — весь pytest;
+#    ПОЛНЫЙ НАБОР — весь pytest (ACCEPT_CLEAN_CLONE=1 — ещё и на чистом клоне);
 #    ПРЕДПОЛЁТ — bash scripts/preflight.sh (готовность к запуску);
 #    ПРОБЫ  — POST /payments/wata/webhook → 404, grep по коду и .env.example,
 #             git status --short пуст после прогона.
@@ -149,6 +149,29 @@ if [[ $FULL_CODE -eq 0 ]]; then
 else
   echo "$FULL_OUT" | grep -E "^(FAILED|ERROR)" | head -10
   _record "ПОЛНЫЙ НАБОР" fail "есть падения (код $FULL_CODE)"
+fi
+
+# ------------------------------------------------------------- чистый клон
+# «Весь набор на чистом клоне»: проверяем, что для зелёного прогона не нужны
+# незакоммиченные файлы, боевой .env или локальная база. Включается явно:
+#   ACCEPT_CLEAN_CLONE=1 bash scripts/accept_review.sh
+if [[ "${ACCEPT_CLEAN_CLONE:-0}" == "1" ]]; then
+  _banner "5b. Полный набор на чистом клоне"
+  CLONE_DIR="$(mktemp -d)"
+  if git clone -q --local "$PROJECT_DIR" "$CLONE_DIR/repo" 2>/dev/null; then
+    CLONE_OUT="$(cd "$CLONE_DIR/repo" && "$PROJECT_DIR/$PY" -m pytest -q -o addopts="" --tb=line 2>&1)"
+    CLONE_CODE=$?
+    echo "  $(echo "$CLONE_OUT" | tail -1)"
+    if [[ $CLONE_CODE -eq 0 ]]; then
+      _record "ЧИСТЫЙ КЛОН" ok
+    else
+      echo "$CLONE_OUT" | grep -E "^(FAILED|ERROR)" | head -5
+      _record "ЧИСТЫЙ КЛОН" fail "на чистом клоне есть падения"
+    fi
+  else
+    _record "ЧИСТЫЙ КЛОН" fail "не удалось склонировать репозиторий"
+  fi
+  rm -rf "$CLONE_DIR"
 fi
 
 # ------------------------------------------------------------------ предполёт
