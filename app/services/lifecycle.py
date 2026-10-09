@@ -57,6 +57,10 @@ class Scenario:
     kind: str
     title: str
     text: str
+    #: Кнопка под сообщением: (подпись, callback_data). Без неё сценарий —
+    #: тупик: в тексте написано «доступ можно вернуть в один клик», а нажать
+    #: нечего и человеку нужно самому искать раздел в меню.
+    cta: tuple[str, str] | None = None
 
 
 def scenarios() -> tuple[Scenario, ...]:
@@ -72,6 +76,7 @@ def scenarios() -> tuple[Scenario, ...]:
                 "Если что-то не получилось — напиши в поддержку, разберёмся: "
                 "обычно дело в одном шаге при подключении."
             ),
+            cta=("Выбрать тариф", "plans"),
         ),
         Scenario(
             kind=KIND_WINBACK,
@@ -83,6 +88,7 @@ def scenarios() -> tuple[Scenario, ...]:
                 "Если что-то не устраивало — расскажи, что именно. Ответим честно: "
                 "иногда проблема решается сменой локации."
             ),
+            cta=("Выбрать тариф", "plans"),
         ),
         Scenario(
             kind=KIND_UPSELL,
@@ -93,6 +99,7 @@ def scenarios() -> tuple[Scenario, ...]:
                 "6 месяцев — 90 ₽/мес, год — 79 ₽/мес вместо 120 ₽.\n\n"
                 "Так спокойнее: не нужно вспоминать про продление каждый месяц."
             ),
+            cta=("Выбрать тариф", "plans"),
         ),
         Scenario(
             kind=KIND_REFERRAL,
@@ -104,8 +111,26 @@ def scenarios() -> tuple[Scenario, ...]:
                 f"а тебе капнут {settings.referral_bonus_days_referrer} дней — "
                 "и ещё столько же за каждое его продление."
             ),
+            cta=("Пригласить друга", "ref:show"),
         ),
     )
+
+
+def _cta_markup(cta: tuple[str, str] | None):  # noqa: ANN201
+    """Кнопка действия под автосообщением.
+
+    Правило проекта «сообщение без кнопки — потерянный клиент» нарушалось ровно
+    там, где человек уже разогрет: дожим, возврат, апселл и напоминание про
+    друзей уходили простым текстом.
+    """
+    if cta is None:
+        return None
+    from app.bot.keyboards import StyledKeyboardBuilder
+
+    kb = StyledKeyboardBuilder()
+    kb.primary(text=cta[0], callback_data=cta[1])
+    kb.adjust(1)
+    return kb.as_markup()
 
 
 async def _sent_before(session: AsyncSession, user_id: int, kind: str) -> bool:
@@ -284,7 +309,12 @@ async def run_lifecycle(
     sent = 0
     for user, scenario in planned:
         try:
-            await bot.send_message(user.tg_id, scenario.text, disable_web_page_preview=True)
+            await bot.send_message(
+                user.tg_id,
+                scenario.text,
+                reply_markup=_cta_markup(scenario.cta),
+                disable_web_page_preview=True,
+            )
         except Exception:  # noqa: BLE001 - бот мог быть заблокирован человеком
             continue
         user.last_lifecycle_at = moment

@@ -55,6 +55,18 @@ async def _send(bot: Bot, tg_id: int, text: str, markup=None) -> bool:  # noqa: 
         return False
 
 
+
+def plans_button_kb():  # noqa: ANN201
+    """Кнопка «Выбрать тариф» для сообщений о продлении.
+
+    Импорт внутри функции: ``app.bot.keyboards`` тянет тексты и стили бота, а
+    сервис уведомлений зовут и фоновые задачи, и вебхуки — на уровне модуля это
+    создало бы лишнюю связность.
+    """
+    from app.bot.keyboards import plans_button_kb as build
+
+    return build()
+
 def safe(value: object) -> str:
     """Экранировать текст для HTML-сообщения.
 
@@ -85,7 +97,9 @@ async def notify_expiring(bot: Bot, session: AsyncSession, days_before: int) -> 
             f"Продлить в один клик — раздел «Моя подписка» → «Продлить».\n"
             "Если ничего не делать, доступ отключится автоматически, данные сохраним 30 дней."
         )
-        if await _send(bot, user.tg_id, text):
+        # Кнопка обязательна: в тексте написано «продлить в один клик», и без
+        # неё человеку нужно самому искать раздел «Моя подписка» → «Продлить».
+        if await _send(bot, user.tg_id, text, markup=plans_button_kb()):
             sent += 1
     return sent
 
@@ -101,7 +115,7 @@ async def notify_expired(bot: Bot, session: AsyncSession, changed: list[Subscrip
             "Продлить можно в любой момент — доступ вернётся сразу после оплаты, "
             "настройки в приложении менять не нужно."
         )
-        if await _send(bot, user.tg_id, text):
+        if await _send(bot, user.tg_id, text, markup=plans_button_kb()):
             sent += 1
     return sent
 

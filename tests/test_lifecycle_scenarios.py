@@ -222,3 +222,69 @@ async def test_gift_scenarios_do_not_break_lifecycle(session, panel, bot):
     planned = await lifecycle.plan_sends(session)
 
     assert 7301 not in kinds(planned)
+
+
+# ------------------------------------------------------------------ кнопки
+class _RecordingBot:
+    """Бот-заглушка: запоминает текст и клавиатуру каждого сообщения."""
+
+    def __init__(self) -> None:
+        self.messages: list[tuple[int, str, object]] = []
+
+    async def send_message(self, chat_id, text, **kwargs):  # noqa: ANN001, ANN003
+        self.messages.append((chat_id, text, kwargs.get("reply_markup")))
+
+
+def _button_labels(markup) -> list[str]:  # noqa: ANN001
+    return [button.text for row in markup.inline_keyboard for button in row]
+
+
+def test_every_scenario_has_a_button():
+    """У каждого автосценария есть кнопка действия.
+
+    Правило проекта «сообщение без кнопки — потерянный клиент» нарушалось ровно
+    там, где человек уже разогрет: в текстах написано «вернуть в один клик», а
+    нажать было нечего — нужно было самому искать раздел в меню.
+    """
+    scenario_list = lifecycle.scenarios()
+
+    assert scenario_list, "сценариев нет — тест ничего не проверяет"
+    without = [scenario.kind for scenario in scenario_list if scenario.cta is None]
+    assert without == [], f"сценарии без кнопки: {without}"
+
+
+async def test_lifecycle_message_carries_the_button(session, panel):
+    """Кнопка не просто объявлена — она уходит в сообщении."""
+    await make_trial_user(session, panel, 7006, expired_days=5)
+    bot = _RecordingBot()
+
+    planned = await lifecycle.plan_sends(session)
+    sent = await lifecycle.run_lifecycle(bot, session, planned=planned)
+
+    assert sent == 1
+    _tg_id, _text, markup = bot.messages[-1]
+    assert markup is not None, "автосценарий ушёл без кнопки"
+    assert "Выбрать тариф" in _button_labels(markup)
+
+
+async def test_expiry_reminder_carries_the_button(session, panel, monkeypatch):
+    """«Продлить в один клик» — теперь правда: кнопка в напоминании."""
+    from app.services import notifications
+
+    user, sub = await make_trial_user(session, panel, 7007, expired_days=0)
+    sub.status = "active"
+    await session.flush()
+
+    async def fake_due(session_, days_before):  # noqa: ANN001, ARG001
+        return [sub]
+
+    monkeypatch.setattr(subscriptions, "due_for_reminder", fake_due)
+    bot = _RecordingBot()
+
+    sent = await notifications.notify_expiring(bot, session, 3)
+
+    assert sent == 1, "напоминание не ушло"
+    _tg_id, _text, markup = bot.messages[-1]
+    assert markup is not None, "напоминание о продлении ушло без кнопки"
+    assert "Выбрать тариф" in _button_labels(markup)
+    assert user.tg_id  # пользователь существует
