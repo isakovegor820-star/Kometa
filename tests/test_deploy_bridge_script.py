@@ -312,10 +312,20 @@ def test_duplicate_uuid_warns_that_one_link_for_all_is_forbidden():
     assert len(links(text)) == 1
 
 
-def test_chrome_fingerprint_is_flagged():
+def test_chrome_fingerprint_is_refused():
+    """Помеченный отпечаток — это отказ, а не предупреждение: с chrome клиент
+    рискует заморозкой на 120 с, и «зелёный» прогон тут вреден."""
     proc = run(*base_args("--client-uuid", UUID_1, "--exit-fp", "chrome"))
-    assert "чёрном списке эвристики июня 2026" in out(proc)
-    assert "fp=firefox" not in out(proc)
+    assert proc.returncode != 0, out(proc)
+    assert "помечен в эвристике июня 2026" in out(proc)
+    assert "--allow-flagged-fp" in out(proc), "в отказе должна быть названа дверь для осознанного обхода"
+
+
+def test_chrome_fingerprint_allowed_with_explicit_flag():
+    proc = run(*base_args("--client-uuid", UUID_1, "--exit-fp", "chrome",
+                          "--allow-flagged-fp"))
+    assert proc.returncode == 0, out(proc)
+    assert "--allow-flagged-fp" in out(proc), "предупреждение должно остаться видимым"
 
 
 # ------------------------------------------------------ dry-run: изоляция ----
@@ -407,7 +417,8 @@ def test_dry_run_config_matches_plan(workdir: Path, stub_bin: Path):
     assert ereality["fingerprint"] == "firefox"
 
     tags = [r["ruleTag"] for r in cfg["routing"]["rules"]]
-    assert tags == ["Kometa-Block-Private", "Kometa-Exit"], "по умолчанию РФ-прямых правил нет"
+    assert tags == ["Kometa-Block-Checkers", "Kometa-Block-Private", "Kometa-Exit"], \
+        "по умолчанию РФ-прямых правил нет, но блок-лист чекеров обязан быть первым"
     assert cfg["routing"]["rules"][-1]["outboundTag"] == "exit"
     assert cfg["routing"]["domainStrategy"] == "AsIs", "мост сам ничего не резолвит — порт 53 молчит"
 
@@ -422,8 +433,9 @@ def test_direct_ru_adds_direct_rule_first(workdir: Path, stub_bin: Path):
     assert raw
     cfg = json.loads(raw.group(0))
     rules = cfg["routing"]["rules"]
-    assert [r["ruleTag"] for r in rules] == ["Kometa-Block-Private", "Kometa-Direct", "Kometa-Exit"]
-    direct = rules[1]
+    assert [r["ruleTag"] for r in rules] == \
+        ["Kometa-Block-Checkers", "Kometa-Block-Private", "Kometa-Direct", "Kometa-Exit"]
+    direct = [r for r in rules if r["ruleTag"] == "Kometa-Direct"][0]
     assert "geosite:category-ru" in direct["domain"] and "geoip:ru" in direct["ip"]
 
 
@@ -777,3 +789,167 @@ def test_unreadable_existing_config_warns_about_new_keys(workdir: Path, stub_bin
     text = out(proc)
     assert "не читается как JSON" in text
     assert "НОВЫЕ ключи" in text
+
+
+# ------------------------------------- регрессии по ревью Дня 0 (2026-10-09) ---
+# Эти проверки появились после внешнего ревью: три из них ловят дефекты, из-за
+# которых боевой прогон не мог пройти вообще, а одна — утечку ключа в консоль.
+
+
+def test_config_handed_to_core_has_json_extension(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """Ядро Xray выбирает формат конфига ПО РАСШИРЕНИЮ файла.
+
+    Регрессия: конфиг для проверки писался через ``mktemp`` (имя без расширения),
+    ядро отвечало «Failed to get format of …», и путь применения не проходил
+    никогда — при этом часть изменений (IPv6, MSS, ufw) уже применялась.
+    """
+    log = tmp_path / "xray.log"
+    proc = run(
+        *apply_args(workdir, "--client-uuid", UUID_1),
+        stub_bin=stub_bin,
+        env_extra={"XRAY_LOG": str(log), "SYSTEMCTL_LOG": str(tmp_path / "s.log")},
+    )
+    assert proc.returncode == 0, out(proc)
+    lines = log.read_text(encoding="utf-8").splitlines()
+    configs = [line.split()[-1] for line in lines if "-config" in line]
+    assert configs, f"ядру не передавали -config: {lines}"
+    for path in configs:
+        assert path.endswith(".json"), (
+            f"конфиг отдан ядру без расширения .json: {path!r} — "
+            "ядро отвергнет его, и применение не пройдёт"
+        )
+
+
+def test_temp_config_is_removed_after_run(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """Во временном каталоге лежит конфиг с приватным ключом — он не должен
+    оставаться на диске после выхода.
+
+    Регрессия: каталог создавался внутри ``$(tmp_dir)``, запись в ``TMPFILES``
+    оставалась в подоболочке, и ``trap cleanup EXIT`` не удалял ничего — каталоги
+    (вместе с ключом) копились в $TMPDIR сотнями. Проверяем по факту: берём путь,
+    который скрипт реально отдал ядру, и убеждаемся, что его больше нет.
+    """
+    log = tmp_path / "xray.log"
+    proc = run(
+        *apply_args(workdir, "--client-uuid", UUID_1),
+        stub_bin=stub_bin,
+        env_extra={"XRAY_LOG": str(log), "SYSTEMCTL_LOG": str(tmp_path / "s.log")},
+    )
+    assert proc.returncode == 0, out(proc)
+    configs = [line.split()[-1] for line in log.read_text(encoding="utf-8").splitlines()
+               if "-config" in line]
+    assert configs, "ядру не передавали -config"
+    for path in configs:
+        assert not Path(path).exists(), f"временный конфиг остался на диске: {path}"
+        assert not Path(path).parent.exists(), (
+            f"временный каталог остался: {Path(path).parent} — в нём был конфиг с приватным ключом"
+        )
+
+
+def test_default_rules_do_not_need_geoip_dat(workdir: Path, stub_bin: Path):
+    """``geoip:private`` требует geoip.dat: без него конфиг не собирается вовсе
+    («common/geodata: failed to open geoip.dat»), а geo-файлы тянутся из
+    стороннего изменяемого релиза. Поэтому приватные диапазоны — явными CIDR."""
+    proc = run(*base_args("--client-uuid", UUID_1, "--config", str(workdir / "config.json")),
+               stub_bin=stub_bin)
+    raw = re.search(r'^\{"log".*\}$', proc.stdout, re.MULTILINE)
+    assert raw
+    cfg = json.loads(raw.group(0))
+    assert "geoip:private" not in json.dumps(cfg, ensure_ascii=False)
+    private = [r for r in cfg["routing"]["rules"] if r["ruleTag"] == "Kometa-Block-Private"][0]
+    for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10"):
+        assert cidr in private["ip"], f"в блок-листе приватных нет {cidr}"
+
+
+def test_checker_services_are_blocked_first(workdir: Path, stub_bin: Path):
+    """Опрос api.ipify.org/ifconfig.me из чужой сети сразу выдаёт VPN."""
+    proc = run(*base_args("--client-uuid", UUID_1, "--config", str(workdir / "config.json")),
+               stub_bin=stub_bin)
+    raw = re.search(r'^\{"log".*\}$', proc.stdout, re.MULTILINE)
+    assert raw
+    first = json.loads(raw.group(0))["routing"]["rules"][0]
+    assert first["ruleTag"] == "Kometa-Block-Checkers"
+    assert first["outboundTag"] == "block"
+    for host in ("api.ipify.org", "ifconfig.me", "2ip.ru", "redirector.googlevideo.com"):
+        assert host in first["domain"], f"{host} не заблокирован"
+
+
+def test_dry_run_masks_private_key_and_show_secrets_reveals_it(workdir: Path, stub_bin: Path):
+    """Приватный ключ Reality не должен оседать в терминале и SSH-логе: README
+    сам рекомендует предпросмотр по SSH."""
+    secret = "PRIVKEYTEST0000000000000000000000000000"
+    proc = run(*base_args("--client-uuid", UUID_1), stub_bin=stub_bin,
+               env_extra={"XRAY_STUB_PRIV": secret})
+    assert proc.returncode == 0, out(proc)
+    assert secret not in proc.stdout, "приватный ключ утёк в предпросмотр"
+    assert "СКРЫТО" in proc.stdout
+
+    proc2 = run(*base_args("--client-uuid", UUID_1, "--show-secrets"), stub_bin=stub_bin,
+                env_extra={"XRAY_STUB_PRIV": secret})
+    assert proc2.returncode == 0, out(proc2)
+    assert secret in proc2.stdout, "--show-secrets обязан показывать ключ"
+    assert "--show-secrets" in out(proc2), "надо предупредить, что ключ показан"
+
+
+def test_mss_clamp_goes_to_output_not_forward(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """Мост терминирует VLESS локально: через FORWARD трафик не идёт, правило
+    там инертно. Клампим исходящие SYN-ACK в OUTPUT."""
+    log = tmp_path / "iptables.log"
+    stub = (
+        "#!/usr/bin/env bash\n"
+        f'echo "$*" >> "{log}"\n'
+        # Скрипт сначала снимает прежние правила циклом `while ... -D`, поэтому
+        # на -D шим обязан отвечать «правила нет» — иначе цикл не закончится.
+        'case "$*" in *"-D"*) exit 1 ;; esac\n'
+        "exit 0\n"
+    )
+    for name in ("iptables", "ip6tables"):
+        write_stub(stub_bin / name, stub)
+
+    args = [a for a in apply_args(workdir, "--client-uuid", UUID_1) if a != "--no-mss"]
+    proc = run(*args, stub_bin=stub_bin, env_extra={"SYSTEMCTL_LOG": str(tmp_path / "s.log")})
+    assert proc.returncode == 0, out(proc)
+    text = log.read_text(encoding="utf-8")
+    assert "OUTPUT" in text, f"MSS не применён в OUTPUT: {text}"
+    assert "FORWARD" not in text, f"MSS остался в FORWARD (там он инертен): {text}"
+    assert "--set-mss 1240" in text, f"ожидался MSS 1240 при MTU 1280: {text}"
+
+
+def test_rollback_hint_points_to_real_backup(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """Служба не поднялась — подсказка про откат обязана ссылаться на реальный
+    файл: раньше условие с ``"${CONFIG}.bak-"*`` внутри [[ ]] не раскрывалось
+    (внутри [[ ]] нет pathname expansion) и подсказка не печаталась никогда."""
+    config = workdir / "config.json"
+    config.write_text('{"log":{"loglevel":"warning"}}', encoding="utf-8")
+    (workdir / "config.json.bak-20261009010101").write_text('{"old":true}', encoding="utf-8")
+    proc = run(
+        *apply_args(workdir, "--client-uuid", UUID_1),
+        stub_bin=stub_bin,
+        env_extra={"SYSTEMCTL_ACTIVE": "inactive", "SYSTEMCTL_LOG": str(tmp_path / "s.log")},
+    )
+    text = out(proc)
+    assert proc.returncode != 0
+    assert "config.json.bak-20261009010101" in text, f"нет ссылки на реальный бэкап: {text}"
+
+
+def test_harden_firewall_respects_explicit_ssh_port(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """Явный --ssh-port обязан побеждать детект.
+
+    Регрессия: ``apply_firewall`` вызывался с ``detect_ssh_port()``, а тот читает
+    только ``/etc/ssh/sshd_config``. На Ubuntu порт лежит в ``sshd_config.d/*.conf``,
+    детект возвращал 22, и ``--harden-firewall`` разрешал не тот порт — то есть
+    отрезал SSH к мосту.
+    """
+    log = tmp_path / "ufw.log"
+    proc = run(
+        *apply_args(workdir, "--client-uuid", UUID_1,
+                    "--harden-firewall", "--ssh-port", "2222"),
+        stub_bin=stub_bin,
+        env_extra={"UFW_LOG": str(log), "UFW_STATUS": "active",
+                   "SYSTEMCTL_LOG": str(tmp_path / "s.log")},
+    )
+    assert proc.returncode == 0, out(proc)
+    text = log.read_text(encoding="utf-8")
+    assert "allow 2222/tcp" in text, f"явный SSH-порт проигнорирован: {text}"
+    assert "allow 22/tcp" not in text, f"разрешён не тот SSH-порт (локаут): {text}"
+    assert "allow 443/tcp" in text, f"порт моста не разрешён: {text}"

@@ -62,6 +62,9 @@ DO_REALITY=1
 DO_AWG=1
 DRY_RUN=0
 TEST_CLIENT=0
+BRIDGE_CLIENT=1        # клиент для моста: без него мосту нечем выйти на эту ноду
+BRIDGE_CLIENT_NAME="bridge@kometa"
+PUBLIC_IP_OVERRIDE=""  # --public-ip: что печатать как адрес этой ноды
 FORCE_REMOTE=0
 CURL_OPTS=()
 
@@ -138,6 +141,11 @@ usage() {
                      и показать, что вписать в мастер-панели (режим «нода+мастер»)
   --test-client      дополнительно создать тестового клиента и напечатать
                      готовую ссылку vless:// для проверки на телефоне
+  --no-bridge-client не создавать клиента для моста (по умолчанию создаётся:
+                     без него у моста нет --exit-uuid)
+  --bridge-client-name NAME  имя клиента моста (по умолчанию bridge@kometa)
+  --public-ip IP     что печатать адресом этой ноды в параметрах моста
+                     (по умолчанию определяется по маршруту, без внешних сервисов)
   --force-remote     разрешить создавать инбаунды на удалённой панели
   --insecure         не проверять TLS-сертификат панели (самоподписанный)
   --dry-run          показать план, ничего не менять
@@ -429,7 +437,7 @@ create_reality_inbound() {
         --arg fp "$REALITY_FP" --argjson names "$names" \
         '{network:"tcp",security:"reality",externalProxy:[],
           realitySettings:{show:false,xver:0,target:($sni+":443"),serverNames:$names,
-            privateKey:$priv,minClientVer:"",maxClientVer:"",maxTimediff:0,
+            privateKey:$priv,minClientVer:"",maxClientVer:"",maxTimeDiff:0,
             shortIds:[$sid],
             settings:{publicKey:$pub,fingerprint:$fp,serverName:"",spiderX:"/"}}}')"
     # routeOnly: домен из sniffing нужен только для маршрутизации — он не
@@ -509,6 +517,63 @@ print_awg_unsupported_hint() {
   После обновления запусти этот скрипт ещё раз — он создаст AmneziaWG-инбаунд.
   ВАЖНО: обновляй и мастер-панель, и все ноды: инбаунд AmneziaWG нельзя
   выкатить на ноду старее 3.7.0.
+EOF
+}
+
+detect_public_ip() { # внешний адрес ноды без внешних сервисов; пусто, если не вышел
+    local a=""
+    if have ip; then
+        a="$(ip -4 route get 1.1.1.1 2>/dev/null \
+             | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}' || true)"
+    fi
+    [[ -n "$a" ]] || a="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+    printf '%s' "$a"
+}
+
+# Клиент моста на Reality-инбаунде. Без него мост собрать нельзя: ему нужен
+# --exit-uuid, а панель до этого создавала клиентов только боту (settings.clients
+# пустой). Повторный запуск не плодит второго клиента — берём существующий UUID.
+create_bridge_client() { # create_bridge_client <inbound_id>
+    local inbound_id="$1" uuid payload resp addr existing
+    [[ -n "$inbound_id" ]] || { warn "Нет id Reality-инбаунда — клиента моста не создаю."; return 0; }
+
+    resp="$(api_get "/panel/api/inbounds/get/${inbound_id}")"
+    existing="$(printf '%s' "$resp" | jq -r --arg e "$BRIDGE_CLIENT_NAME" \
+        '[.obj.settings | fromjson | .clients[]? | select(.email == $e)][0].id // empty' 2>/dev/null || true)"
+    if [[ -n "$existing" ]]; then
+        uuid="$existing"
+        note "Клиент моста ${BRIDGE_CLIENT_NAME} уже есть — беру его UUID (новый не создаю)."
+    else
+        uuid="$(rand_uuid)"
+        payload="$(jq -nc --arg id "$uuid" --arg email "$BRIDGE_CLIENT_NAME" --argjson iid "$inbound_id" \
+            '{client:{id:$id,email:$email,flow:"xtls-rprx-vision",limitIp:0,totalGB:0,
+                      expiryTime:0,enable:true,subId:"",tgId:0},inboundIds:[$iid]}')"
+        log "Создаю клиента моста ${BRIDGE_CLIENT_NAME}..."
+        resp="$(api_post /panel/api/clients/add "$payload")"
+        if [[ "$(printf '%s' "$resp" | jq -r '.success // false')" != "true" ]]; then
+            warn "Клиента моста создать не удалось: $(printf '%s' "$resp" | jq -r '.msg // "нет сообщения"')"
+            warn "Создай клиента в панели вручную и возьми UUID оттуда: без --exit-uuid мост не собрать."
+            return 0
+        fi
+    fi
+
+    addr="${PUBLIC_IP_OVERRIDE:-$(detect_public_ip)}"
+    [[ -n "$addr" ]] || addr="<IP_СЕРВЕРА>"
+    box "ПАРАМЕТРЫ ДЛЯ МОСТА (ops/30-deploy-bridge.sh)"
+    cat <<EOF
+  --exit-address ${addr} \\
+  --exit-port ${REALITY_PORT} \\
+  --exit-uuid ${uuid} \\
+  --exit-pubkey ${REALITY_PUBKEY:-<publicKey из панели>} \\
+  --exit-sni ${SNI:-<домен маскировки>} \\
+  --exit-shortid ${REALITY_SHORTID:-<shortId из панели>}
+
+  Порт ${REALITY_PORT}/tcp на этой ноде должен пускать только мост:
+    ufw allow from <IP_МОСТА> to any port ${REALITY_PORT} proto tcp
+    ufw deny ${REALITY_PORT}/tcp
+
+  Клиента ${BRIDGE_CLIENT_NAME} не удаляй — это учётная запись моста.
+  Отключить его создание можно флагом --no-bridge-client.
 EOF
 }
 
@@ -607,10 +672,14 @@ print_port_checks() {
   # снаружи, с другого компьютера (TCP-порт Reality должен отвечать):
     nc -vz <IP_СЕРВЕРА> ${REALITY_PORT}
 
-  # если портов нет в firewall (install_panel.sh открывает 443/tcp и ${AWG_PORT}/udp):
-    ufw allow ${REALITY_PORT}/tcp
+  # Порт Reality должен пускать ТОЛЬКО мост, иначе нода открыта всему интернету:
+    ufw allow from <IP_МОСТА> to any port ${REALITY_PORT} proto tcp
+    ufw deny ${REALITY_PORT}/tcp
     ufw allow ${AWG_PORT}/udp
     ufw status numbered
+
+  # (без ограничения по IP было бы просто `ufw allow ${REALITY_PORT}/tcp` —
+  #  так делать не надо: любой, кто узнает UUID, сможет ходить через ноду)
 
   # журнал панели, если что-то не поднялось:
     journalctl -u x-ui -n 50 --no-pager
@@ -646,7 +715,9 @@ EOF
   publicKey  : ${REALITY_PUBKEY:-<см. панель: Inbounds → инбаунд → клиент>}
   fingerprint: ${REALITY_FP}, spiderX: /
 
-  Клиентов создаёт бот (по одному на подписку) — вручную добавлять не нужно.
+  Клиентов бота создаёт бот (по одному на подписку) — вручную добавлять не нужно.
+  Отдельно создаётся клиент моста ${BRIDGE_CLIENT_NAME}: он нужен, чтобы мост мог
+  выйти на эту ноду (--exit-uuid). Не удаляй его.
   Если понадобится вручную: панель → Inbounds → ${REALITY_REMARK} → «+» у клиента.
 EOF
     fi
@@ -697,6 +768,9 @@ main() {
             --env)          ENV_FILE="${2:?}"; shift 2 ;;
             --token-only)   MODE="token-only"; shift ;;
             --test-client)  TEST_CLIENT=1; shift ;;
+            --no-bridge-client) BRIDGE_CLIENT=0; shift ;;
+            --bridge-client-name) BRIDGE_CLIENT_NAME="${2:?}"; shift 2 ;;
+            --public-ip)    PUBLIC_IP_OVERRIDE="${2:?}"; shift 2 ;;
             --force-remote) FORCE_REMOTE=1; shift ;;
             --insecure)     CURL_OPTS+=(--insecure); shift ;;
             --dry-run)      DRY_RUN=1; shift ;;
@@ -798,6 +872,9 @@ main() {
             wait_for_port "$AWG_PORT" udp 15 \
                 && ok "Порт ${AWG_PORT}/udp слушается." \
                 || warn "Порт ${AWG_PORT}/udp пока не слушается — AmneziaWG поднимается при первом клиенте, это нормально."
+        fi
+        if [[ "$BRIDGE_CLIENT" -eq 1 ]]; then
+            create_bridge_client "${REALITY_ID:-}"
         fi
         if [[ "$TEST_CLIENT" -eq 1 ]]; then
             create_test_client "${REALITY_ID:-}"

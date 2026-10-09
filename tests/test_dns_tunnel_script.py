@@ -187,9 +187,13 @@ def path_without_dig(tmp_path_factory: pytest.TempPathFactory) -> Path:
             dst = target / name
             if dst.is_symlink() or dst.exists():
                 continue
-            if not src.is_file() or not os.access(src, os.X_OK):
-                continue
+            # На macOS часть системных бинарников защищена SIP: обычный stat() по
+            # /usr/sbin/weakpass_edit даёт PermissionError, и весь тест падал на
+            # ровном месте («нет dig» тут ни при чём). Такие файлы просто
+            # пропускаем — эмуляция «dig не установлен» от них не зависит.
             try:
+                if not src.is_file() or not os.access(src, os.X_OK):
+                    continue
                 dst.symlink_to(src)
             except OSError:
                 continue
