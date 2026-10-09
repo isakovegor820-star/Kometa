@@ -28,13 +28,16 @@
 #       КЛЮЧИ ПЕРЕИСПОЛЬЗУЮТСЯ из конфига и из файла-спутника — иначе у всех
 #       трёх клиентов отвалились бы уже розданные ссылки;
 #    4. пишет конфиг: инбаунд VLESS+Reality на 443 (N клиентов), outbound на
-#       выход, блокировка приватных адресов, ПОСЛЕДНИМ правилом — всё на выход;
-#    5. проверяет конфиг (`xray run -test`) ДО перезапуска, делает бэкап,
+#       выход, блокировка сервисов, показывающих клиенту его IP, и приватных
+#       диапазонов, ПОСЛЕДНИМ правилом — всё на выход;
+#    5. проверяет конфиг (`xray run -test`) ДО перезапуска по файлу с именем
+#       config.json (ядро выбирает формат по расширению), делает бэкап,
 #       перезапускает службу и требует is-active = active;
 #    6. печатает по ссылке на каждого клиента и ведёт реестр users.csv
 #       (имя, UUID, дата выдачи, платформа, оператор, статус, дата отзыва);
-#    7. подрезает MSS для транзитного TCP (LTE: MTU 1280 → MSS 1240) — без этого
-#       «сайты висят» при живом SSH (docs/LTE-ВАРИАНТЫ-2026-10.md §6.4);
+#    7. подрезает MSS в OUTPUT (LTE: MTU 1280 → MSS 1240) — без этого «сайты
+#       висят» при живом SSH (docs/LTE-ВАРИАНТЫ-2026-10.md §6.4). Именно OUTPUT:
+#       мост терминирует VLESS локально, через FORWARD трафик не идёт;
 #    8. печатает готовые команды для выходной ноды (allowlist «только мой мост»).
 #
 #  Отзыв ключа (второй UUID — не трогая остальных): убрать его из --client-uuid
@@ -49,7 +52,8 @@
 #    * не публикует адрес и ссылки — печатает их только в консоль;
 #    * не ставит fp=chrome/safari/ios (эвристика июня 2026 их помечает) —
 #      по умолчанию firefox;
-#    * в --dry-run не пишет НИЧЕГО и не делает ни одного сетевого запроса.
+#    * в --dry-run не меняет систему и не делает ни одного сетевого запроса
+#      (временный конфиг для проверки создаётся в $TMPDIR и удаляется при выходе).
 #
 #  Зависимости: bash, jq (обязательно), openssl (shortId), curl (только
 #  установка из сети), unzip (только --xray-zip), systemd, iptables (MSS).
@@ -125,6 +129,8 @@ DRY_RUN=0
 LINKS_ONLY=0
 ROTATE_KEYS=0
 ROTATE_SHORTID=0
+SHOW_SECRETS=0
+ALLOW_FLAGGED_FP=0
 
 # Клиенты — четыре параллельных массива (bash 3.2 на macOS не знает
 # ассоциативных массивов, а скрипт должен прогоняться в тестах и на маке).
@@ -161,13 +167,28 @@ box() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Временный файл: mktemp есть и на мосте, и на маке; путь запоминаем, чтобы
-# гарантированно убрать за собой.
-tmp_file() {
-    local f
-    f="$(mktemp 2>/dev/null || printf '%s/kometa-bridge.%s.%s' "${TMPDIR:-/tmp}" "$$" "${RANDOM:-0}")"
-    TMPFILES+=("$f")
-    printf '%s' "$f"
+# Временный каталог прогона. Создаётся РОВНО ОДИН раз — и обязательно в
+# родительском шелле. Если делать это внутри $(...), запись в TMPFILES остаётся
+# в подоболочке, cleanup не находит ничего, и каталог вместе с конфигом (в нём
+# приватный ключ Reality) остаётся в $TMPDIR навсегда. Проверено: каталоги
+# копились сотнями, а `trap cleanup EXIT` был декоративным.
+TMP_ROOT=""
+tmp_root_init() {
+    [[ -n "$TMP_ROOT" ]] && return 0
+    TMP_ROOT="$(mktemp -d 2>/dev/null || true)"
+    if [[ -z "$TMP_ROOT" || ! -d "$TMP_ROOT" ]]; then
+        TMP_ROOT="${TMPDIR:-/tmp}/kometa-bridge.$$.${RANDOM:-0}"
+        mkdir -p "$TMP_ROOT" 2>/dev/null || true
+    fi
+    TMPFILES+=("$TMP_ROOT")
+}
+
+# Путь внутри временного каталога прогона. Имя файла важно: ядро Xray выбирает
+# формат конфига ПО РАСШИРЕНИЮ, поэтому конфиг — всегда config.json (файл без
+# расширения ядро отвергает с «Failed to get format of …»).
+tmp_path() { # tmp_path <имя файла или каталога>
+    [[ -n "$TMP_ROOT" ]] || die "внутренняя ошибка: временный каталог прогона не создан"
+    printf '%s/%s' "$TMP_ROOT" "$1"
 }
 
 cleanup() {
@@ -177,7 +198,32 @@ cleanup() {
     done
     return 0
 }
+
+# По сигналу мало убрать за собой — надо ещё и завершиться: во временном
+# каталоге лежит конфиг с приватным ключом Reality.
+cleanup_on_signal() {
+    cleanup
+    trap - EXIT INT TERM HUP
+    exit 130
+}
+
 trap cleanup EXIT
+trap cleanup_on_signal INT TERM HUP
+
+# Печать конфига без секретов. Приватный ключ Reality в открытом виде не должен
+# попадать в терминал и SSH-лог: полный ключ всегда есть в самом конфиге на
+# мосте (${CONFIG}, режим 0600). Нужен полный вывод — --show-secrets.
+print_config_masked() { # print_config_masked <файл>
+    local f="$1"
+    if have jq; then
+        # -c: держим тот же компактный формат, что и в самом конфиге (его собирает
+        # `jq -nc`), иначе предпросмотр печатал бы другое представление.
+        jq -c --arg redact "<СКРЫТО: приватный ключ есть только в ${CONFIG} на мосте>" \
+            '(.inbounds[]?.streamSettings.realitySettings.privateKey) |= (if . == null then . else $redact end)' "$f"
+    else
+        sed -E 's/("privateKey"[[:space:]]*:[[:space:]]*")[^"]*/\1<СКРЫТО>/g' "$f"
+    fi
+}
 
 # ------------------------------------------------------------------ справка ---
 usage() {
@@ -194,7 +240,7 @@ Kometa · День 0 · шаг 6: мост «RU-адрес → зарубежн�
       --client-uuid <UUID_1> --client-uuid <UUID_2> --client-uuid <UUID_3>
 
 По умолчанию скрипт ПРИМЕНЯЕТ изменения на хосте. Предпросмотр без изменений:
-  ... --dry-run      # ничего не пишет, в сеть не ходит, systemctl не зовёт
+  ... --dry-run      # систему не меняет, в сеть не ходит, systemctl не зовёт
 
 Выход (обязательно):
   --exit-address IP     адрес зарубежного выхода. Только IP: имя заставило бы
@@ -205,7 +251,10 @@ Kometa · День 0 · шаг 6: мост «RU-адрес → зарубежн�
   --exit-sni DOMAIN     serverName Reality выхода (домен маскировки)
   --exit-shortid SID    shortId Reality выхода (hex, до 16 символов; пусто — без)
   --exit-fp FP          uTLS-отпечаток (по умолчанию firefox; chrome/safari/ios
-                        в эвристике июня 2026 помечены)
+                        в эвристике июня 2026 помечены — такие значения скрипт
+                        отвергает, см. --allow-flagged-fp)
+  --allow-flagged-fp    осознанно разрешить помеченный отпечаток (chrome/safari/
+                        ios): клиент будет риском заморозки на 120 с
   --exit-flow FLOW      flow клиента на выходе (по умолчанию xtls-rprx-vision)
   --allow-exit-hostname разрешить в --exit-address домен, а не IP (не советуем)
 
@@ -256,7 +305,11 @@ Kometa · День 0 · шаг 6: мост «RU-адрес → зарубежн�
   --harden-firewall     включить ufw: только SSH и порт моста (по умолчанию
                         скрипт лишь показывает правила и не трогает фаервол)
   --ssh-port N          SSH-порт для --harden-firewall и подсказок (по умолчанию 22)
-  --dry-run             предпросмотр: ничего не пишет и не ходит в сеть
+  --dry-run             предпросмотр: систему не меняет и в сеть не ходит
+                        (временный конфиг создаётся и удаляется при выходе);
+                        приватный ключ Reality в выводе скрыт
+  --show-secrets        показать в предпросмотре и приватный ключ (по умолчанию
+                        скрыт, чтобы ключ не оседал в терминале и SSH-логе)
   --links-only          только напечатать ссылки по существующему конфигу
   -h, --help            эта справка
 
@@ -363,6 +416,8 @@ parse_args() {
             --harden-firewall)  HARDEN_FIREWALL=1; shift ;;
             --ssh-port)         need "$1" $#; SSH_PORT="$2"; shift 2 ;;
             --dry-run)          DRY_RUN=1; shift ;;
+            --show-secrets)     SHOW_SECRETS=1; shift ;;
+            --allow-flagged-fp) ALLOW_FLAGGED_FP=1; shift ;;
             --links-only)       LINKS_ONLY=1; shift ;;
             -h|--help)          usage; exit 0 ;;
             *)                  die "Неизвестный аргумент: «$1» (см. --help)" ;;
@@ -398,7 +453,11 @@ validate_exit_params() {
     esac
     case "$EXIT_FP" in
         chrome | safari | ios | ios14 | ios15)
-            warn "Отпечаток «${EXIT_FP}» в чёрном списке эвристики июня 2026 — рекомендуется firefox/edge/android." ;;
+            if [[ "$ALLOW_FLAGGED_FP" -eq 1 ]]; then
+                warn "Отпечаток «${EXIT_FP}» помечен в эвристике июня 2026 — продолжаю только из-за --allow-flagged-fp: вероятны заморозки на 120 с."
+            else
+                die "Отпечаток «${EXIT_FP}» помечен в эвристике июня 2026 (Chrome/Safari/iOS). Возьми firefox, edge или android. Осознанный обход — --allow-flagged-fp."
+            fi ;;
     esac
     case "$EXIT_PUBKEY" in
         *[!A-Za-z0-9_=-]* | "") warn "publicKey выхода «${EXIT_PUBKEY}» выглядит необычно (обычно 43 символа base64url)." ;;
@@ -510,7 +569,7 @@ urlenc() { printf '%s' "$1" | jq -sRr @uri 2>/dev/null || printf '%s' "$1"; }
 install_xray_from_network() {
     local url="https://github.com/XTLS/Xray-install/raw/main/install-release.sh" tmp
     have curl || die "Нужен curl для установки ядра. Без сети на мосте: скачай архив Xray локально и запусти с --xray-zip <файл>."
-    tmp="$(tmp_file)"
+    tmp="$(tmp_path install-release.sh)"
     log "Скачиваю официальный установщик Xray…"
     curl -fsSL "$url" -o "$tmp" \
         || die "Не скачал install-release.sh. Если у моста нет доступа к GitHub — скачай архив Xray (Xray-linux-64.zip) на своей машине, перенеси на мост и запусти с --xray-zip /root/xray.zip."
@@ -524,7 +583,7 @@ install_xray_from_zip() {
     local zip="$1" dir
     have unzip || die "Для --xray-zip нужен unzip (apt-get install -y unzip)."
     [[ -f "$zip" ]] || die "--xray-zip: файл не найден: ${zip}"
-    dir="$(tmp_file).d"
+    dir="$(tmp_path xray-zip)"
     mkdir -p "$dir"
     unzip -o -q "$zip" -d "$dir" || die "Не распаковал ${zip}."
     [[ -f "$dir/xray" ]] || die "В архиве нет файла xray (нужен Xray-linux-64.zip с bin/xray)."
@@ -742,6 +801,15 @@ direct_tokens() { # → JSON-массив строк «напрямую»
     printf '%s\n' "$raw" | jq -R -s 'split("\n") | map(select(length > 0))'
 }
 
+# Правила маршрутизации (порядок важен — первое совпавшее выигрывает):
+#   1) Kometa-Block-Checkers — сервисы, показывающие клиенту его IP: их опрос из
+#      чужой сети сразу выдаёт VPN. Адрес проверяем через cdn-cgi/trace.
+#   2) Kometa-Block-Private — приватные и служебные диапазоны. Явные CIDR, а не
+#      geoip:private: без geoip.dat рядом с ядром конфиг не собирается вовсе
+#      (проверено на v26.9.30: «common/geodata: failed to open geoip.dat»),
+#      а geo-файлы тянутся из стороннего изменяемого релиза.
+#   3) Kometa-Direct (только с --direct-ru) — РФ напрямую.
+#   4) Kometa-Exit — всё остальное на выход.
 build_rules_json() {
     local tokens="[]"
     [[ "$DIRECT_RU" -eq 1 ]] && tokens="$(direct_tokens)"
@@ -750,8 +818,19 @@ build_rules_json() {
         startswith("geoip:")
         or test("^[0-9]{1,3}(\\.[0-9]{1,3}){3}(/[0-9]{1,2})?$")
         or test("^[0-9a-fA-F:.]+/[0-9]{1,3}$");
-      [ { type:"field", ruleTag:"Kometa-Block-Private", inboundTag:["bridge-in"],
-          ip:["geoip:private","169.254.0.0/16","fd00::/8"], outboundTag:"block" } ]
+      [ { type:"field", ruleTag:"Kometa-Block-Checkers", inboundTag:["bridge-in"],
+          domain:[
+            "api.ipify.org","ipify.org","icanhazip.com","ifconfig.me","ipinfo.io",
+            "ip-api.com","ipapi.co","ipwho.is","myip.com","checkip.amazonaws.com",
+            "checkip.dyndns.org","whatismyipaddress.com","2ip.ru","ip.mail.ru",
+            "ident.me","ipecho.net","ip.sb","httpbin.org","api.myip.com",
+            "geoip.seeip.org","ipv4-internet.yandex.net","ipv6-internet.yandex.net",
+            "redirector.googlevideo.com"
+          ], outboundTag:"block" },
+        { type:"field", ruleTag:"Kometa-Block-Private", inboundTag:["bridge-in"],
+          ip:["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","127.0.0.0/8",
+              "169.254.0.0/16","100.64.0.0/10","224.0.0.0/4","240.0.0.0/4",
+              "::1/128","fc00::/7","fe80::/10"], outboundTag:"block" } ]
       + (if ($tokens | length) > 0 then
            [ { type:"field", ruleTag:"Kometa-Direct", inboundTag:["bridge-in"], outboundTag:"direct" }
              + (if ($tokens | map(select(ipish | not)) | length) > 0
@@ -826,11 +905,15 @@ build_config_json() { # пишет JSON конфига в stdout
 }
 
 config_test() { # config_test <файл> → 0/1; вывод ядра в stderr при ошибке
-    local bin out
+    local bin out_run out_legacy
     bin="$(find_xray)" || return 1
-    out="$("$bin" run -test -config "$1" 2>&1)" && return 0
-    out="$("$bin" -test -config "$1" 2>&1)" && return 0
-    printf '%s\n' "$out" >&2
+    # Актуальная форма вызова — «run -test»; «-test» оставлен для старых ядер.
+    if out_run="$("$bin" run -test -config "$1" 2>&1)"; then return 0; fi
+    if out_legacy="$("$bin" -test -config "$1" 2>&1)"; then return 0; fi
+    # Диагностику первой формы не затираем второй: именно она называет настоящую
+    # причину (например, «Failed to get format of …» для файла без расширения).
+    printf '%s\n' "$out_run" >&2
+    [[ -n "$out_legacy" && "$out_legacy" != "$out_run" ]] && printf '%s\n' "$out_legacy" >&2
     return 1
 }
 
@@ -910,7 +993,7 @@ registry_update() { # registry_update <куда писать>; ставит REG_
     local target="$1" tmp today r_name r_uuid r_date r_plat r_oper r_status r_rdate
     local i=0 found_name found_plat found_oper rev_date
     today="$(date +%F)"
-    tmp="$(tmp_file)"
+    tmp="$(tmp_path registry.new)"
     REG_ACTIVE=0; REG_REVOKED=0; REG_ADDED=0; REG_REVOKED_NOW=""
 
     {
@@ -1005,7 +1088,11 @@ apply_ipv6_off() {
     fi
 }
 
-mss_rule() { printf '%s -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %s' "$1" "$2"; }
+# MSS-clamp: мост терминирует VLESS локально (обычный listener), пакеты
+# клиента и ответы моста идут через INPUT/OUTPUT, а не через FORWARD —
+# «ip_forward» здесь нигде не включается, поэтому правило в FORWARD было
+# инертным. Клампим исходящие SYN-ACK моста в OUTPUT.
+mss_rule() { printf '%s -t mangle -C OUTPUT -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %s' "$1" "$2"; }
 
 apply_mss_clamp() {
     local mss4 mss6 bin mss rule removed spec
@@ -1018,7 +1105,7 @@ apply_mss_clamp() {
         removed=0
         while $rule -D >/dev/null 2>&1; do removed=$((removed + 1)); done
         if $rule -I >/dev/null 2>&1; then
-            ok "MSS-clamp ${bin}: MSS ${mss} (MTU ${LTE_MTU}) для транзитного TCP."
+            ok "MSS-clamp ${bin}: MSS ${mss} (MTU ${LTE_MTU}) в OUTPUT — для TCP, который терминирует сам мост (через FORWARD трафик не идёт)."
         else
             warn "MSS-clamp ${bin}: не применился. Вручную: ${rule} -I"
         fi
@@ -1108,8 +1195,12 @@ write_config_and_restart() { # write_config_and_restart <tmp-config>
         systemctl status xray --no-pager -l 2>&1 | head -25 >&2 || true
         err "--- journalctl -u xray -n 30 ---"
         journalctl -u xray -n 30 --no-pager 2>&1 >&2 || true
-        if [[ -n "$old_hash" && -f "${CONFIG}.bak-"* ]]; then
-            warn "Откат: последний бэкап конфига лежит рядом (${CONFIG}.bak-*)."
+        # Внутри [[ ]] нет pathname expansion, поэтому прежнее условие
+        # `-f "${CONFIG}.bak-"*` было всегда ложным и подсказка не печаталась.
+        backup_hint="$(ls -1t "${CONFIG}".bak-* 2>/dev/null | head -n 1 || true)"
+        if [[ -n "$backup_hint" ]]; then
+            warn "Откат: последний бэкап конфига: ${backup_hint}"
+            warn "  cp -a '${backup_hint}' '${CONFIG}' && systemctl restart xray"
         fi
         exit 1
     fi
@@ -1149,8 +1240,8 @@ print_summary() { # print_summary <режим> <версия-строка>
     if [[ "$NO_REGISTRY" -eq 1 ]]; then
         note "Реестр: отключён (--no-registry)"
     elif [[ "$DRY_RUN" -eq 1 ]]; then
-        note "Реестр ${REGISTRY}: будет записан так (--dry-run ничего не пишет):"
-        registry_update "$(tmp_file)"
+        note "Реестр ${REGISTRY}: будет записан так (--dry-run реестр не трогает):"
+        registry_update "$(tmp_path registry.preview.csv)"
     else
         note "Реестр: ${REGISTRY} (активных ${REG_ACTIVE}, отозванных ${REG_REVOKED})"
     fi
@@ -1180,10 +1271,11 @@ print_next_steps() {
 main() {
     local tmp_config ver
     parse_args ${1+"$@"}
+    tmp_root_init          # до первого использования временных файлов
 
     box "Kometa · День 0 · мост RU → зарубежный выход"
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        log "Режим: ПРЕДПРОСМОТР (--dry-run): ничего не пишу, в сеть не хожу, systemctl не зову."
+        log "Режим: ПРЕДПРОСМОТР (--dry-run): систему не меняю, в сеть не хожу, systemctl не зову."
     elif [[ "$LINKS_ONLY" -eq 1 ]]; then
         log "Режим: только ссылки по существующему конфигу (--links-only)."
     else
@@ -1278,19 +1370,29 @@ main() {
 
     # Geo-файлы нужны только для geo-правил.
     if [[ "$DIRECT_RU" -eq 1 && -z "$DIRECT_FILE" ]]; then
-        if [[ "$DRY_RUN" -eq 0 && ! -f /usr/local/share/xray/geosite.dat ]]; then
-            die "--direct-ru: нет /usr/local/share/xray/geosite.dat. Поставь geoip.dat/geosite.dat или задай список доменами через --direct-file."
+        if [[ "$DRY_RUN" -eq 0 ]]; then
+            for gf in geosite.dat geoip.dat; do
+                [[ -f "/usr/local/share/xray/${gf}" ]] \
+                    || die "--direct-ru: нет /usr/local/share/xray/${gf} — с --direct-ru нужны оба geo-файла (geosite:category-ru и geoip:ru). Поставь их или задай список через --direct-file."
+            done
         fi
     fi
 
     # Конфиг.
-    tmp_config="$(tmp_file)"
+    tmp_config="$(tmp_path config.json)"
     build_config_json >"$tmp_config" || die "Не собрал конфиг (jq)."
     if [[ ! -s "$tmp_config" ]]; then die "Конфиг пуст — сборка не удалась."; fi
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         box "Конфиг (будет записан в ${CONFIG} при запуске без --dry-run)"
-        cat "$tmp_config"
+        if [[ "$SHOW_SECRETS" -eq 1 ]]; then
+            cat "$tmp_config"
+            warn "--show-secrets: приватный ключ Reality показан в открытом виде — не публикуй этот вывод."
+        else
+            print_config_masked "$tmp_config"
+            note "Приватный ключ Reality в выводе скрыт (он есть только в ${CONFIG} на мосте, режим 0600)."
+            note "Показать вывод целиком: --show-secrets."
+        fi
         note ""
         note "Проверка ядром: xray run -test -config <временный файл> — выполняется на мосте перед перезапуском."
         if [[ "$NO_REGISTRY" -eq 0 ]]; then
