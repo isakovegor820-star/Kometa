@@ -211,6 +211,56 @@ async def test_short_grant_is_treated_as_failure(session):
     assert sub is not None  # подписка есть, но факт выдачи не подтверждён — ретрай доведёт
 
 
+# ------------------- C6 (находка 09.10.2026): выдача по снимку тарифа
+async def test_grant_uses_plan_snapshot_not_live_plan(session, panel):
+    """C6: правка тарифа в окне заказа не меняет то, что получит клиент.
+
+    Находка 09.10.2026: заказ хранил цену, но не срок и лимиты — выдача читала
+    ЖИВОЙ тариф. Правка ``plan.days`` 30 → 365 после создания заказа давала
+    оплату 120 ₽ за 364 дня вместо 959 ₽ (окно до 24 часов: закрытые заказы
+    переопрашиваются, то есть ровно правка прайса в день запуска). Обратная
+    правка отнимала у клиента оплаченное.
+    """
+    _, order = await _make_order(session, 9931, provider="manual")
+    plan = await orders.get_plan(session, order.plan_id)
+    paid_days, paid_devices, paid_traffic = plan.days, plan.devices_limit, plan.traffic_limit_gb
+
+    assert order.plan_days == paid_days, "условия тарифа не записаны в заказ"
+
+    plan.days = paid_days + 335
+    plan.devices_limit = paid_devices + 10
+    plan.traffic_limit_gb = (paid_traffic or 0) + 500
+    await session.commit()
+
+    before = datetime.now(timezone.utc)
+    sub, already = await orders.mark_paid(session, order, panel)
+    await session.commit()
+
+    assert already is False and sub is not None
+    assert sub.expires_at <= before + timedelta(days=paid_days + 1), "выдан срок из правленого тарифа"
+    assert sub.devices_limit == paid_devices
+    assert sub.traffic_limit_gb == paid_traffic
+
+
+async def test_legacy_order_without_snapshot_falls_back_to_live_plan(session, panel):
+    """Заказы до 09.10.2026 (без снимка) обслуживаются как раньше."""
+    _, order = await _make_order(session, 9932, provider="manual")
+    plan = await orders.get_plan(session, order.plan_id)
+    live_days = plan.days
+
+    order.plan_days = None
+    order.plan_devices_limit = None
+    order.plan_traffic_gb = None
+    await session.commit()
+
+    before = datetime.now(timezone.utc)
+    sub, already = await orders.mark_paid(session, order, panel)
+    await session.commit()
+
+    assert already is False and sub is not None
+    assert sub.expires_at >= before + timedelta(days=live_days - 1)
+
+
 # ---------------------------------- C5 (находка 09.10.2026): сбой выдачи слышно
 class _RecordingBot:
     """Бот-заглушка: запоминает, что ушло команде."""

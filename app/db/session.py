@@ -122,6 +122,12 @@ _EXTRA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("orders", "granted_at", "DATETIME"),
     ("orders", "grant_attempts", "INTEGER DEFAULT 0"),
     ("orders", "grant_last_error", "VARCHAR(300) DEFAULT ''"),
+    # Снимок условий тарифа на момент заказа: выдача обязана дать ровно то, что
+    # оплатили, даже если прайс поправили в окне заказа (находка 09.10.2026).
+    # NULL — снимка нет (заказы до этого дня), берём живой тариф, как раньше.
+    ("orders", "plan_days", "INTEGER"),
+    ("orders", "plan_devices_limit", "INTEGER"),
+    ("orders", "plan_traffic_gb", "INTEGER"),
     ("users", "promo_code", "VARCHAR(32)"),
     ("users", "bonus_days_balance", "INTEGER DEFAULT 0"),
     ("users", "tags", "VARCHAR(128) DEFAULT ''"),

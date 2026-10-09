@@ -164,6 +164,11 @@ async def _insert_order(
             discount_rub=discount_rub,
             promo_code=promo_code,
             stars_amount=stars_amount,
+            # Снимок условий на момент заказа: выдача обязана дать ровно то, что
+            # клиент оплатил, даже если прайс поправят, пока счёт не закрыт.
+            plan_days=plan.days,
+            plan_devices_limit=plan.devices_limit,
+            plan_traffic_gb=plan.traffic_limit_gb,
             # Уникальные копейки нужны только для ручных переводов: по ним
             # система сама узнаёт, какой заказ оплатили.
             pay_kopecks=kopecks,
@@ -222,6 +227,23 @@ async def get_order(session: AsyncSession, order_id: int) -> Order | None:
 def _grant_fingerprint(order_id: int) -> str:
     """Отпечаток алерта «оплаченный заказ без доступа» — один на заказ."""
     return f"grant:order:{order_id}"
+
+
+def grant_terms(order: Order, plan: Plan) -> tuple[int, int, int]:
+    """Что именно оплатил клиент: (срок, устройств, ГБ) — из снимка заказа.
+
+    Выдача читала живой тариф, поэтому правка прайса в окне заказа меняла то,
+    что получит клиент: 120 ₽ за 364 дня вместо 959 ₽ в одну сторону и меньше
+    оплаченного — в другую.
+
+    ``None`` в снимке означает «заказа до 09.10.2026»: для них берём живой тариф,
+    как было раньше. Ноль — законное значение (безлимит по трафику), поэтому
+    проверяем именно на ``None``, а не на ложность.
+    """
+    days = order.plan_days if order.plan_days is not None else plan.days
+    devices = order.plan_devices_limit if order.plan_devices_limit is not None else plan.devices_limit
+    traffic = order.plan_traffic_gb if order.plan_traffic_gb is not None else plan.traffic_limit_gb
+    return int(days), int(devices), int(traffic)
 
 
 def _grant_target(sub: Subscription | None, plan: Plan, *, now: datetime | None = None) -> datetime:
@@ -400,8 +422,15 @@ async def grant_ungranted_orders(
             continue
 
         try:
+            days, devices, traffic = grant_terms(order, plan)
             await subscriptions.activate_plan(
-                session, user, plan, panels or await subscriptions.all_user_panels(session)
+                session,
+                user,
+                plan,
+                panels or await subscriptions.all_user_panels(session),
+                paid_days=days,
+                paid_devices=devices,
+                paid_traffic_gb=traffic,
             )
         except Exception as exc:  # noqa: BLE001 - панель может не ответить
             logger.error("Повторная выдача по заказу #%s не удалась: %s", order.id, exc)
@@ -590,7 +619,16 @@ async def mark_paid(
     await session.commit()
 
     try:
-        sub = await subscriptions.activate_plan(session, user, plan, panel)
+        days, devices, traffic = grant_terms(order, plan)
+        sub = await subscriptions.activate_plan(
+            session,
+            user,
+            plan,
+            panel,
+            paid_days=days,
+            paid_devices=devices,
+            paid_traffic_gb=traffic,
+        )
     except Exception as exc:  # noqa: BLE001 - панель может не ответить
         logger.error("Панель не выдала доступ по заказу #%s: %s", order.id, exc)
         await _record_grant_failure(session, order, target, exc, bot=bot)

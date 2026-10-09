@@ -225,6 +225,16 @@ class Order(Base):
     promo_code: Mapped[str | None] = mapped_column(String(32), default=None)
     #: Цена этого заказа в звёздах (со скидкой). 0 — заказ не звёздный.
     stars_amount: Mapped[int] = mapped_column(Integer, default=0)
+    #: Снимок условий тарифа на момент заказа: срок, устройств, ГБ.
+    #:
+    #: Нужен потому, что выдача читала ЖИВОЙ тариф. Правка ``plan.days`` в окне
+    #: заказа (до 24 часов: закрытые заказы переопрашиваются) давала оплату 120 ₽
+    #: за 364 дня вместо 959 ₽ — и наоборот, клиент получал меньше оплаченного.
+    #: ``None`` означает «снимка нет» (заказы до 09.10.2026) — тогда берём живой
+    #: тариф, как было раньше.
+    plan_days: Mapped[int | None] = mapped_column(Integer, default=None)
+    plan_devices_limit: Mapped[int | None] = mapped_column(Integer, default=None)
+    plan_traffic_gb: Mapped[int | None] = mapped_column(Integer, default=None)
     #: Уникальная надбавка в копейках (1…99) для автоматического сопоставления
     #: перевода с заказом: 199 ₽ + 13 копеек = 199.13 ₽.
     pay_kopecks: Mapped[int] = mapped_column(Integer, default=0)
