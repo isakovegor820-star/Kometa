@@ -32,6 +32,21 @@ async def test_health_endpoint():
     assert response.json() == {"status": "ok"}
 
 
+async def test_openapi_schema_is_not_public():
+    """Схема API закрыта: она перечисляла все пути админки.
+
+    Находка 09.10.2026: docs_url и redoc_url были выставлены в None, а
+    openapi_url забыт — публичный /openapi.json отдавал 49 КБ с 68 путями,
+    включая /admin/orders/{id}/refund и /admin/team/{id}/password.
+    """
+    app = await build_app()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/openapi.json")
+
+    assert response.status_code == 404, "схема админ-API снова отдаётся наружу"
+
+
 async def test_subscription_returns_base64_configs(session, patch_registry):
     user = await make_user(session, 6001)
     sub, _ = await subscriptions.start_trial(session, user, patch_registry)

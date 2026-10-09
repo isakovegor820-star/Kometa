@@ -211,6 +211,52 @@ async def test_short_grant_is_treated_as_failure(session):
     assert sub is not None  # подписка есть, но факт выдачи не подтверждён — ретрай доведёт
 
 
+# ---------- C10 (находка 09.10.2026): платёж не уходит на чужой заказ
+async def test_payment_with_closed_order_code_does_not_credit_stranger(session, autopay_env):
+    """C10: код закрытого заказа в комментарии не отдаёт платёж чужому.
+
+    Находка 09.10.2026: копейки закрытого заказа освобождаются и мгновенно
+    достаются следующему заказу на ту же сумму, а поиск идёт только по pending —
+    поэтому платёж клиента A с ЕГО СОБСТВЕННЫМ номером заказа в комментарии
+    проваливался дальше и по точной сумме попадал на заказ клиента B. B получал
+    30 дней, A — ничего и без единого уведомления (120 ₽ мимо плюс уход клиента,
+    LTV 654 ₽).
+    """
+    from app.services import autopay
+
+    user_a, order_a = await _make_order(session, 9981, provider="manual")
+    order_a.status = "canceled"
+    await session.commit()
+
+    _user_b, order_b = await _make_order(session, 9982, provider="manual")
+    await session.commit()
+    # Копейки у заказов на одну сумму совпадают — та самая ловушка.
+    assert order_a.pay_kopecks == order_b.pay_kopecks
+
+    found, reason = await autopay.find_order_for_payment(
+        session, _payment(order_a.amount_rub * 100, comment=f"Kometa {order_a.id}")
+    )
+
+    assert found is None, "платёж клиента A ушёл на заказ клиента B"
+    assert reason == autopay.CLOSED_ORDER_CODE
+    assert user_a is not None
+
+
+async def test_typo_in_order_code_still_matches_by_amount(session, autopay_env):
+    """Опечатка в номере не должна блокировать оплату: разбираем по сумме."""
+    from app.services import autopay
+
+    _, order = await _make_order(session, 9983, provider="manual")
+    await session.commit()
+
+    found, reason = await autopay.find_order_for_payment(
+        session, _payment(order.pay_amount_kopecks, comment="Kometa 999999")
+    )
+
+    assert found is not None and found.id == order.id
+    assert "по точной сумме" in reason
+
+
 # ---------------- C9 (находка 09.10.2026): лимит активаций промокода
 async def test_promo_uses_limit_counts_unpaid_orders(session):
     """C9: лимит активаций не обходится неоплаченными заказами.

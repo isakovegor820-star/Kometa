@@ -360,7 +360,17 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
     from app.web.payments import router as payments_router
     from app.web.templating import STATIC_DIR
 
-    app = FastAPI(title="Kometa subscription service", docs_url=None, redoc_url=None)
+    # openapi_url=None обязателен: docs_url и redoc_url были закрыты, а схема
+    # осталась — публичный /openapi.json отдавал 49 КБ с 68 путями админки,
+    # включая /admin/orders/{id}/refund, /admin/export/users.csv и
+    # /admin/team/{id}/password, с именами полей форм. Это бесплатная разведка
+    # для того, кто ищет админку (находка 09.10.2026).
+    app = FastAPI(
+        title="Kometa subscription service",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.bot = bot
     # Лимиты и кэш живут в состоянии приложения: и боевой процесс, и каждый
     # тестовый экземпляр получают свои счётчики (иначе тесты влияли бы друг на
