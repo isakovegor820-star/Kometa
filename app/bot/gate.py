@@ -6,13 +6,10 @@ middleware: иначе получился бы цикл импортов (middle
 
 from __future__ import annotations
 
-import contextlib
-
-from aiogram.exceptions import TelegramAPIError
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.bot import texts
+from app.bot import texts, view
 from app.config import get_settings
 from app.services import channel_gate
 
@@ -64,7 +61,6 @@ async def show_on_call(call: CallbackQuery, note: str = "") -> None:
     """
         if not isinstance(call.message, Message):
                 return
-        with contextlib.suppress(TelegramAPIError):
-                await call.message.edit_text(
-                        text(note), reply_markup=markup(), disable_web_page_preview=True
-        )
+        # Правим и текст, и подпись фото: экран подписки могли показать
+        # сообщением с картинкой (см. ``view.edit_screen``).
+        await view.edit_screen(call.message, text(note), markup())

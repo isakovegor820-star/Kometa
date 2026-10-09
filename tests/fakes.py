@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from aiogram import Bot
 from aiogram.client.session.base import BaseSession
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import TelegramMethod
 from aiogram.types import (
     CallbackQuery,
@@ -16,6 +17,7 @@ from aiogram.types import (
     ChatMemberOwner,
     ChatMemberRestricted,
     Message,
+    PhotoSize,
     PreCheckoutQuery,
     SuccessfulPayment,
     Update,
@@ -62,6 +64,23 @@ class FakeSession(BaseSession):
         self.chat_members: dict[int, str] = {}
         #: Ответ Telegram вместо результата — проверка «а если API молчит».
         self.chat_member_error: Exception | None = None
+        #: Сообщения, отправленные как фото: у них нет текста, только подпись.
+        #: Telegram на правку текста такого сообщения отвечает ошибкой
+        #: «there is no text in the message to edit» — и раньше заглушка об этом
+        #: молчала, поэтому тесты не видели, что кнопки под hero-экраном падают.
+        self.photo_messages: set[int] = set()
+        #: Что лежит в сообщении: message_id -> (текст, клавиатура). Нужно для
+        #: правила «message is not modified» — Telegram ругается на повторную
+        #: правку тем же содержимым, а кнопка при этом выглядит сломанной.
+        self.content: dict[int, tuple[str, str]] = {}
+
+    @staticmethod
+    def _content_key(text: str | None, markup) -> tuple[str, str]:  # noqa: ANN001
+        """Отпечаток содержимого сообщения: текст + клавиатура."""
+        if markup is None:
+            return (text or "", "")
+        dump = getattr(markup, "model_dump_json", None)
+        return (text or "", dump(exclude_none=True) if dump else repr(markup))
 
     async def close(self) -> None:  # pragma: no cover
         return None
@@ -77,12 +96,51 @@ class FakeSession(BaseSession):
                 raise self.chat_member_error
             user_id = int(getattr(method, "user_id", 0) or 0)
             return _chat_member(user_id, self.chat_members.get(user_id, "left"))
-        if name in {"SendMessage", "EditMessageText"}:
+        if name in {"SendMessage", "SendPhoto"}:
+            message_id = len(self.requests)
+            text = getattr(method, "text", None) or getattr(method, "caption", None) or ""
+            self.content[message_id] = self._content_key(text, getattr(method, "reply_markup", None))
+            if name == "SendPhoto":
+                self.photo_messages.add(message_id)
+                return Message.model_construct(
+                    message_id=message_id,
+                    date=datetime.now(timezone.utc),
+                    chat=Chat(id=1, type="private"),
+                    photo=[
+                        PhotoSize.model_construct(
+                            file_id="fake-photo-id", file_unique_id="fake-photo", width=1280, height=720
+                        )
+                    ],
+                    caption=text,
+                )
             return Message(
-                message_id=len(self.requests),
+                message_id=message_id,
                 date=datetime.now(timezone.utc),
                 chat=Chat(id=1, type="private"),
-                text=getattr(method, "text", "") or "edited",
+                text=text or "edited",
+            )
+        if name in {"EditMessageText", "EditMessageCaption"}:
+            message_id = int(getattr(method, "message_id", 0) or 0)
+            if name == "EditMessageText" and message_id in self.photo_messages:
+                # Так отвечает Telegram: у фото нет текста, править нечего.
+                raise TelegramBadRequest(
+                    method, "Bad Request: there is no text in the message to edit"
+                )
+            text = getattr(method, "text", None) or getattr(method, "caption", None) or ""
+            key = self._content_key(text, getattr(method, "reply_markup", None))
+            if self.content.get(message_id) == key:
+                raise TelegramBadRequest(
+                    method,
+                    "Bad Request: message is not modified: specified new message content and "
+                    "reply markup are exactly the same as a current content and reply markup "
+                    "of the message",
+                )
+            self.content[message_id] = key
+            return Message(
+                message_id=message_id,
+                date=datetime.now(timezone.utc),
+                chat=Chat(id=1, type="private"),
+                text=text or "edited",
             )
         if name == "GetMe":
             return TgUser(id=1, is_bot=True, first_name="Kometa", username="kometa_test_bot")
@@ -140,6 +198,8 @@ class FakeSession(BaseSession):
 
     def clear(self) -> None:
         self.requests.clear()
+        self.photo_messages.clear()
+        self.content.clear()
 
 
 def make_update(text: str | None = None, callback_data: str | None = None, user_id: int = 42) -> Update:
@@ -161,6 +221,37 @@ def make_update(text: str | None = None, callback_data: str | None = None, user_
     return Update(
         update_id=2,
         message=Message(message_id=2, date=datetime.now(timezone.utc), chat=chat, from_user=tg_user, text=text),
+    )
+
+
+def make_photo_callback_update(callback_data: str, user_id: int = 42) -> Update:
+    """Нажатие кнопки под **фото-сообщением** (hero-экран бота).
+
+    Главное меню бот отправляет фото с подписью, и Telegram не даёт править
+    текст такого сообщения — ``there is no text in the message to edit``.
+    Тест на текстовом сообщении (``make_update``) этого не поймает, поэтому
+    кнопки под hero проверяются отдельным апдейтом.
+    """
+    tg_user = TgUser(id=user_id, is_bot=False, first_name="Тест", username="tester")
+    chat = Chat(id=user_id, type="private")
+    message = Message.model_construct(
+        message_id=1,
+        date=datetime.now(timezone.utc),
+        chat=chat,
+        photo=[
+            PhotoSize.model_construct(file_id="hero-id", file_unique_id="hero", width=1280, height=720)
+        ],
+        caption="меню",
+    )
+    return Update(
+        update_id=5,
+        callback_query=CallbackQuery(
+            id="cb-photo",
+            from_user=tg_user,
+            chat_instance="ci1",
+            data=callback_data,
+            message=message,
+        ),
     )
 
 

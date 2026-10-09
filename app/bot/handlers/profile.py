@@ -14,7 +14,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import keyboards, texts
+from app.bot import keyboards, texts, view
 from app.config import get_settings
 from app.db.models import User
 from app.panels.registry import registry
@@ -70,7 +70,7 @@ async def show_profile(event: Message | CallbackQuery, session: AsyncSession, us
     markup = keyboards.profile_kb()
 
     if isinstance(event, CallbackQuery):
-        await event.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        await view.edit_screen(event.message, text, reply_markup=markup, disable_web_page_preview=True)
         await event.answer()
         return
     await event.answer(text, reply_markup=markup, disable_web_page_preview=True)

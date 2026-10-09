@@ -8,7 +8,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import keyboards, texts
+from app.bot import keyboards, texts, view
 from app.config import get_settings
 from app.db.models import User
 from app.panels.base import PanelError
@@ -27,7 +27,7 @@ async def cb_start_trial(call: CallbackQuery, session: AsyncSession, user: User)
         # их закрывает отдельный флаг SALES_ENABLED, и при нём пробный доступ
         # как раз работает — так пускаем людей на 3 дня, пока нет оплаты.
         await call.answer("Пробный доступ скоро откроется", show_alert=True)
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
             texts.TRIAL_CLOSED.format(note=settings.trial_closed_note),
             reply_markup=keyboards.back_to_menu_kb(),
             disable_web_page_preview=True,
@@ -44,12 +44,12 @@ async def cb_start_trial(call: CallbackQuery, session: AsyncSession, user: User)
         # Пишем в лог: без этого разбор «клиент не получил доступ» упирается
         # в «Сервис временно недоступен» без единой строчки причины.
         logger.error("Пробный доступ не выдан пользователю %s: %s", user.tg_id, exc)
-        await call.message.edit_text(texts.ERROR_GENERIC, reply_markup=keyboards.back_to_menu_kb())
+        await view.edit_screen(call.message, texts.ERROR_GENERIC, reply_markup=keyboards.back_to_menu_kb())
         await call.answer("Сервис временно недоступен", show_alert=False)
         return
 
     if not granted:
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
             texts.TRIAL_ALREADY_USED,
             reply_markup=keyboards.back_to_menu_kb(),
         )
@@ -65,7 +65,7 @@ async def cb_start_trial(call: CallbackQuery, session: AsyncSession, user: User)
     text = texts.TRIAL_STARTED.format(days=settings.trial_days + granted_bonus, traffic=traffic)
     if bonus_days and not granted_bonus:
         text += texts.TRIAL_BONUS_LINE.format(days=bonus_days)
-    await call.message.edit_text(
+    await view.edit_screen(call.message,
         text,
         reply_markup=keyboards.subscription_kb(has_panel_user=bool(sub.panel_user_uuid)),
     )

@@ -18,7 +18,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import legal_texts
-from app.bot import keyboards, texts
+from app.bot import keyboards, texts, view
 from app.config import get_settings
 from app.legal_texts import LegalContext
 from app.payments.registry import payments
@@ -137,7 +137,7 @@ async def show_legal(event: Message | CallbackQuery) -> None:
         """Главный экран раздела: кнопки на все документы, цены и поддержку."""
         markup = _docs_markup()
         if isinstance(event, CallbackQuery):
-                await event.message.edit_text(texts.LEGAL_HEADER, reply_markup=markup, disable_web_page_preview=True)
+                await view.edit_screen(event.message, texts.LEGAL_HEADER, reply_markup=markup, disable_web_page_preview=True)
                 await event.answer()
         else:
                 await event.answer(texts.LEGAL_HEADER, reply_markup=markup, disable_web_page_preview=True)
@@ -152,7 +152,7 @@ async def cb_show(event: Message | CallbackQuery) -> None:
 @router.callback_query(F.data == "legal:pricing")
 async def cb_pricing(call: CallbackQuery, session: AsyncSession) -> None:
         text = await pricing_text(session)
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 text,
                 reply_markup=keyboards.docs_back_kb(),
                 disable_web_page_preview=True,
@@ -176,5 +176,5 @@ async def cb_terms(call: CallbackQuery, session: AsyncSession) -> None:
 async def cb_support(call: CallbackQuery) -> None:
         contact = settings.support_contact
         text = texts.SUPPORT.format(support=contact) if contact else texts.SUPPORT_NO_CONTACT
-        await call.message.edit_text(text, reply_markup=keyboards.support_kb(), disable_web_page_preview=True)
+        await view.edit_screen(call.message, text, reply_markup=keyboards.support_kb(), disable_web_page_preview=True)
         await call.answer()

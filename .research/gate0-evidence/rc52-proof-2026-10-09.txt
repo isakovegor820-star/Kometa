@@ -1,0 +1,15 @@
+=== Доказательство: rc=52 — это ЗАВЕРШЁННЫЙ TLS, а не «непонятно» ===
+Команда: curl -sk -o /dev/null -m 8 https://95.181.181.5:443; echo rc=$?
+rc=56
+
+Независимая проверка тем же адресом через openssl s_client:
+Connecting to 95.181.181.5
+Can't use SSL_get_servername
+depth=0 C=RU, ST=Moscow, L=Moscow, O=Edgecenter LLC, CN=*.edgecenter.ru
+verify error:num=10:certificate has expired
+notAfter=Jul  6 08:05:29 2026 GMT
+notAfter=Jul  6 08:05:29 2026 GMT
+CONNECTION ESTABLISHED
+Protocol version: TLSv1.3
+Ciphersuite: TLS_AES_256_GCM_SHA384
+Peer certificate: C=RU, ST=Moscow, L=Moscow, O=Edgecenter LLC, CN=*.edgecenter.ru

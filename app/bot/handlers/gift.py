@@ -22,7 +22,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import keyboards
+from app.bot import keyboards, view
 from app.bot.handlers.buy import PROVIDER_TITLES
 from app.config import get_settings
 from app.db.models import User
@@ -58,7 +58,7 @@ async def show_gifts(call: CallbackQuery, session: AsyncSession) -> None:
                 return
         choices = await _plan_choices(session)
         lines = "\n".join(f"• {title} — <b>{price} ₽</b>" for _, title, price in choices)
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 "🎁 <b>Подарить подписку</b>\n\n"
                 "Сертификат можно активировать в любой момент — хоть сегодня, хоть через месяц. "
                 "Срок начнёт идти только после активации.\n\n"
@@ -82,7 +82,7 @@ async def choose_plan(call: CallbackQuery, state: FSMContext, session: AsyncSess
 
         await state.set_state(GiftForm.waiting_recipient)
         await state.update_data(gift_plan_id=plan.id, gift_plan_title=plan.title)
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 f"🎁 <b>{plan.title}</b> — {gift.gift_price_rub(plan.price_rub)} ₽\n\n"
                 "Напиши имя того, кому даришь: так подарок будет приятнее. "
                 "Или нажми кнопку ниже — пришлю ссылку без имени.",
@@ -184,7 +184,7 @@ async def _send_payment(
                 [(p.code, PROVIDER_TITLES.get(p.code, p.title)) for p in available],
         )
         if isinstance(event, CallbackQuery):
-                await event.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+                await view.edit_screen(event.message, text, reply_markup=markup, disable_web_page_preview=True)
                 await event.answer()
         else:
                 await event.answer(text, reply_markup=markup, disable_web_page_preview=True)
@@ -288,7 +288,7 @@ async def pay_gift(call: CallbackQuery, session: AsyncSession, user: User) -> No
                 )
         except PaymentError as exc:
                 logger.warning("Ошибка счёта на подарок: %s", exc)
-                await call.message.edit_text(texts.ERROR_GENERIC, reply_markup=keyboards.back_to_menu_kb())
+                await view.edit_screen(call.message, texts.ERROR_GENERIC, reply_markup=keyboards.back_to_menu_kb())
                 await call.answer("Не удалось создать счёт", show_alert=True)
                 return
 
@@ -321,5 +321,5 @@ async def pay_gift(call: CallbackQuery, session: AsyncSession, user: User) -> No
                         stars=order.stars_amount,
                 )
 
-        await call.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        await view.edit_screen(call.message, text, reply_markup=markup, disable_web_page_preview=True)
         await call.answer()

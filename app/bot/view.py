@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup
 
 from app.bot import emoji
@@ -142,6 +143,65 @@ async def send_view(
     return sent
 
 
+async def edit_screen(
+    message,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    *,
+    entities: list[dict] | None = None,
+    disable_web_page_preview: bool = True,
+) -> None:
+    """Заменить текущий экран бота: подпись у фото, текст у обычного сообщения.
+
+    Почему не ``edit_text`` напрямую. Главный экран — **фото с подписью**
+    (hero), и на правку текста такого сообщения Telegram отвечает
+    ``Bad Request: there is no text in the message to edit``. Из-за этого кнопки
+    под hero («Пригласить друга», «Профиль и подписка», «Помощь», «Тарифы»…)
+    выглядели мёртвыми: нажатие не давало ничего, а в лог уходила ошибка
+    (боевой лог 09.10.2026, 08:43 — пять таких подряд).
+
+    Заодно закрыты две соседние особенности Telegram, из-за которых кнопка тоже
+    «не работает»:
+
+    * повторное нажатие той же кнопки → ``message is not modified`` — это не
+      ошибка, экран уже такой, просто выходим;
+    * сообщение уже недоступно для правки (``message to edit not found``) —
+      показываем экран новым сообщением, а не молчим.
+
+    Подпись есть у фото, видео, документа и гифки — ориентируемся на неё, а не
+    только на ``photo``.
+    """
+    as_caption = getattr(message, "caption", None) is not None and getattr(message, "text", None) is None
+    try:
+        if as_caption:
+            await message.edit_caption(
+                caption=text,
+                reply_markup=reply_markup,
+                caption_entities=entities or None,
+                parse_mode=None,
+            )
+        else:
+            await message.edit_text(
+                text,
+                reply_markup=reply_markup,
+                entities=entities or None,
+                disable_web_page_preview=disable_web_page_preview,
+                parse_mode=None,
+            )
+    except TelegramBadRequest as exc:
+        reason = str(exc).lower()
+        if "message is not modified" in reason:
+            return
+        logger.info("Экран не отредактировался (%s) — отправляю новым сообщением", exc)
+        await message.answer(
+            text,
+            reply_markup=reply_markup,
+            entities=entities or None,
+            disable_web_page_preview=disable_web_page_preview,
+            parse_mode=None,
+        )
+
+
 async def edit_view(call, markup_text: str, keyboard) -> bool:
     """Заменить текст сообщения, сохранив фирменные эмодзи.
 
@@ -149,9 +209,7 @@ async def edit_view(call, markup_text: str, keyboard) -> bool:
     :func:`send_view`, а эмодзи в меню должны быть одинаковыми и там.
     """
     text, entities = emoji.decorate(markup_text)
-    await call.message.edit_text(
-        text, reply_markup=keyboard, entities=entities or None, parse_mode=None
-    )
+    await edit_screen(call.message, text, keyboard, entities=entities or None)
     return True
 
 

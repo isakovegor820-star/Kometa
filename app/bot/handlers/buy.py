@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import keyboards, texts
+from app.bot import keyboards, texts, view
 from app.config import get_settings
 from app.db.models import Order, User
 from app.panels.base import PanelError
@@ -75,7 +75,7 @@ async def send_plans(target: Message | CallbackQuery, session: AsyncSession, use
                         show_promo_button=percent == 0,
                 )
         if isinstance(target, CallbackQuery):
-                await target.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+                await view.edit_screen(target.message, text, reply_markup=markup, disable_web_page_preview=True)
                 await target.answer()
         else:
                 await target.answer(text, reply_markup=markup, disable_web_page_preview=True)
@@ -95,7 +95,7 @@ async def show_payment_soon(target: Message | CallbackQuery, plan) -> None:  # n
         )
         markup = keyboards.docs_back_kb()
         if isinstance(target, CallbackQuery):
-                await target.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+                await view.edit_screen(target.message, text, reply_markup=markup, disable_web_page_preview=True)
         else:
                 await target.answer(text, reply_markup=markup, disable_web_page_preview=True)
 
@@ -186,7 +186,7 @@ async def _show_plan_card(
                 text += texts.PLAN_CARD_SOON_NOTE
 
         markup = keyboards.providers_kb(plan.id, providers, sbp_soon=sbp_soon)
-        await call.message.edit_text(text, reply_markup=markup)
+        await view.edit_screen(call.message, text, reply_markup=markup)
         await call.answer()
 
 
@@ -242,7 +242,7 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
                 )
         except PaymentError as exc:
                 logger.warning("Ошибка создания счёта: %s", exc)
-                await call.message.edit_text(texts.ERROR_GENERIC, reply_markup=keyboards.back_to_menu_kb())
+                await view.edit_screen(call.message, texts.ERROR_GENERIC, reply_markup=keyboards.back_to_menu_kb())
                 await call.answer("Не удалось создать счёт", show_alert=True)
                 return
 
@@ -290,7 +290,7 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
                         stars=stars_price,
                 )
 
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 discount_note + text, reply_markup=markup, disable_web_page_preview=True
         )
         await call.answer()
@@ -303,7 +303,7 @@ async def cb_cancel(call: CallbackQuery, session: AsyncSession) -> None:
                 await call.answer(texts.ORDER_NOT_FOUND, show_alert=True)
                 return
         await orders.cancel_order(session, order, reason="canceled by user")
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 texts.ORDER_CANCELED.format(order_id=order.id),
                 reply_markup=keyboards.back_to_menu_kb(),
         )
@@ -317,7 +317,7 @@ async def cb_manual_paid(call: CallbackQuery, session: AsyncSession, user: User,
                 await call.answer(texts.ORDER_NOT_FOUND, show_alert=True)
                 return
         plan = await orders.get_plan(session, order.plan_id) if order.plan_id else None
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 texts.ORDER_WAITING_CONFIRM.format(order_id=order.id),
                 reply_markup=keyboards.back_to_menu_kb(),
         )

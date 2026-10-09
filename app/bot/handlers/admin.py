@@ -13,7 +13,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import keyboards, texts
+from app.bot import keyboards, texts, view
 from app.bot.filters import IsAdmin
 from app.config import get_settings
 from app.db.models import Order, PromoCode, Subscription, User
@@ -73,7 +73,7 @@ async def cmd_stats(message: Message, session: AsyncSession) -> None:
 
 @router.callback_query(F.data == "admin:stats")
 async def cb_stats(call: CallbackQuery, session: AsyncSession) -> None:
-    await call.message.edit_text((await stats.collect(session)).as_text(), reply_markup=keyboards.back_to_menu_kb())
+    await view.edit_screen(call.message, (await stats.collect(session)).as_text(), reply_markup=keyboards.back_to_menu_kb())
     await call.answer()
 
 
@@ -117,7 +117,7 @@ async def cb_confirm_order(call: CallbackQuery, session: AsyncSession, bot: Bot)
     user = await session.get(User, order.user_id)
     panel = await subscriptions.all_user_panels(session)
     sub, already = await orders.mark_paid(session, order, panel, confirmed_by=call.from_user.id, bot=bot)
-    await call.message.edit_text(texts.ADMIN_CONFIRMED.format(order_id=order.id))
+    await view.edit_screen(call.message, texts.ADMIN_CONFIRMED.format(order_id=order.id))
     await call.answer("Подтверждено ✅")
 
     # Подарочный заказ: покупателю уходит сертификат, а не доступ.
@@ -158,7 +158,7 @@ async def cb_reject_order(call: CallbackQuery, session: AsyncSession, bot: Bot) 
         await call.answer(texts.ORDER_NOT_FOUND, show_alert=True)
         return
     await orders.cancel_order(session, order, reason=f"rejected by {call.from_user.id}")
-    await call.message.edit_text(texts.ADMIN_REJECTED.format(order_id=order.id))
+    await view.edit_screen(call.message, texts.ADMIN_REJECTED.format(order_id=order.id))
     await call.answer("Отклонено")
     user = await session.get(User, order.user_id)
     if user is not None:
@@ -526,7 +526,7 @@ async def cmd_nodes(event: Message | CallbackQuery, session: AsyncSession) -> No
             lines.append(f"❌ <b>{title}</b>: ошибка — <code>{exc}</code>")
     text = "\n".join(lines)
     if isinstance(event, CallbackQuery):
-        await event.message.edit_text(text, reply_markup=keyboards.back_to_menu_kb())
+        await view.edit_screen(event.message, text, reply_markup=keyboards.back_to_menu_kb())
         await event.answer()
     else:
         await event.answer(text)

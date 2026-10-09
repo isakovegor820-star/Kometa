@@ -16,7 +16,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import keyboards, texts
+from app.bot import keyboards, texts, view
 from app.config import get_settings
 from app.db.models import User
 from app.services import orders, promo, referral
@@ -70,7 +70,7 @@ async def show_referral(event: Message | CallbackQuery, session: AsyncSession, u
                 text += texts.REFERRAL_SHARE_BLOCK.format(share_text=share_text)
         markup = keyboards.referral_share_kb(link, share_text)
         if isinstance(event, CallbackQuery):
-                await event.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+                await view.edit_screen(event.message, text, reply_markup=markup, disable_web_page_preview=True)
                 await event.answer()
         else:
                 await event.answer(text, reply_markup=markup, disable_web_page_preview=True)
@@ -79,7 +79,7 @@ async def show_referral(event: Message | CallbackQuery, session: AsyncSession, u
 @router.callback_query(F.data == "ref:code")
 async def show_promo_code(call: CallbackQuery, session: AsyncSession, user: User) -> None:
         code = await promo.ensure_referral_code(session, user)
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 texts.PROMO_MY.format(
                         code=code.code,
                         percent=code.percent,
@@ -113,7 +113,7 @@ async def show_friends(call: CallbackQuery, session: AsyncSession, user: User) -
                         for friend in friends
                 )
                 text = texts.REFERRAL_FRIENDS.format(items=items, **stats)
-        await call.message.edit_text(text, reply_markup=keyboards.back_to_menu_kb(), disable_web_page_preview=True)
+        await view.edit_screen(call.message, text, reply_markup=keyboards.back_to_menu_kb(), disable_web_page_preview=True)
         await call.answer()
 
 
@@ -122,7 +122,7 @@ async def show_friends(call: CallbackQuery, session: AsyncSession, user: User) -
 async def ask_promo(call: CallbackQuery, state: FSMContext, session: AsyncSession, user: User) -> None:
         example = promo.code_for_referral(user.referral_code)
         await state.set_state(PromoForm.code)
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 texts.PROMO_ENTER.format(example=example),
                 reply_markup=keyboards.back_to_menu_kb(),
                 disable_web_page_preview=True,
@@ -188,7 +188,7 @@ async def show_help(event: Message | CallbackQuery) -> None:
         if settings.public_base_url:
                 text += texts.SERVICE_STATUS_HINT.format(status_url=f"{settings.public_base_url.rstrip('/')}/status")
         if isinstance(event, CallbackQuery):
-                await event.message.edit_text(text, reply_markup=keyboards.support_kb(), disable_web_page_preview=True)
+                await view.edit_screen(event.message, text, reply_markup=keyboards.support_kb(), disable_web_page_preview=True)
                 await event.answer()
         else:
                 await event.answer(text, reply_markup=keyboards.support_kb(), disable_web_page_preview=True)

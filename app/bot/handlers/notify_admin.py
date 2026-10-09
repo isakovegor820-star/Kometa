@@ -20,7 +20,7 @@ from aiogram.filters import BaseFilter, Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import texts
+from app.bot import texts, view
 from app.config import get_settings
 from app.db.models import User
 from app.panels.base import PanelError
@@ -263,7 +263,7 @@ async def _safe_edit(call: CallbackQuery, text: str, order_id: int) -> None:
     if call.message is None:
         return
     try:
-        await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[]))
+        await view.edit_screen(call.message, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[]))
     except Exception: # noqa: BLE001 - сообщение могло устареть
         logger.debug("Не удалось обновить сообщение заявки #%s", order_id)
 

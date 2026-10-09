@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import keyboards, texts
+from app.bot import keyboards, texts, view
 from app.config import get_settings
 from app.db.session import SessionMaker
 from app.db.models import Node, User
@@ -75,7 +75,7 @@ async def show_subscription(event: Message | CallbackQuery, session: AsyncSessio
                 markup = keyboards.subscription_kb(has_panel_user=bool(sub.panel_user_uuid))
 
         if is_call:
-                await event.message.edit_text(text, reply_markup=markup)
+                await view.edit_screen(event.message, text, reply_markup=markup)
                 await event.answer()
         else:
                 await event.answer(text, reply_markup=markup)
