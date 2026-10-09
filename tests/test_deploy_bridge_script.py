@@ -752,3 +752,28 @@ def test_busy_bridge_port_is_reported_before_restart(workdir: Path, stub_bin: Pa
     text = out(proc)
     assert "уже кем-то занят" in text
     assert "0.0.0.0:443" in text
+
+
+def test_private_bridge_address_is_flagged(workdir: Path, stub_bin: Path):
+    """Ссылка с 192.168.x не подключится извне — об этом надо сказать сразу."""
+    proc = run(
+        *base_args("--bridge-address", "192.168.1.5", "--client-uuid", UUID_1),
+        stub_bin=stub_bin,
+    )
+    text = out(proc)
+    assert proc.returncode == 0, text
+    assert "приватный" in text
+
+
+def test_unreadable_existing_config_warns_about_new_keys(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """Битый конфиг = ключи не восстановить; молча выпустить новые нельзя."""
+    config = workdir / "config.json"
+    config.write_text("{ это не JSON", encoding="utf-8")
+    proc = run(
+        *apply_args(workdir, "--client-uuid", UUID_1),
+        stub_bin=stub_bin,
+        env_extra={"SYSTEMCTL_LOG": str(tmp_path / "s.log")},
+    )
+    text = out(proc)
+    assert "не читается как JSON" in text
+    assert "НОВЫЕ ключи" in text

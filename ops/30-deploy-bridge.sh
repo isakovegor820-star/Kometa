@@ -643,6 +643,10 @@ resolve_keys() {
 
     # 1. Ключи и shortId — из существующего конфига (иначе розданные ссылки
     #    отвалились бы при каждом повторном запуске скрипта).
+    if [[ "$ROTATE_KEYS" -eq 0 && -f "$CONFIG" ]] && ! jq -e . "$CONFIG" >/dev/null 2>&1; then
+        warn "Существующий конфиг ${CONFIG} не читается как JSON: ключи моста из него не восстановить."
+        warn "Если у трёх человек уже на руках ссылки — прерви работу (Ctrl+C) и почини конфиг; при продолжении будут выпущены НОВЫЕ ключи, и старые ссылки перестанут подключаться."
+    fi
     if [[ "$ROTATE_KEYS" -eq 0 && -f "$CONFIG" ]]; then
         BRIDGE_PRIVKEY="$(inbound_field "$CONFIG" '.streamSettings.realitySettings.privateKey' || true)"
         [[ -n "$BRIDGE_PRIVKEY" ]] && log "Приватный ключ моста взят из существующего конфига (без --rotate-keys)."
@@ -721,7 +725,8 @@ build_clients_json() {
     done
     out="$(printf '%s' "$rows" | sed '/^$/d' | jq -R -s --arg flow "$EXIT_FLOW" '
         split("\n") | map(select(length > 0) | split("\t"))
-        | map({ id: .[0], email: (.[1] // ""), flow: $flow })')" || return 1
+        | map({ id: .[0], email: (.[1] // "") }
+              + (if $flow == "" then {} else { flow: $flow } end))')" || return 1
     printf '%s' "$out"
 }
 
@@ -1238,6 +1243,15 @@ main() {
         fi
     fi
     [[ "$BRIDGE_ADDRESS" == "<BRIDGE_IP>" ]] || is_ipv4 "$BRIDGE_ADDRESS" || warn "Адрес моста «${BRIDGE_ADDRESS}» не IPv4 — ссылки будут с доменом."
+    # Приватный адрес в ссылке = ссылка, которая не подключается ни у кого,
+    # кроме той же локальной сети. Частая ошибка: мост за NAT (или запуск
+    # теста на домашней машине), а адрес взят «какой нашёлся».
+    case "$BRIDGE_ADDRESS" in
+        10.* | 192.168.* | 127.* | 169.254.* | 100.6[4-9].* | 100.[7-9][0-9].* | 100.1[0-2][0-9].*)
+            warn "Адрес моста ${BRIDGE_ADDRESS} — приватный: такие ссылки не подключатся извне." ;;
+        172.1[6-9].* | 172.2[0-9].* | 172.3[01].*)
+            warn "Адрес моста ${BRIDGE_ADDRESS} — приватный: такие ссылки не подключатся извне." ;;
+    esac
 
     # Ядро.
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -1283,6 +1297,8 @@ main() {
             note "Реестр: ${REGISTRY} (обновляется при применении; сейчас показан предпросмотр выше)."
         fi
         print_summary "ПРЕДПРОСМОТР, ничего не изменено" "${ver}"
+        # Про пустые поля реестра честнее сказать до боевого запуска, чем после.
+        [[ "$NO_REGISTRY" -eq 0 ]] && registry_warn_missing_fields
         print_exit_hint
         print_next_steps
         return 0

@@ -8,9 +8,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Request
@@ -21,6 +23,7 @@ from app.db.models import Subscription
 from app.panels.base import PanelError, panel_label
 from app.panels.registry import registry
 from app.services import subscriptions as subs_service
+from app.web.ratelimit import RateLimiter, SubCache, limit_for_path, public_client_ip
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -68,6 +71,94 @@ def _rename(configs: list[str], title: str) -> list[str]:
     except ImportError:  # pragma: no cover - модуль форматов необязателен
         return configs
     return rename_locations(configs, title)
+
+
+@dataclass(slots=True)
+class PanelData:
+    """Данные подписки, собранные у панелей (кэшируются на несколько секунд)."""
+
+    configs: list[str] = field(default_factory=list)
+    used_bytes: int = 0
+    renamed_per_panel: bool = False
+    channel_urls: dict[str, str] = field(default_factory=dict)
+
+
+async def collect_panel_data(session: AsyncSession, sub: Subscription) -> PanelData:
+    """Собрать конфиги со всех панелей **параллельно** и с таймаутом на каждую.
+
+    Почему параллельно: раньше панели опрашивались по очереди, и две
+    недоступные локации означали два полных таймаута ожидания — клиент видел
+    зависшую ссылку, а вебхук-запросы копились. Теперь время ответа — самая
+    медленная живая панель, а недоступная отсекается таймаутом
+    ``PANEL_TIMEOUT_SECONDS`` и не мешает остальным.
+
+    Возвращаем именно данные, а не готовый HTTP-ответ: формат (base64, Clash,
+    sing-box) выбирается по User-Agent уже после, поэтому один кэш обслуживает
+    и Happ, и v2rayNG.
+    """
+    data = PanelData()
+    if not sub.panel_user_uuid:
+        return data
+
+    from app.web.subscription_format import channel_mark
+
+    uuid = sub.panel_user_uuid
+    timeout = max(1, int(settings.panel_timeout_seconds))
+    pairs = await registry.all_panels_with_nodes(session)
+
+    async def from_panel(node, panel) -> tuple[list[str], int, bool, dict[str, str]]:  # noqa: ANN001
+        """Опрос одной панели. Ошибка этой панели не должна ломать остальные."""
+        configs: list[str] = []
+        used = 0
+        renamed = False
+        urls: dict[str, str] = {}
+        try:
+            panel_configs = await asyncio.wait_for(panel.get_configs(uuid), timeout=timeout)
+        except (PanelError, asyncio.TimeoutError) as exc:
+            logger.warning("Панель %s не отдала конфиги: %s", panel_label(panel), exc)
+            return configs, used, renamed, urls
+        except Exception as exc:  # noqa: BLE001 - чужая панель может ответить чем угодно
+            logger.warning("Панель %s: неожиданная ошибка конфигов: %s", panel_label(panel), exc)
+            return configs, used, renamed, urls
+
+        # Имя локации у каждой страны своё: у основной панели — из LOCATION_TITLE,
+        # у ноды — её название из админки («🇯🇵 Япония»).
+        title = getattr(panel, "location_title", "") or ""
+        # Канал локации: обычная, резервная или CDN. Метка в имени — единственный
+        # способ передать канал в base64-список (Happ/v2RayTun групп не умеют),
+        # а у канала может быть свой test-URL: под ограничениями общий адрес
+        # замера недоступен.
+        channel = (
+            (getattr(node, "channel", "main") or "main").strip().lower() if node is not None else "main"
+        )
+        mark = channel_mark(channel)
+        if mark:
+            title = f"{title or panel_label(panel)}{mark}"
+            custom_url = str(getattr(node, "test_url", "") or "").strip()
+            if custom_url:
+                urls.setdefault(channel, custom_url)
+        if title:
+            panel_configs, renamed = _rename(panel_configs, title), True
+        configs.extend(panel_configs)
+
+        try:
+            panel_user = await asyncio.wait_for(panel.get_user(uuid), timeout=timeout)
+            if panel_user is not None:
+                used = panel_user.used_bytes or 0
+        except (PanelError, asyncio.TimeoutError) as exc:
+            logger.warning("Панель %s не отдала статистику: %s", panel_label(panel), exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Панель %s: неожиданная ошибка статистики: %s", panel_label(panel), exc)
+        return configs, used, renamed, urls
+
+    results = await asyncio.gather(*(from_panel(node, panel) for node, panel in pairs))
+    for configs, used, renamed, urls in results:
+        data.configs.extend(configs)
+        data.used_bytes += used
+        data.renamed_per_panel = data.renamed_per_panel or renamed
+        for channel, url in urls.items():
+            data.channel_urls.setdefault(channel, url)
+    return data
 
 
 def _test_url() -> str:
@@ -271,6 +362,45 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
 
     app = FastAPI(title="Kometa subscription service", docs_url=None, redoc_url=None)
     app.state.bot = bot
+    # Лимиты и кэш живут в состоянии приложения: и боевой процесс, и каждый
+    # тестовый экземпляр получают свои счётчики (иначе тесты влияли бы друг на
+    # друга, а «тридцать запросов подряд» ловили бы чужой трафик).
+    app.state.rate_limiter = RateLimiter()
+    app.state.sub_cache = SubCache()
+
+    @app.middleware("http")
+    async def public_rate_limit(request: Request, call_next):  # noqa: ANN001, ANN202
+        """Ограничить поток запросов с одного IP на публичных адресах.
+
+        Ответ 429 — человеческий: сколько ждать и почему. Без лимита тридцать
+        запросов к /sub подряд — это тридцать походов в панели от каждого, кто
+        узнал токен, а вебхуки читают тело целиком до проверки подписи.
+        """
+        if not settings.rate_limit_enabled:
+            return await call_next(request)
+        info = limit_for_path(request.url.path, settings)
+        if info is None:
+            return await call_next(request)
+        group, limit = info
+        key = f"{group}:{public_client_ip(request)}"
+        decision = app.state.rate_limiter.check(
+            key, limit=limit, window_seconds=int(settings.rate_limit_window_seconds)
+        )
+        if not decision.allowed:
+            logger.warning("Лимит запросов: %s исчерпан (порог %s)", key, limit)
+            return JSONResponse(
+                {
+                    "detail": (
+                        f"Слишком много запросов с этого адреса: не больше {limit} за "
+                        f"{int(settings.rate_limit_window_seconds)} секунд. "
+                        f"Повтори через {decision.retry_after} с."
+                    ),
+                    "retry_after": decision.retry_after,
+                },
+                status_code=429,
+                headers={"Retry-After": str(decision.retry_after)},
+            )
+        return await call_next(request)
 
     @app.middleware("http")
     async def panel_ajax_flag(request: Request, call_next):  # noqa: ANN001, ANN202
@@ -532,7 +662,6 @@ function copySub(){{
     @app.get("/sub/{token}")
     async def get_subscription(token: str, request: Request) -> Response:
         from app.db.session import SessionMaker
-        from app.web.subscription_format import channel_mark
 
         async with SessionMaker() as session:  # type: AsyncSession
             sub = await subs_service.get_subscription_by_token(session, token)
@@ -541,51 +670,22 @@ function copySub(){{
             if sub.status == "blocked":
                 raise HTTPException(status_code=403, detail="subscription blocked")
 
-            configs: list[str] = []
-            used_bytes = 0
-            renamed_per_panel = False
-            # Свой test-URL по каналу: у CDN и входа своя точка замера.
-            channel_urls: dict[str, str] = {}
-            for node, panel in await registry.all_panels_with_nodes(session):
-                if not sub.panel_user_uuid:
-                    continue
-                try:
-                    panel_configs = await panel.get_configs(sub.panel_user_uuid)
-                except PanelError as exc:
-                    logger.warning("Панель %s не отдала конфиги: %s", panel_label(panel), exc)
-                    continue
+            # Короткий кэш данных панелей: приложения дёргают ссылку при каждом
+            # открытии и обновлении профиля, а панель на каждый запрос получает
+            # два HTTP-вызова. Внутри окна кэша панели не опрашиваются вовсе;
+            # срок подписки при этом берётся из БД, поэтому продление видно сразу.
+            data = app.state.sub_cache.get(token)
+            if data is None:
+                data = await collect_panel_data(session, sub)
+                app.state.sub_cache.set(token, data)
 
-                # Имя локации у каждой страны своё: у основной панели — из
-                # LOCATION_TITLE, у ноды — её название из админки («🇯🇵 Япония»).
-                title = getattr(panel, "location_title", "") or ""
-                # Канал локации: обычная, резервная или CDN. Метка в имени —
-                # единственный способ передать канал в base64-список
-                # (Happ/v2RayTun групп не умеют), а у канала может быть свой
-                # test-URL: под ограничениями общий адрес замера недоступен.
-                channel = (
-                    (getattr(node, "channel", "main") or "main").strip().lower()
-                    if node is not None
-                    else "main"
-                )
-                mark = channel_mark(channel)
-                if mark:
-                    title = f"{title or panel_label(panel)}{mark}"
-                    custom_url = str(getattr(node, "test_url", "") or "").strip()
-                    if custom_url:
-                        channel_urls.setdefault(channel, custom_url)
-                if title:
-                    panel_configs, renamed_per_panel = _rename(panel_configs, title), True
-                configs.extend(panel_configs)
-
-                try:
-                    panel_user = await panel.get_user(sub.panel_user_uuid)
-                    if panel_user is not None:
-                        used_bytes += panel_user.used_bytes or 0
-                except PanelError as exc:
-                    logger.warning("Панель %s не отдала статистику: %s", panel_label(panel), exc)
-
-            if not configs:
+            if not data.configs:
                 raise HTTPException(status_code=503, detail="no configs available")
+
+            configs = list(data.configs)
+            used_bytes = data.used_bytes
+            renamed_per_panel = data.renamed_per_panel
+            channel_urls = dict(data.channel_urls)
 
         # Имена локаций: панель отдаёт служебные («DE-REALITY-firefox-u123-10GB📊»),
         # в приложении это выглядит мусором — подменяем на человеческое имя страны.
