@@ -589,10 +589,10 @@ def test_apply_revocation_removes_only_that_uuid(workdir: Path, stub_bin: Path, 
 
     rows = (workdir / "users.csv").read_text(encoding="utf-8")
     today = dt.date.today().isoformat()
-    assert f"Пётр,{UUID_2},2026" not in rows or True  # дата выдачи могла быть сегодняшней
-    assert f",{UUID_2}," in rows and f"отозван,{today}" in rows
-    assert f"Иван,{UUID_1},$" not in rows and f",{UUID_1}," in rows
-    assert f",{UUID_3}," in rows
+    revoked = [r for r in rows.splitlines() if f",{UUID_2}," in r]
+    assert len(revoked) == 1 and revoked[0].endswith(f"отозван,{today}")
+    assert any(f",{UUID_1}," in r and r.endswith("активен,") for r in rows.splitlines())
+    assert any(f",{UUID_3}," in r and r.endswith("активен,") for r in rows.splitlines())
 
 
 def test_bad_config_is_not_applied_and_old_config_survives(workdir: Path, stub_bin: Path, tmp_path: Path):

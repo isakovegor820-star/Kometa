@@ -594,6 +594,25 @@ meta_get() { # meta_get <ключ>
     jq -r --arg k "$1" '.[$k] // empty' "$f" 2>/dev/null
 }
 
+# Наш инбаунд из существующего конфига. Именно по тегу, а не «inbounds[0]»:
+# официальный установщик Xray кладёт свой демо-конфиг, и первый инбаунд там
+# может быть чужим (socks/dokodemo) — тогда ключи и SNI читались бы не оттуда,
+# и повторный запуск молча выпустил бы НОВЫЕ ключи, порвав розданные ссылки.
+existing_inbound_json() { # existing_inbound_json <файл> → JSON инбаунда (или пусто)
+    [[ -f "$1" ]] || return 1
+    jq -c '
+        if any(.inbounds[]?; .tag == "bridge-in")
+        then (.inbounds[] | select(.tag == "bridge-in"))
+        else (.inbounds[0] // empty) end' "$1" 2>/dev/null
+}
+
+inbound_field() { # inbound_field <файл> <jq-путь внутри инбаунда>
+    local json
+    json="$(existing_inbound_json "$1")" || return 1
+    [[ -n "$json" && "$json" != "null" ]] || return 1
+    printf '%s' "$json" | jq -r "$2 // empty" 2>/dev/null
+}
+
 derive_public_key() { # derive_public_key <bin> <private> → public
     local out pub
     out="$("$1" x25519 -i "$2" 2>/dev/null)" || return 1
@@ -620,18 +639,18 @@ resolve_keys() {
     # 1. Ключи и shortId — из существующего конфига (иначе розданные ссылки
     #    отвалились бы при каждом повторном запуске скрипта).
     if [[ "$ROTATE_KEYS" -eq 0 && -f "$CONFIG" ]]; then
-        BRIDGE_PRIVKEY="$(jq -r '.inbounds[0].streamSettings.realitySettings.privateKey // empty' "$CONFIG" 2>/dev/null || true)"
+        BRIDGE_PRIVKEY="$(inbound_field "$CONFIG" '.streamSettings.realitySettings.privateKey' || true)"
         [[ -n "$BRIDGE_PRIVKEY" ]] && log "Приватный ключ моста взят из существующего конфига (без --rotate-keys)."
     fi
     if [[ "$ROTATE_SHORTID" -eq 0 && -z "$BRIDGE_SHORTID" ]]; then
         if [[ -f "$CONFIG" ]]; then
-            BRIDGE_SHORTID="$(jq -r '.inbounds[0].streamSettings.realitySettings.shortIds[0] // empty' "$CONFIG" 2>/dev/null || true)"
+            BRIDGE_SHORTID="$(inbound_field "$CONFIG" '.streamSettings.realitySettings.shortIds[0]' || true)"
         fi
         [[ -z "$BRIDGE_SHORTID" ]] && BRIDGE_SHORTID="$(meta_get shortId || true)"
     fi
     # SNI моста: явный флаг → существующий конфиг → SNI выхода.
     if [[ -z "$BRIDGE_SNI" && -f "$CONFIG" ]]; then
-        existing_sni="$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' "$CONFIG" 2>/dev/null || true)"
+        existing_sni="$(inbound_field "$CONFIG" '.streamSettings.realitySettings.serverNames[0]' || true)"
         if [[ -n "$existing_sni" ]]; then
             BRIDGE_SNI="$existing_sni"
             log "SNI моста взят из существующего конфига: ${BRIDGE_SNI}"
@@ -677,6 +696,9 @@ resolve_keys() {
 
 write_meta() { # спутник: публичные параметры моста, чтобы ссылки можно было перепечатать
     local f; f="$(meta_file)"
+    # --config может указывать в ещё не созданный каталог: спутник пишется
+    # раньше конфига, поэтому каталог создаём здесь.
+    mkdir -p "$(dirname "$f")" 2>/dev/null || true
     jq -nc --arg pub "$BRIDGE_PUBKEY" --arg sid "$BRIDGE_SHORTID" --arg sni "$BRIDGE_SNI" \
         --arg addr "$BRIDGE_ADDRESS" --argjson port "$BRIDGE_PORT" --arg ver "$XRAY_VERSION" \
         --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -838,7 +860,7 @@ load_clients_from_config() { # для --links-only: клиенты берутс�
     while IFS= read -r uuid; do
         [[ -n "$uuid" ]] || continue
         add_client "$uuid"
-    done < <(jq -r '.inbounds[0].settings.clients[]?.id // empty' "$CONFIG" 2>/dev/null)
+    done < <(existing_inbound_json "$CONFIG" | jq -r '.settings.clients[]?.id // empty' 2>/dev/null)
 }
 
 enrich_names_from_registry() {
@@ -995,7 +1017,6 @@ apply_mss_clamp() {
 
 apply_firewall() {
     local ssh_port="$1"
-    if have ufw; then
         # Именно «Status: active»: строка «Status: inactive» тоже содержит
         # подстроку «active», и по ней легко решить, что фаервол включён.
         if ufw status 2>/dev/null | head -1 | grep -q '^Status: active'; then
@@ -1158,9 +1179,10 @@ main() {
         [[ -n "$BRIDGE_ADDRESS" ]] || die "--links-only: не определил адрес моста, передай --bridge-address."
         [[ -n "$BRIDGE_PUBKEY" ]] || BRIDGE_PUBKEY="$(meta_get publicKey || true)"
         [[ -n "$BRIDGE_PUBKEY" ]] || die "--links-only: нет publicKey (файл-спутник $(meta_file)); передай --bridge-pubkey."
-        [[ -n "$BRIDGE_SNI" ]] || BRIDGE_SNI="$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0] // empty' "$CONFIG")"
-        [[ -n "$BRIDGE_SHORTID" ]] || BRIDGE_SHORTID="$(jq -r '.inbounds[0].streamSettings.realitySettings.shortIds[0] // empty' "$CONFIG")"
-        BRIDGE_PORT="$(jq -r '.inbounds[0].port // 443' "$CONFIG")"
+        [[ -n "$BRIDGE_SNI" ]] || BRIDGE_SNI="$(inbound_field "$CONFIG" '.streamSettings.realitySettings.serverNames[0]' || true)"
+        [[ -n "$BRIDGE_SHORTID" ]] || BRIDGE_SHORTID="$(inbound_field "$CONFIG" '.streamSettings.realitySettings.shortIds[0]' || true)"
+        BRIDGE_PORT="$(inbound_field "$CONFIG" '.port' || true)"
+        [[ -n "$BRIDGE_PORT" ]] || BRIDGE_PORT=443
         load_clients_from_config
         [[ ${#C_UUIDS[@]} -ge 1 ]] || die "--links-only: в конфиге нет клиентов."
         enrich_names_from_registry

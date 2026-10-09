@@ -7,6 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
@@ -15,13 +16,86 @@ from app.db.models import Base
 logger = logging.getLogger(__name__)
 
 _settings = get_settings()
+
+
+class UnsupportedDialectError(RuntimeError):
+    """Понятная ошибка вместо тихой поломки на не-SQLite базе."""
+
+
+#: PRAGMA, которые включаем на КАЖДОМ соединении SQLite.
+#:
+#: Зачем каждый раз, а не один: ``journal_mode`` живёт в файле базы, а
+#: ``busy_timeout``/``foreign_keys``/``synchronous`` — свойства соединения, и
+#: новое соединение из пула получает значения по умолчанию. Без этого второй
+#: писатель падал с «database is locked» через 5 секунд, а ссылочная
+#: целостность не проверялась вовсе.
+SQLITE_PRAGMAS: tuple[tuple[str, str], ...] = (
+    # WAL: читатели не блокируют писателя, отчёты в панели не «замирают».
+    ("journal_mode", "WAL"),
+    # Ждать блокировку 15 секунд вместо «database is locked» на пятой.
+    ("busy_timeout", "15000"),
+    # WAL + NORMAL: коммит быстрый, при падении процесса данные не теряются
+    # (рискует только последняя транзакция при отключении питания).
+    ("synchronous", "NORMAL"),
+    # Ссылочная целостность: «сирота» (заказ удалённого пользователя) должен
+    # ловиться вставкой, а не находиться через полгода в отчётах.
+    ("foreign_keys", "ON"),
+)
+
+
+def sqlite_pragmas(dialect_name: str) -> tuple[tuple[str, str], ...]:
+    """PRAGMA для диалекта или понятная ошибка для не-SQLite.
+
+    Приложение работает на SQLite; для PostgreSQL эти настройки задаются на
+    сервере. Молча их игнорировать нельзя: поведение в бою оказалось бы не тем,
+    что проверяли в тестах.
+    """
+    if dialect_name != "sqlite":
+        raise UnsupportedDialectError(
+            f"Диалект {dialect_name!r}: PRAGMA journal_mode/busy_timeout/foreign_keys "
+            "применимы только к SQLite. Для PostgreSQL включи foreign keys и таймауты "
+            "блокировок на сервере и заведи миграции Alembic: лёгкие миграции из "
+            "app/db/session.py работают только с SQLite."
+        )
+    return SQLITE_PRAGMAS
+
+
 engine = create_async_engine(_settings.resolved_db_url, echo=False, future=True)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragmas(dbapi_connection, _record) -> None:  # noqa: ANN001
+    """Настроить соединение сразу после открытия.
+
+    Обработчик синхронный — так требует SQLAlchemy для события ``connect``.
+    aiosqlite выполняет его в потоке соединения, поэтому вставки в очередь нет.
+    """
+    dialect = getattr(dbapi_connection, "dialect", None)
+    name = getattr(dialect, "name", None) or engine.dialect.name
+    if name != "sqlite":
+        logger.warning(
+            "Соединение %s: PRAGMA SQLite не применяются — настрой foreign keys и "
+            "таймауты блокировок на стороне сервера БД.",
+            name,
+        )
+        return
+    cursor = dbapi_connection.cursor()
+    try:
+        for pragma, value in SQLITE_PRAGMAS:
+            cursor.execute(f"PRAGMA {pragma}={value}")
+    finally:
+        cursor.close()
+
+
 SessionMaker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
 async def init_db() -> None:
     """Создаёт таблицы, добавляет недостающие колонки и наполняет справочник тарифов."""
     async with engine.begin() as conn:
+        if conn.dialect.name != "sqlite":
+            # Явная ошибка: без неё база на другом диалекте осталась бы без схемы.
+            raise sqlite_pragmas(conn.dialect.name)
         await conn.run_sync(Base.metadata.create_all)
         await _apply_light_migrations(conn)
     await seed_plans()
