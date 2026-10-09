@@ -28,7 +28,6 @@ from app.bot.middlewares import (
     UserMiddleware,
 )
 from app.config import get_settings
-from app.db.models import User
 from app.db.session import SessionMaker, init_db
 from app.panels.base import PanelError
 from app.panels.registry import registry
@@ -175,10 +174,9 @@ async def job_check_crypto(bot: Bot) -> None:
                 continue
             if check.status is not PaymentStatus.PAID:
                 continue
-            user = await session.get(User, order.user_id)
-            if user is None:
-                continue
-            await finalize_order(session, order, bot, user)
+            # Владельца заказа finalize_order определяет сам: получатель
+            # доступа не должен зависеть от того, кто инициировал проверку.
+            await finalize_order(session, order, bot)
             await session.commit()
 
 
@@ -207,16 +205,13 @@ async def _confirm_platega_orders(bot: Bot, *, statuses: tuple[str, ...]) -> int
                 continue
             if check.status is not PaymentStatus.PAID:
                 continue
-            user = await session.get(User, order.user_id)
-            if user is None:
-                continue
             if order.status == "paid":
                 continue
 
             logger.info("Platega: заказ #%s оплачен (подтверждено опросом)", order.id)
             # finalize_order выдаёт доступ сам, в том числе по заказу, который
             # успел закрыться: деньги пришли — человек не должен ждать админа.
-            await finalize_order(session, order, bot, user)
+            await finalize_order(session, order, bot)
             granted += 1
             await session.commit()
     return granted
