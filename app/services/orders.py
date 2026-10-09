@@ -256,6 +256,8 @@ async def _record_grant_failure(
     order: Order,
     target: datetime | None,
     exc: BaseException,
+    *,
+    bot: Bot | None = None,
 ) -> None:
     """Запомнить, что оплаченный заказ ждёт выдачи, и поднять алерт.
 
@@ -263,13 +265,22 @@ async def _record_grant_failure(
     падение процесса, и rollback вызывающего. Иначе заказ снова станет
     «оплачен и забыт» — ровно та дыра, из-за которой клиент платил и не получал
     ничего (B2).
+
+    Про **немедленное сообщение**. Раньше здесь поднимался алерт вида
+    ``panel_error`` («ошибка панели», предупреждение) и дальше не происходило
+    ничего: в Telegram алерты не уходят вообще, а в 21:00 владелец видел
+    счётчик. Клиент, заплативший утром, мог ждать до вечера. Поэтому вид алерта
+    отдельный и денежный, а на первую же неудачу уходит пуш — в тот момент
+    человек ещё ждёт и всё исправимо. Повторы не шлём: ``raise_alert`` не плодит
+    строк, а увеличивает ``repeat_count``, поэтому признак «только что создан» —
+    это ``repeat_count == 1``.
     """
     order.grant_target_at = target or order.grant_target_at
     order.grant_attempts = int(order.grant_attempts or 0) + 1
     order.grant_last_error = str(exc)[:300]
-    await alerts_service.raise_alert(
+    alert = await alerts_service.raise_alert(
         session,
-        "panel_error",
+        "payment_not_granted",
         title=f"Оплачен заказ #{order.id}, доступа нет",
         message=(
             f"Заказ #{order.id} на {order.amount_rub} ₽ оплачен, но доступ не выдан: "
@@ -278,7 +289,27 @@ async def _record_grant_failure(
         fingerprint=_grant_fingerprint(order.id),
         user_id=order.user_id,
     )
+    if bot is not None and int(alert.repeat_count or 1) == 1:
+        await notifications.notify_admins(
+            bot,
+            "🔴 <b>Оплачено, доступа нет</b>\n\n"
+            f"Заказ #{order.id}, {order.amount_rub} ₽\n"
+            f"Клиент: <code>{order.user_id}</code>, попытка {order.grant_attempts}\n"
+            f"Причина: <code>{notifications.safe(order.grant_last_error)}</code>\n\n"
+            "Повторю выдачу автоматически каждые 3 минуты. "
+            "Если не получится — сообщу отдельно.",
+        )
     await session.commit()
+
+
+def _grant_stuck_fingerprint(order_id: int) -> str:
+    """Отпечаток алерта «выдача исчерпала попытки» — один на заказ.
+
+    Отдельный от ``_grant_fingerprint``: там «повторяю», здесь «сам не справлюсь».
+    Разные отпечатки дают разный признак «только что создан» в ``repeat_count``,
+    поэтому сообщение «нужен человек» уходит ровно один раз, а не каждые 3 минуты.
+    """
+    return f"grant-stuck:order:{order_id}"
 
 
 async def grant_ungranted_orders(
@@ -340,6 +371,32 @@ async def grant_ungranted_orders(
                 order.grant_attempts,
                 order.grant_last_error,
             )
+            # Автоматика сделала всё, что могла. Молчать об этом нельзя: раньше
+            # здесь была только строка в логе, и заказ оставался оплаченным без
+            # доступа навсегда. Алерт с отдельным отпечатком уходит один раз.
+            alert = await alerts_service.raise_alert(
+                session,
+                "payment_not_granted",
+                title=f"Заказ #{order.id}: выдача не удалась за {MAX_GRANT_ATTEMPTS} попыток",
+                message=(
+                    f"Заказ #{order.id} на {order.amount_rub} ₽ оплачен, доступ так и не выдан. "
+                    f"Последняя причина: {order.grant_last_error}. Автоповторы остановлены — "
+                    "нужен человек: проверить панель и выдать доступ вручную."
+                ),
+                fingerprint=_grant_stuck_fingerprint(order.id),
+                user_id=order.user_id,
+            )
+            if bot is not None and int(alert.repeat_count or 1) == 1:
+                await notifications.notify_admins(
+                    bot,
+                    "🔴 <b>Оплачено, доступа нет — автоповторы остановлены</b>\n\n"
+                    f"Заказ #{order.id}, {order.amount_rub} ₽\n"
+                    f"Попыток: {order.grant_attempts}\n"
+                    f"Причина: <code>{notifications.safe(order.grant_last_error)}</code>\n\n"
+                    "Нужен человек: проверь панель и выдай доступ вручную "
+                    "(<code>/grant</code> или карточка заказа в /admin).",
+                )
+            await session.commit()
             continue
 
         try:
@@ -348,7 +405,7 @@ async def grant_ungranted_orders(
             )
         except Exception as exc:  # noqa: BLE001 - панель может не ответить
             logger.error("Повторная выдача по заказу #%s не удалась: %s", order.id, exc)
-            await _record_grant_failure(session, order, target, exc)
+            await _record_grant_failure(session, order, target, exc, bot=bot)
             continue
 
         # Проверяем факт, а не «не было исключения»: панель могла ответить
@@ -357,7 +414,7 @@ async def grant_ungranted_orders(
         problem = _grant_problem(sub, target)
         if problem:
             logger.error("Заказ #%s: %s", order.id, problem)
-            await _record_grant_failure(session, order, target, PanelError(problem))
+            await _record_grant_failure(session, order, target, PanelError(problem), bot=bot)
             continue
 
         order.granted_at = datetime.now(timezone.utc)
@@ -536,14 +593,14 @@ async def mark_paid(
         sub = await subscriptions.activate_plan(session, user, plan, panel)
     except Exception as exc:  # noqa: BLE001 - панель может не ответить
         logger.error("Панель не выдала доступ по заказу #%s: %s", order.id, exc)
-        await _record_grant_failure(session, order, target, exc)
+        await _record_grant_failure(session, order, target, exc, bot=bot)
         return None, False
 
     # Выдача подтверждается фактом (срок в панели), а не отсутствием исключения.
     problem = _grant_problem(sub, target)
     if problem:
         logger.error("Заказ #%s: %s", order.id, problem)
-        await _record_grant_failure(session, order, target, PanelError(problem))
+        await _record_grant_failure(session, order, target, PanelError(problem), bot=bot)
         return sub, False
 
     order.granted_at = datetime.now(timezone.utc)

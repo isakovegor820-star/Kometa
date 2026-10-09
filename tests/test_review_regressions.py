@@ -211,6 +211,88 @@ async def test_short_grant_is_treated_as_failure(session):
     assert sub is not None  # подписка есть, но факт выдачи не подтверждён — ретрай доведёт
 
 
+# ---------------------------------- C5 (находка 09.10.2026): сбой выдачи слышно
+class _RecordingBot:
+    """Бот-заглушка: запоминает, что ушло команде."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[int, str]] = []
+
+    async def send_message(self, chat_id: int, text: str, **kwargs) -> None:  # noqa: ANN003, ARG002
+        self.sent.append((chat_id, text))
+
+    def texts(self) -> str:
+        return " ".join(text for _, text in self.sent)
+
+
+async def test_grant_failure_raises_money_alert_and_pushes(session):
+    """C5: «оплачено, доступа нет» — денежный алерт и сообщение, а не строка в логе.
+
+    Находка 09.10.2026: поднимался алерт вида ``panel_error`` важности ``warn``,
+    в Telegram не уходило ничего (``alerts.py`` вообще не отправляет), а после
+    десяти попыток оставался только ``logger.error``. Клиент, заплативший утром,
+    ждал до вечерней сводки, где видел счётчик алертов.
+    """
+    _, order = await _make_order(session, 9921, provider="manual")
+    bot = _RecordingBot()
+
+    await orders.mark_paid(session, order, DeadPanel(), bot=bot)
+    await session.commit()
+
+    alert = await session.scalar(select(Alert).where(Alert.fingerprint == f"grant:order:{order.id}"))
+    assert alert is not None
+    assert alert.kind == "payment_not_granted", "денежный сбой не должен зваться «ошибка панели»"
+    assert alert.severity == "err", "важность warn прятала сбой в суточной сводке"
+
+    assert bot.sent, "о «оплачено, доступа нет» команда не узнала"
+    assert f"#{order.id}" in bot.texts()
+
+
+async def test_repeated_grant_failures_do_not_spam_team(session):
+    """Повторы выдачи каждые 3 минуты не превращаются в спам."""
+    _, order = await _make_order(session, 9922, provider="manual")
+    bot = _RecordingBot()
+
+    await orders.mark_paid(session, order, DeadPanel(), bot=bot)
+    await session.commit()
+    assert len(bot.sent) == 1
+
+    for _ in range(3):
+        await orders.grant_ungranted_orders(session, [DeadPanel()], bot=bot)
+        await session.commit()
+
+    assert len(bot.sent) == 1, f"повторы снова пишут команде: {len(bot.sent)} сообщений"
+
+
+async def test_exhausted_grant_attempts_shout_once(session):
+    """Автоповторы кончились — «нужен человек» звучит ровно один раз.
+
+    Раньше здесь была только строка в логе: заказ оставался оплаченным без
+    доступа навсегда, и никто об этом не узнавал.
+    """
+    _, order = await _make_order(session, 9923, provider="manual")
+    bot = _RecordingBot()
+
+    await orders.mark_paid(session, order, DeadPanel(), bot=bot)
+    await session.commit()
+    await session.refresh(order)
+
+    order.grant_attempts = orders.MAX_GRANT_ATTEMPTS
+    await session.commit()
+    bot.sent.clear()
+
+    for _ in range(3):
+        await orders.grant_ungranted_orders(session, [DeadPanel()], bot=bot)
+        await session.commit()
+
+    stuck = await session.scalar(
+        select(Alert).where(Alert.fingerprint == f"grant-stuck:order:{order.id}")
+    )
+    assert stuck is not None, "об исчерпании попыток не поднято ни одного алерта"
+    assert stuck.kind == "payment_not_granted"
+    assert len(bot.sent) == 1, f"«нужен человек» прозвучало {len(bot.sent)} раз вместо одного"
+
+
 # ------------------------------------------------------------------------- B3
 class _StaticSource:
     """Источник выписки для теста: отдаёт заранее заданные поступления."""
@@ -288,6 +370,72 @@ async def test_amount_without_kopecks_matches_the_only_candidate(session, autopa
 
     assert found is not None and found.id == order.id
     assert "без копеек" in reason
+
+
+# ------------------------------------ C4 (находка 09.10.2026): код заказа и сумма
+async def test_order_code_with_smaller_amount_is_not_confirmed(session, autopay_env):
+    """C4: код заказа в комментарии не заменяет сверку суммы.
+
+    Находка 09.10.2026: ветка «код заказа в комментарии» возвращала заказ **до**
+    любых проверок суммы, а номер заказа последовательный и напечатан клиенту в
+    инструкции ``ManualProvider.create_invoice``. Перевод на 1 ₽ с комментарием
+    «Kometa 7» подтверждал заказ на 120 ₽, выдавал 30 дней и не поднимал алерта.
+
+    Дефект спал только потому, что реквизиты перевода не заполнены. Он
+    вооружается в день, когда вклюют СБП-перевод, — поэтому тест здесь.
+    """
+    from app.services import autopay
+
+    user, order = await _make_order(session, 9911, provider="manual")
+
+    found, reason = await autopay.find_order_for_payment(
+        session, _payment(100, comment=f"Kometa {order.id}")
+    )
+
+    assert found is None
+    assert reason == autopay.UNDERPAID_MATCH
+
+    # И на уровне всего цикла: доступ не выдаётся, платёж уходит админам.
+    result = await autopay.reconcile(
+        session,
+        None,
+        None,
+        sources=[_StaticSource([_payment(100, comment=f"Kometa {order.id}", key="op-under")])],
+    )
+    await session.commit()
+
+    assert result.confirmed == []
+    assert result.unmatched
+    assert await session.scalar(select(Subscription).where(Subscription.user_id == user.id)) is None
+    alert = await session.scalar(select(Alert).where(Alert.kind == "payment_unmatched"))
+    assert alert is not None
+
+
+async def test_order_code_with_full_amount_is_confirmed(session, autopay_env):
+    """Обычный путь не сломан: верный код и полная сумма подтверждают заказ."""
+    from app.services import autopay
+
+    _, order = await _make_order(session, 9912, provider="manual")
+
+    found, reason = await autopay.find_order_for_payment(
+        session, _payment(order.pay_amount_kopecks, comment=f"Kometa {order.id}")
+    )
+
+    assert found is not None and found.id == order.id
+    assert "по коду заказа" in reason
+
+
+async def test_order_code_with_overpayment_is_confirmed(session, autopay_env):
+    """Переплата не мешает: клиент заплатил больше — заказ подтверждаем."""
+    from app.services import autopay
+
+    _, order = await _make_order(session, 9913, provider="manual")
+
+    found, _reason = await autopay.find_order_for_payment(
+        session, _payment(order.pay_amount_kopecks + 5000, comment=f"Kometa {order.id}")
+    )
+
+    assert found is not None and found.id == order.id
 
 
 # ------------------------------------------------------------------------- B4
