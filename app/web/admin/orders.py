@@ -215,6 +215,26 @@ async def order_confirm(order_id: int, request: Request):
             await db.rollback()
             return flash_redirect("/admin/orders", error=f"Панель не выдала доступ: {exc}")
 
+        if sub is None and not already:
+            # Оплата зафиксирована, выдача не подтвердилась: заказ подхватит
+            # фоновая задача. Говорим это прямо, чтобы админ не искал «где доступ».
+            await audit.log_action(
+                db,
+                "admin.order_confirm",
+                actor=audit.Actor(name=auth.name, role=auth.role, tg_id=auth.tg_id),
+                user_id=order.user_id,
+                payload={"order_id": order_id, "amount": order.amount_rub, "grant_pending": True},
+            )
+            await db.commit()
+            return flash_redirect(
+                "/admin/orders",
+                message=(
+                    f"Заказ #{order_id} подтверждён, оплата зафиксирована. "
+                    f"Панель не подтвердила выдачу ({order.grant_last_error or 'нет ответа'}) — "
+                    "доступ выдастся автоматически в течение нескольких минут."
+                ),
+            )
+
         await audit.log_action(
             db,
             "admin.order_confirm",

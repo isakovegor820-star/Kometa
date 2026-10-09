@@ -300,16 +300,32 @@ async def activate_plan(
     panel: PanelClient | Sequence[PanelClient],
     *,
     extra_days: int = 0,
+    paid_days: int | None = None,
+    paid_devices: int | None = None,
+    paid_traffic_gb: int | None = None,
 ) -> Subscription:
-    """Оплаченная покупка/продление тарифа."""
-    bonus_days = await drain_bonus_balance(session, user, reason=plan.code)
-    days = plan.days + max(0, extra_days) + bonus_days
+    """Оплаченная покупка/продление тарифа.
+
+    Накопленные бонусные дни списываем **после** успешного ответа панели: если
+    панель не ответила, выдача повторится (``orders.grant_ungranted_orders``), и
+    баланс должен дойти до клиента, а не исчезнуть в неудачной попытке.
+
+    ``paid_*`` — условия, которые клиент оплатил (снимок заказа). Их передаёт
+    выдача: пока счёт не закрыт, тариф могли отредактировать, и читать живой
+    прайс значит выдать не то, за что заплатили. ``None`` — снимка нет, берём
+    тариф как раньше.
+    """
+    bonus_days = int(user.bonus_days_balance or 0)
+    plan_days = plan.days if paid_days is None else int(paid_days)
+    devices = plan.devices_limit if paid_devices is None else int(paid_devices)
+    traffic_gb = plan.traffic_limit_gb if paid_traffic_gb is None else int(paid_traffic_gb)
+    days = plan_days + max(0, extra_days) + bonus_days
     sub = await get_subscription(session, user.id)
     spec = UserSpec(
         email=_panel_email(user),
         days=days,
-        traffic_gb=plan.traffic_limit_gb,
-        devices=plan.devices_limit,
+        traffic_gb=traffic_gb,
+        devices=devices,
         note=plan.code,
     )
 
@@ -328,8 +344,8 @@ async def activate_plan(
                 panels,
                 sub.panel_user_uuid,
                 extend_days=days,
-                traffic_gb=plan.traffic_limit_gb,
-                devices=plan.devices_limit,
+                traffic_gb=traffic_gb,
+                devices=devices,
                 enable=True,
             )
         except PanelError as exc:
@@ -348,11 +364,21 @@ async def activate_plan(
 
     sub.status = "active"
     sub.plan_id = plan.id
-    sub.devices_limit = plan.devices_limit
-    sub.traffic_limit_gb = plan.traffic_limit_gb
+    sub.devices_limit = devices
+    sub.traffic_limit_gb = traffic_gb
     sub.expires_at = panel_user.expires_at or (datetime.now(timezone.utc) + timedelta(days=days))
     sub.notified_3d = False
     sub.notified_1d = False
+
+    # Дни уже учтены в сроке выше — теперь их можно списать с баланса.
+    if bonus_days > 0:
+        user.bonus_days_balance = 0
+        await events.log_event(
+            session,
+            events.BONUS_DAYS_APPLIED,
+            user_id=user.id,
+            payload={"days": bonus_days, "reason": plan.code},
+        )
     await session.flush()
     return sub
 

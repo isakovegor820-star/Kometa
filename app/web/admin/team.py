@@ -235,11 +235,20 @@ async def team_update(
             "tg_id": account.tg_id,
         }
         account.display_name = display_name or account.login
+        # Смена роли, пароля или выключение учётки гасит все её прежние сессии:
+        # именно здесь поднимается версия, которую сверяет require().
+        security_sensitive = (
+            account.role != role
+            or account.is_active != new_active
+            or bool(password)
+        )
         account.role = role
         account.is_active = new_active
         account.tg_id = tg_value
         if password:
             account.password_hash = security.hash_password(password)
+        if security_sensitive:
+            await security.bump_session_version(db, account)
         after = {
             "display_name": account.display_name,
             "role": account.role,
@@ -278,6 +287,8 @@ async def team_reset_password(account_id: int, request: Request):
 
         password = security.new_password()
         account.password_hash = security.hash_password(password)
+        # Новый пароль — старые сессии (в том числе у того, кто знал прежний) недействительны.
+        await security.bump_session_version(db, account)
         await audit.log_action(
             db,
             "admin.team_updated",

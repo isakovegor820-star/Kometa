@@ -249,13 +249,34 @@ async def _apply(  # pragma: no cover - ручной запуск
         )
         print(f"✅ Пост отправлен: {message_link(chat_id, sent.message_id)}")
         if pin:
-            await bot.pin_chat_message(
-                chat_id=chat_id, message_id=sent.message_id, disable_notification=True
-            )
-            print("✅ Закреплён без уведомления — новый человек видит его первым")
+            from aiogram.exceptions import TelegramBadRequest
+
+            try:
+                await bot.pin_chat_message(
+                    chat_id=chat_id, message_id=sent.message_id, disable_notification=True
+                )
+                print("✅ Закреплён без уведомления — новый человек видит его первым")
+            except TelegramBadRequest as exc:
+                # Пост уже ушёл, поэтому падать нельзя: «команда не сработала»
+                # читается как «ничего не вышло», и владелец публикует второй раз.
+                # Права can_pin_messages у бота нет (проверено 09.10.2026), а без
+                # него закрепить нельзя — это делает человек в Telegram.
+                print(pin_problem_text(exc))
+                return 1
         return 0
     finally:
         await bot.session.close()
+
+
+def pin_problem_text(exc: BaseException) -> str:
+    """Что сказать, когда пост ушёл, а закрепить не вышло."""
+    return (
+        f"⚠️ Пост отправлен, но закрепить не удалось: {exc}\n"
+        "   Причина — нет права can_pin_messages. Telegram → канал → управление →\n"
+        "   администраторы → бот → включить «Закреплять сообщения».\n"
+        "   Дальше: закрепить этот пост вручную либо повторить\n"
+        "   `python -m app.tools.post_channel --text first --apply --pin`."
+    )
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover - ручной запуск

@@ -38,17 +38,21 @@ async def test_manual_channel_keeps_full_amount(session):
     assert manual.fee_percent == 0
 
 
-async def test_wata_channel_subtracts_acquiring_fee(session, monkeypatch):
-    monkeypatch.setattr(settings, "fee_percent_wata", 3.5)
-    _, plan = await make_paid_order(session, 9902, "wata")
+async def test_unknown_channel_uses_default_fee(session, monkeypatch):
+    """Незнакомый код провайдера не должен ломать отчёт: считаем по умолчанию.
+
+    Так же рисуются исторические заказы удалённого канала: строки в выручке
+    остаются, даже если провайдера больше нет в реестре (B1/WATA).
+    """
+    monkeypatch.setattr(settings, "fee_percent_manual", 1.5)
+    _, plan = await make_paid_order(session, 9902, "legacy-channel")
     await session.flush()
 
     channels = await stats.channel_economics(session, days=30)
-    wata = next(c for c in channels if c.provider == "wata")
+    legacy = next(c for c in channels if c.provider == "legacy-channel")
 
-    assert wata.gross_rub == plan.price_rub
-    assert wata.net_rub == round(plan.price_rub * (1 - 0.035))
-    assert 3.0 < wata.fee_percent < 4.0
+    assert legacy.gross_rub == plan.price_rub
+    assert legacy.net_rub == round(plan.price_rub * (1 - 0.015))
 
 
 async def test_sbp_partner_channel_subtracts_eight_percent(session, monkeypatch):

@@ -22,12 +22,18 @@ from sqlalchemy import (
     Text,
     TypeDecorator,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+#: Как показываем клиента, чьи персональные данные удалены (анонимизирован).
+#: Единое место: и карточка в панели, и уведомления, и сервис ретенции.
+ANONYMIZED_DISPLAY_NAME = "удалён"
 
 
 class TZDateTime(TypeDecorator):
@@ -105,6 +111,12 @@ class User(Base):
     #: Код последнего отправленного сценария — для отчёта «что сработало».
     last_lifecycle_kind: Mapped[str] = mapped_column(String(32), default="")
 
+    #: Когда персональные данные удалены: по запросу клиента или задачей ретенции
+    #: после 12 месяцев без активности. Стоит — значит имя, @username, tg_id и
+    #: заметки обнулены, а заказы и суммы остались (налоговый учёт, 4 года).
+    #: По этому полю видно и то, что повторное удаление ничего не сделает.
+    anonymized_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+
     subscription: Mapped["Subscription | None"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
@@ -118,7 +130,14 @@ class User(Base):
 
     @property
     def display_name(self) -> str:
+        # Персональные данные удалены — показывать имя нечего и нельзя.
+        if self.anonymized_at is not None:
+            return ANONYMIZED_DISPLAY_NAME
         return self.first_name or (f"@{self.username}" if self.username else f"id{self.tg_id}")
+
+    @property
+    def is_anonymized(self) -> bool:
+        return self.anonymized_at is not None
 
 
 class Plan(Base):
@@ -173,7 +192,24 @@ class Subscription(Base):
 
 class Order(Base):
     __tablename__ = "orders"
-    __table_args__ = (Index("ix_orders_status_created", "status", "created_at"),)
+    __table_args__ = (
+        Index("ix_orders_status_created", "status", "created_at"),
+        # Частичный UNIQUE: среди ОТКРЫТЫХ заказов не может быть двух с
+        # одинаковой парой «сумма + копейки», иначе автоплатёж не поймёт, чей
+        # это перевод (H3). Частичный — потому что оплаченные заказы живут по
+        # своим правилам, а у не-ручных способов (Stars, Platega) копеек нет
+        # вовсе: pay_kopecks = 0, и общий UNIQUE запретил бы два счёта на одну
+        # сумму. Условие ``pay_kopecks > 0`` оставляет в индексе только заказы
+        # с реальной подписью.
+        Index(
+            "uq_orders_pending_kopeck",
+            "amount_rub",
+            "pay_kopecks",
+            unique=True,
+            sqlite_where=text("status = 'pending' AND pay_kopecks > 0"),
+            postgresql_where=text("status = 'pending' AND pay_kopecks > 0"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
@@ -189,6 +225,22 @@ class Order(Base):
     promo_code: Mapped[str | None] = mapped_column(String(32), default=None)
     #: Цена этого заказа в звёздах (со скидкой). 0 — заказ не звёздный.
     stars_amount: Mapped[int] = mapped_column(Integer, default=0)
+    #: Снимок условий тарифа на момент заказа: срок, устройств, ГБ.
+    #:
+    #: Нужен потому, что выдача читала ЖИВОЙ тариф. Правка ``plan.days`` в окне
+    #: заказа (до 24 часов: закрытые заказы переопрашиваются) давала оплату 120 ₽
+    #: за 364 дня вместо 959 ₽ — и наоборот, клиент получал меньше оплаченного.
+    #: ``None`` означает «снимка нет» (заказы до 09.10.2026) — тогда берём живой
+    #: тариф, как было раньше.
+    plan_days: Mapped[int | None] = mapped_column(Integer, default=None)
+    plan_devices_limit: Mapped[int | None] = mapped_column(Integer, default=None)
+    plan_traffic_gb: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: Когда заказ взят на выдачу. Между «оплата зафиксирована» и «панель
+    #: ответила» заказ виден как ``paid`` + ``granted_at IS NULL``, поэтому
+    #: фоновая задача брала его и звала панель второй раз по тому же платежу.
+    #: Захват снимается по завершении попытки; если процесс упал — истекает сам
+    #: (``GRANT_CLAIM_TTL_MINUTES``), чтобы заказ не завис навсегда.
+    grant_claimed_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
     #: Уникальная надбавка в копейках (1…99) для автоматического сопоставления
     #: перевода с заказом: 199 ₽ + 13 копеек = 199.13 ₽.
     pay_kopecks: Mapped[int] = mapped_column(Integer, default=0)
@@ -217,6 +269,23 @@ class Order(Base):
     #: Нужно, чтобы фоновая проверка не писала об одном платеже каждые 2 минуты,
     #: и чтобы админ вообще узнал о деньгах, за которые ничего не выдано.
     payment_alerted_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+
+    # --- выдача доступа после оплаты ---------------------------------------
+    #: До какого срока подписка должна была продлиться. Считается в момент
+    #: захвата заказа — **до** обращения к панели. По нему проверяем факт:
+    #: «панель продлила хотя бы до этой даты». Без цели нельзя отличить
+    #: «панель ничего не сделала» от «панель продлила, но ответ потерялся».
+    grant_target_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    #: Когда доступ фактически выдан (панель подтвердила срок). Пусто у
+    #: оплаченного заказа — значит выдача не состоялась, и её повторит
+    #: фоновая задача: деньги приняты, клиент без доступа не остаётся.
+    granted_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    #: Сколько раз пытались выдать доступ. Ограничиваем: бесконечно бить в
+    #: мёртвую панель нельзя, после лимита нужен человек (алерт уже поднят).
+    grant_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    #: Текст последней ошибки выдачи: виден в админке и в алерте — «панель не
+    #: ответила», «выдала до 12.11, а ожидали минимум 12.12» и т.п.
+    grant_last_error: Mapped[str] = mapped_column(String(300), default="")
 
     # --- подарочный сертификат ---------------------------------------------
     #: Токен подарка (``KOMETA-GIFT-XXXXXXXX``). Заполнен — заказ подарочный:
@@ -615,6 +684,11 @@ class AdminAccount(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    #: Версия сессий учётной записи. Растёт при выходе, смене пароля, роли и
+    #: деактивации — и все выданные ранее cookie становятся недействительными.
+    #: Без неё выход не «выключал» сессию на сервере: украденная cookie жила
+    #: свои 12 часов, а понижение роли не мешало делать прежние действия.
+    session_version: Mapped[int] = mapped_column(Integer, default=1)
 
     @property
     def name(self) -> str:

@@ -28,7 +28,6 @@ from app.bot.middlewares import (
     UserMiddleware,
 )
 from app.config import get_settings
-from app.db.models import User
 from app.db.session import SessionMaker, init_db
 from app.panels.base import PanelError
 from app.panels.registry import registry
@@ -175,10 +174,9 @@ async def job_check_crypto(bot: Bot) -> None:
                 continue
             if check.status is not PaymentStatus.PAID:
                 continue
-            user = await session.get(User, order.user_id)
-            if user is None:
-                continue
-            await finalize_order(session, order, bot, user)
+            # Владельца заказа finalize_order определяет сам: получатель
+            # доступа не должен зависеть от того, кто инициировал проверку.
+            await finalize_order(session, order, bot)
             await session.commit()
 
 
@@ -207,16 +205,13 @@ async def _confirm_platega_orders(bot: Bot, *, statuses: tuple[str, ...]) -> int
                 continue
             if check.status is not PaymentStatus.PAID:
                 continue
-            user = await session.get(User, order.user_id)
-            if user is None:
-                continue
             if order.status == "paid":
                 continue
 
             logger.info("Platega: заказ #%s оплачен (подтверждено опросом)", order.id)
             # finalize_order выдаёт доступ сам, в том числе по заказу, который
             # успел закрыться: деньги пришли — человек не должен ждать админа.
-            await finalize_order(session, order, bot, user)
+            await finalize_order(session, order, bot)
             granted += 1
             await session.commit()
     return granted
@@ -269,6 +264,64 @@ async def startup_payment_check(bot: Bot) -> None:
         logger.warning("Стартовая проверка платежей не удалась: %s", exc)
 
 
+async def job_grant_paid(bot: Bot) -> None:
+    """Довести до доступа оплаченные заказы, по которым выдача не подтверждена.
+
+    Закрывает дыру «деньги приняты, доступа нет и не будет»: если панель не
+    ответила в момент оплаты, заказ остаётся с пустым ``granted_at`` и попадает
+    сюда. Функция сверяет факт (срок в панели) и либо отмечает выдачу
+    выполненной, либо повторяет её — с алертом и ограничением числа попыток.
+    """
+    from app.services import orders as orders_service
+
+    async with SessionMaker() as session:
+        try:
+            granted = await orders_service.grant_ungranted_orders(session, bot=bot)
+        except Exception as exc:  # noqa: BLE001 - фоновая задача не должна падать молча
+            logger.exception("Повторная выдача доступа упала: %s", exc)
+            return
+        await session.commit()
+        if granted:
+            logger.info("Повторная выдача доступа: заказы %s", granted)
+
+
+async def job_retention(bot: Bot) -> None:
+    """Ретенция персональных данных: чистка журналов и анонимизация молчунов.
+
+    Сроки — решение владельца, зафиксированы в одном месте
+    (``app/services/retention.py``) и совпадают с Политикой конфиденциальности:
+    технические журналы — 30 дней, аккаунт без активности 12 месяцев —
+    анонимизация, заказы и платежи — 4 года (их не трогаем).
+    """
+    from app.services import retention
+
+    async with SessionMaker() as session:
+        try:
+            purged = await retention.purge_old_records(session)
+            anonymized = await retention.anonymize_inactive_users(session)
+            await session.commit()
+        except Exception as exc:  # noqa: BLE001 - фоновая задача не должна падать молча
+            logger.exception("Ретенция упала: %s", exc)
+            return
+
+    if not purged.total and not anonymized:
+        logger.info("Ретенция: чистить нечего")
+        return
+    logger.info(
+        "Ретенция: удалено (%s), анонимизировано пользователей: %s",
+        purged.as_text(),
+        len(anonymized),
+    )
+    if bot is not None:
+        await notifications.notify_admins(
+            bot,
+            "🧹 <b>Ретенция данных</b>\n"
+            f"Удалено старше {retention.EVENTS_RETENTION_DAYS} дней — {purged.as_text()}.\n"
+            f"Анонимизировано без активности {retention.INACTIVITY_MONTHS} мес.: {len(anonymized)}.\n"
+            "Заказы и суммы сохранены (налоговый учёт, 4 года).",
+        )
+
+
 async def job_autopay(bot: Bot) -> None:
     """Автоподтверждение переводов по выписке банка."""
     from app.services import autopay
@@ -282,7 +335,7 @@ async def job_autopay(bot: Bot) -> None:
             logger.exception("Автоплатёж упал: %s", exc)
             return
         await session.commit()
-        if result.fetched or result.confirmed or result.errors:
+        if result.fetched or result.confirmed or result.errors or result.pending_grant:
             logger.info("Автоплатёж: %s", result.as_text())
 
 
@@ -498,6 +551,19 @@ async def main() -> None:
         minutes=settings.autopay_interval_minutes,
         args=[bot],
         id="autopay",
+    )
+    # Повторная выдача доступа по оплаченным заказам: панель могла не ответить
+    # в момент оплаты. Раз в 3 минуты — клиент не должен ждать человека.
+    scheduler.add_job(job_grant_paid, "interval", minutes=3, args=[bot], id="grant_paid")
+    # Ретенция: раз в сутки ночью (03:00 UTC = 06:00 МСК), когда никто не работает.
+    # Задача чистит журналы старше 30 дней и анонимизирует тех, кто молчит 12 месяцев.
+    scheduler.add_job(
+        job_retention,
+        "cron",
+        hour=3,
+        minute=0,
+        args=[bot],
+        id="retention",
     )
     scheduler.add_job(job_node_health, "interval", minutes=5, args=[bot], id="node_health")
     # Проба «глазами клиента»: TCP-порт и задержка. Отдельно от проверки

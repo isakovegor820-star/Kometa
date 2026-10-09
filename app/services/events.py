@@ -52,6 +52,10 @@ PARTNER_PAID_OUT = "partner_paid_out"
 #: Персональная ссылка под конкретного человека: создана и активирована.
 PERSONAL_LINK_CREATED = "personal_link_created"
 PERSONAL_LINK_USED = "personal_link_used"
+#: Персональные данные удалены: по запросу клиента или задачей ретенции.
+USER_ANONYMIZED = "user_anonymized"
+#: Задача ретенции почистила старые журналы (события/алерты/рассылки).
+RETENTION_PURGED = "retention_purged"
 
 
 async def log_event(

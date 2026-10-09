@@ -158,16 +158,6 @@ DISCOUNT_NOTE = " Скидка <b>{discount} ₽</b> по промокоду <co
 PROVIDER_MANUAL = " Перевод по СБП / на карту"
 PROVIDER_CRYPTO = " Крипта (USDT/TON)"
 PROVIDER_STARS = "⭐️ Telegram Stars"
-PROVIDER_WATA = "💳 Карта / СБП / T-Pay"
-
-ORDER_CREATED_WATA = (
-    "💳 <b>Заказ #{order_id} на {amount} ₽</b>\n\n"
-  "Нажми «Оплатить» — откроется защищённая страница оплаты: карта (МИР, Visa, Mastercard), "
-  "СБП, T-Pay или SberPay.\n\n"
-  "Доступ включится <b>автоматически</b> сразу после оплаты. Если этого не произошло за пару минут — "
-  "нажми «Проверить оплату»."
-)
-
 ORDER_CREATED_PLATEGA = (
     "💳 <b>Заказ #{order_id} на {amount} ₽</b>\n\n"
   "Нажми «Оплатить»: откроется страница оплаты — {method}.\n"

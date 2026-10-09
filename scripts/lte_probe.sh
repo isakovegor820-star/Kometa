@@ -146,6 +146,12 @@ classify_rc() { # classify_rc <rc> <префикс>
     local rc="$1" p="$2"
     case "$rc" in
         0 | 60 | 92) eval "${p}_tls=\$((${p}_tls + 1))" ;;
+        # rc=52 (CURLE_GOT_NOTHING) — сервер закрыл соединение без ответа, но
+        # ТОЛЬКО ПОСЛЕ завершённого TLS: проверено openssl s_client на
+        # 95.181.181.5 — handshake TLSv1.3 состоялся, сертификат *.edgecenter.ru.
+        # Значит адрес ПРОШЁЛ. Без этой ветки рабочий адрес попадал в «прочее»
+        # и вердикт получался «смешанная картина» — вход отбраковывался зря.
+        52)          eval "${p}_empty=\$((${p}_empty + 1))" ;;
         35)          eval "${p}_hs=\$((${p}_hs + 1))" ;;
         7)           eval "${p}_rst=\$((${p}_rst + 1))" ;;
         28)          eval "${p}_to=\$((${p}_to + 1))" ;;
@@ -166,25 +172,25 @@ probe_once() { # probe_once <host> <port> <префикс> [quiet]
 # Проверка адреса БЕЗ слушателя: rc=28 (тишина) = L3 пропускает, rc=7 = блок.
 # Именно так проверяется «белая» /24, не поднимая на ней сервер.
 check_quiet_addr() { # check_quiet_addr <IP> [группа: подсеть или метка пула]
-    local ip="$1" group="${2:-}" q_tls=0 q_hs=0 q_rst=0 q_to=0 q_other=0 attempt verdict
+    local ip="$1" group="${2:-}" q_tls=0 q_hs=0 q_rst=0 q_to=0 q_other=0 q_empty=0 attempt verdict
     for ((attempt = 1; attempt <= REPEAT; attempt++)); do
         probe_once "$ip" 443 q quiet
     done
     printf '%-16s ' "$ip"
-    if [[ "$q_rst" -gt 0 && "$q_to" -eq 0 && "$q_tls" -eq 0 && "$q_hs" -eq 0 ]]; then
+    if [[ "$q_rst" -gt 0 && "$q_to" -eq 0 && "$q_tls" -eq 0 && "$q_hs" -eq 0 && "$q_empty" -eq 0 ]]; then
         verdict="БЛОК"
         printf '❌ БЛОК (RST): адрес отброшен фильтром\n'
     elif [[ "$q_to" -gt 0 && "$q_rst" -eq 0 ]]; then
         verdict="ПРОХОДИТ"
         printf '✅ ПРОХОДИТ (тишина = нет слушателя, L3 пропускает)\n'
-    elif [[ "$q_tls" -gt 0 || "$q_hs" -gt 0 ]]; then
+    elif [[ "$q_tls" -gt 0 || "$q_hs" -gt 0 || "$q_empty" -gt 0 ]]; then
         verdict="КТО-ТО ЕСТЬ"
         printf '⚠️  на адресе кто-то есть (rc TOS/TLS) — для проверки /24 бери пустой\n'
     else
         verdict="СМЕШАННО"
         printf '❓ смешанно (RST=%d, тишина=%d) — повтори\n' "$q_rst" "$q_to"
     fi
-    report_row "range" "$ip" "$group" "$verdict" "rst=$q_rst;to=$q_to;tls=$q_tls;hs=$q_hs"
+    report_row "range" "$ip" "$group" "$verdict" "rst=$q_rst;to=$q_to;tls=$q_tls;hs=$q_hs;empty=$q_empty"
 }
 
 # Режим --pool: проверить пул входов (основной + резерв) и сказать, какой годится.
@@ -193,12 +199,36 @@ check_quiet_addr() { # check_quiet_addr <IP> [группа: подсеть ил�
 #   cold 91.240.86.0/24
 # Для адреса проверяется он сам (--deep), для подсети — пустые соседи (--check-range):
 # так видно, работает ли «эффект соседа» и есть ли куда переехать, когда основной выгорит.
+# Контроль сети для пула. До трёх попыток: на мобильном канале одиночный таймаут —
+# обычное дело (проверено 09.10.2026: контроль в конце пула дал rc=28 при живом канале).
+# Без повтора один мигнувший контроль помечал бы весь батч недействительным.
+pool_control() { # pool_control <метка: begin|end>
+    local tag="$1" rc=0 attempt=0
+    for attempt in 1 2 3; do
+        rc=0
+        curl -sS -o /dev/null -m "$TIMEOUT" "$CONTROL_URL" 2>/dev/null || rc=$?
+        [[ "$rc" -eq 0 ]] && break
+        sleep 2
+    done
+    report_row "control" "$CONTROL_URL" "allowed" \
+        "$([[ "$rc" -eq 0 ]] && echo ПРОХОДИТ || echo БЛОК)" "rc=${rc};pool=${tag};attempts=${attempt}"
+    [[ "$rc" -eq 0 ]]
+}
+
 check_pool() { # check_pool <файл>
     local file="$1" line label target
     [[ -f "$file" ]] || { echo "Файл не найден: $file" >&2; return 2; }
     echo "Проверка пула входов: ${file}"
     echo "Контроль: ${CONTROL_URL}"
     echo "======================================================================"
+    # Контроль в начале и в конце пула — и СТРОКОЙ В CSV, а не только на экране:
+    # без этого по отчёту нельзя проверить, был ли вообще контроль в батче,
+    # и разбор (analyze-probes.py) не может отличить валидный батч от мусора.
+    if pool_control begin; then
+        echo "контроль до              ✅ интернет есть"
+    else
+        echo "контроль до              ⚠️  контроль не ответил за 3 попытки"
+    fi
     local ready=0 total=0
     while read -r line; do
         line="${line%%#*}"
@@ -215,6 +245,11 @@ check_pool() { # check_pool <файл>
             ready=$((ready + 1))
         fi
     done < "$file"
+    if pool_control end; then
+        echo "контроль после           ✅ интернет есть"
+    else
+        echo "контроль после           ⚠️  контроль не ответил за 3 попытки"
+    fi
     echo "======================================================================"
     echo "Проверено входов: ${total}. Не забудьте: нужен минимум ОДИН резервный адрес"
     echo "в другой /24 у второго хостера — без него цикл замены занимает сутки."
@@ -248,7 +283,7 @@ check_range() { # check_range <a.b.c.0/24>
 }
 
 probe_deep() {
-    local host="$1" port="$2" attempt rc tls_ok=0 handshake=0 rst=0 timeout=0 other=0 verdict
+    local host="$1" port="$2" attempt rc tls_ok=0 handshake=0 rst=0 timeout=0 other=0 empty=0 verdict
     echo "Глубокий замер: ${host}:${port}, попыток: ${REPEAT}"
     echo "Контроль: ${CONTROL_URL}"
     echo "----------------------------------------------------------------------"
@@ -265,10 +300,13 @@ probe_deep() {
         rc=0
         curl -sk -o /dev/null -m "$TIMEOUT" "https://${host}:${port}" 2>/dev/null || rc=$?
         # rc=0/60/92 — TLS состоялся (60 = сертификат, 92 = HTTP/2): адрес точно
-        # проходит. rc=35 (обрыв на рукопожатии) — НЕОДНОЗНАЧНО: так же выглядит
+        # проходит. rc=52 — TLS тоже состоялся, но сервер закрыл соединение без
+        # ответа (проверено на 95.181.181.5: handshake TLSv1.3 прошёл) — тоже
+        # «проходит». rc=35 (обрыв на рукопожатии) — НЕОДНОЗНАЧНО: так же выглядит
         # и перехват, и блок без RST, и медленный слушатель. В «прошло» не идёт.
         case "$rc" in
             0 | 60 | 92) tls_ok=$((tls_ok + 1)) ;;
+            52) empty=$((empty + 1)) ;;
             35) handshake=$((handshake + 1)) ;;
             7)  rst=$((rst + 1)) ;;
             28) timeout=$((timeout + 1)) ;;
@@ -278,12 +316,17 @@ probe_deep() {
     done
 
     echo "----------------------------------------------------------------------"
-    printf 'Итог %s:%s → TLS состоялся: %d · обрыв на рукопожатии (rc=35): %d · RST (rc=7, фильтр): %d · таймаут (rc=28): %d · прочее: %d\n' \
-        "$host" "$port" "$tls_ok" "$handshake" "$rst" "$timeout" "$other"
+    printf 'Итог %s:%s → TLS состоялся: %d · пустой ответ после TLS (rc=52): %d · обрыв на рукопожатии (rc=35): %d · RST (rc=7, фильтр): %d · таймаут (rc=28): %d · прочее: %d\n' \
+        "$host" "$port" "$tls_ok" "$empty" "$handshake" "$rst" "$timeout" "$other"
 
-    if [[ "$tls_ok" -gt 0 ]]; then
+    if [[ "$tls_ok" -gt 0 || "$empty" -gt 0 ]]; then
         verdict="ПРОХОДИТ"
-        echo "ВЕРДИКТ: адрес ПРОХОДИТ — TCP и TLS состоялись. Можно брать."
+        if [[ "$tls_ok" -gt 0 ]]; then
+            echo "ВЕРДИКТ: адрес ПРОХОДИТ — TCP и TLS состоялись. Можно брать."
+        else
+            echo "ВЕРДИКТ: адрес ПРОХОДИТ — TLS состоялся, но сервер закрыл соединение без"
+            echo "          ответа (rc=52). L3 и TLS прошли; для входа нужен свой TLS-слушатель."
+        fi
     elif [[ "$handshake" -gt 0 && "$rst" -eq 0 && "$timeout" -eq 0 ]]; then
         verdict="НЕОДНОЗНАЧНО"
         echo "ВЕРДИКТ: НЕОДНОЗНАЧНО — TCP есть, TLS обрывается (rc=35)."
@@ -301,7 +344,7 @@ probe_deep() {
         echo "ВЕРДИКТ: смешанная картина — режим переключается по вышкам. Повтори замер."
     fi
     report_row "deep" "${host}:${port}" "" "$verdict" \
-        "tls=$tls_ok;hs=$handshake;rst=$rst;to=$timeout;other=$other;sni=${SNI:-нет}"
+        "tls=$tls_ok;empty=$empty;hs=$handshake;rst=$rst;to=$timeout;other=$other;sni=${SNI:-нет}"
 
     if run_timeout "$((TIMEOUT + 2))" curl "${curl_args[@]}" "$CONTROL_URL" >/dev/null 2>&1; then
         pass "контроль после" "интернет есть"

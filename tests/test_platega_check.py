@@ -30,6 +30,21 @@ def make_provider(handler) -> PlategaProvider:  # noqa: ANN001
     )
 
 
+@pytest.fixture(autouse=True)
+def isolate_probe_state(tmp_path, monkeypatch):
+    """Файл прошлой проверки — в tmp, а не в ``data/platega_probe.json``.
+
+    Этот файл лежит в ``data/`` и в git не попадает. Пока фикстуры не было,
+    тесты самопроверки читали результат чужого прогона: на машине владельца
+    (файл есть) всё зелёное, а в чистом клоне и в CI — падение. Релизный гейт
+    обязан быть одинаковым везде, поэтому состояние изолируем.
+    """
+    from app.tools import platega_check
+
+    monkeypatch.setattr(platega_check, "PROBE_STATE_FILE", tmp_path / "platega_probe.json")
+    yield
+
+
 @pytest.mark.parametrize(
     ("base", "expected"),
     [
@@ -269,12 +284,48 @@ async def test_run_accepts_webhook_off_mode(monkeypatch):
         return True
 
     monkeypatch.setattr(platega_check, "check_credentials", fake_credentials)
+    # Подтверждённые единицы суммы — отдельное условие (его проверяет тест
+    # ниже). Здесь проверяем именно Callback URL, поэтому кладём результат
+    # прошлой живой проверки явно, а не надеемся на файл в data/.
+    platega_check.write_probe_state(
+        {
+            "amount_unit": "rubles",
+            "checked_at": "2026-10-09T00:00:00+00:00",
+            "evidence": "тест: рубли подтверждены",
+        }
+    )
 
     report = await platega_check.run(probe=False)
 
     assert not any("localhost" in issue for issue in report.issues)
     assert any("опросом" in line for line in report.lines)
     assert report.ok, report.as_text()
+
+
+async def test_run_requires_confirmed_amount_unit(monkeypatch):
+    """Без подтверждённых единиц суммы самопроверка не пропускает продажи.
+
+    Это защита от «клиент заплатит в 100 раз меньше»: пока живая проверка не
+    подтвердила единицы, включать приём платежей нельзя. Состояние проверки
+    изолировано фикстурой, поэтому тест одинаково работает и на машине
+    владельца, и в чистом клоне, и в CI.
+    """
+    from app.config import get_settings
+    from app.tools import platega_check
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "platega_merchant_id", "34c1b38c-6068-4196-bdd4-8fea587e8d75")
+    monkeypatch.setattr(settings, "platega_secret", "secret")
+
+    async def fake_credentials(provider, report):  # noqa: ANN001, ARG001
+        return True
+
+    monkeypatch.setattr(platega_check, "check_credentials", fake_credentials)
+
+    report = await platega_check.run(probe=False)
+
+    assert not report.ok
+    assert any("не подтверждены живой проверкой" in issue for issue in report.issues)
 
 
 async def test_run_still_requires_public_url_with_webhook(monkeypatch):

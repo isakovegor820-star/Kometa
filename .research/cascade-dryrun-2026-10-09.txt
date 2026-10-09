@@ -1,0 +1,255 @@
+=== Проверка add_cascade_exit.sh в режиме dry-run, 09.10.2026 ===
+Цель проверки: подтвердить, что «готовая схема» действительно делает то, что заявлено,
+и совместима со штатным macOS bash 3.2. Панель фиктивная — в сеть скрипт не ходил.
+
+[!] shortId (--exit-sid) не задан: поле в outbound не попадёт. Это сработает только если в инбаунде выхода shortIds содержит пустую строку; install_node.sh задаёт непустой shortId — тогда соединение не поднимется.
+
+══════════════════════════════════════════════════════════════
+KOMETA • КАСКАД: ВХОД (РФ) → ЗАРУБЕЖНЫЙ ВЫХОД
+══════════════════════════════════════════════════════════════
+  панель входа : https://127.0.0.1:2053
+  выход        : 203.0.113.10:443 (VLESS+Reality, SNI www.example.com, fp firefox, flow xtls-rprx-vision)
+  тег outbound : Kometa-Exit
+  напрямую     : 10 записей (домены: 8, ip: 2) — встроенный список
+  domainStrategy: IPIfNonMatch
+  правила      : сначала direct (РФ — напрямую), последним — Kometa-Exit
+  inboundTag   : все инбаунды (правило-ловушка)
+  бэкап        : ./backup-xray-20261009-145207.json (только с --apply)
+  режим        : DRY-RUN (ничего не отправляю)
+
+OUTBOUND «Kometa-Exit» (уйдёт в outbounds xrayTemplateConfig)
+{
+  "tag": "Kometa-Exit",
+  "protocol": "vless",
+  "settings": {
+    "vnext": [
+      {
+        "address": "203.0.113.10",
+        "port": 443,
+        "users": [
+          {
+            "id": "11111111-2222-3333-4444-555555555555",
+            "encryption": "none",
+            "flow": "xtls-rprx-vision"
+          }
+        ]
+      }
+    ]
+  },
+  "streamSettings": {
+    "network": "tcp",
+    "security": "reality",
+    "realitySettings": {
+      "serverName": "www.example.com",
+      "fingerprint": "firefox",
+      "publicKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "spiderX": "/"
+    }
+  },
+  "mux": {
+    "enabled": false
+  }
+}
+
+══════════════════════════════════════════════════════════════
+ПРАВИЛА МАРШРУТИЗАЦИИ (порядок в routing.rules)
+══════════════════════════════════════════════════════════════
+  1) служебные правила панели (inboundTag: api → api) — остаются ВЫШЕ нашего
+     direct: иначе служебный трафик панели попадёт под geoip:private и уедет
+     в direct (панель теряет статистику);
+  2) НАШЕ первое: direct — список «напрямую» (10 записей);
+  3) прочие правила шаблона (blocked: bittorrent и т.п.) — сохраняются как были;
+  4) НАШЕ последнее: всё остальное → Kometa-Exit (все инбаунды).
+
+ПРАВИЛО «НАПРЯМУЮ» (direct — РФ-сервисы не уходят в туннель)
+{
+  "type": "field",
+  "ruleTag": "Kometa-Direct",
+  "outboundTag": "direct",
+  "domain": [
+    "geosite:category-ru",
+    "domain:gosuslugi.ru",
+    "domain:vk.com",
+    "domain:yandex.ru",
+    "domain:ozon.ru",
+    "domain:wildberries.ru",
+    "domain:sberbank.ru",
+    "domain:tbank.ru"
+  ],
+  "ip": [
+    "geoip:ru",
+    "geoip:private"
+  ]
+}
+
+ПРАВИЛО «НА ВЫХОД» (Kometa-Exit — всё остальное)
+{
+  "type": "field",
+  "ruleTag": "Kometa-Exit-Rule",
+  "outboundTag": "Kometa-Exit",
+  "network": "tcp,udp"
+}
+[!] Не гонять через вход разрешённые РФ-сервисы: подсеть выгорает именно на этом (docs/ОБХОД-БЕЛЫХ-СПИСКОВ-ПЛАН.md §5).
+[!] Разделяй входной и выходной IP: Reality форвардит неавторизованные соединения на dest в обход routing rules — подтверждено экспериментом 30.04.2026 (в логах nginx-заглушки появился IP входной ноды).
+[!] Ротация serverNames на инбаунде входа — против паттерна «IP ↔ один SNI».
+[!] В списке «напрямую» есть geoip:private: наше правило стоит ВЫШЕ штатного правила 3x-ui «geoip:private → blocked», то есть приватные адреса станут доступны с входа, а не блокироваться. Нужно штатное поведение — убери строку geoip:private из --direct-file.
+
+══════════════════════════════════════════════════════════════
+DIFF: БЫЛО → СТАЛО (эталонный шаблон 3x-ui (конфиг панели в dry-run не читается))
+══════════════════════════════════════════════════════════════
+--- было
++++ стало
+@@ -13,10 +13,42 @@
+       "protocol": "blackhole",
+       "settings": {},
+       "tag": "blocked"
++    },
++    {
++      "mux": {
++        "enabled": false
++      },
++      "protocol": "vless",
++      "settings": {
++        "vnext": [
++          {
++            "address": "203.0.113.10",
++            "port": 443,
++            "users": [
++              {
++                "encryption": "none",
++                "flow": "xtls-rprx-vision",
++                "id": "11111111-2222-3333-4444-555555555555"
++              }
++            ]
++          }
++        ]
++      },
++      "streamSettings": {
++        "network": "tcp",
++        "realitySettings": {
++          "fingerprint": "firefox",
++          "publicKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
++          "serverName": "www.example.com",
++          "spiderX": "/"
++        },
++        "security": "reality"
++      },
++      "tag": "Kometa-Exit"
+     }
+   ],
+   "routing": {
+-    "domainStrategy": "AsIs",
++    "domainStrategy": "IPIfNonMatch",
+     "rules": [
+       {
+         "inboundTag": [
+@@ -26,9 +58,28 @@
+         "type": "field"
+       },
+       {
++        "domain": [
++          "geosite:category-ru",
++          "domain:gosuslugi.ru",
++          "domain:vk.com",
++          "domain:yandex.ru",
++          "domain:ozon.ru",
++          "domain:wildberries.ru",
++          "domain:sberbank.ru",
++          "domain:tbank.ru"
++        ],
+         "ip": [
++          "geoip:ru",
+           "geoip:private"
+         ],
++        "outboundTag": "direct",
++        "ruleTag": "Kometa-Direct",
++        "type": "field"
++      },
++      {
++        "ip": [
++          "geoip:private"
++        ],
+         "outboundTag": "blocked",
+         "type": "field"
+       },
+@@ -38,6 +89,12 @@
+           "bittorrent"
+         ],
+         "type": "field"
++      },
++      {
++        "network": "tcp,udp",
++        "outboundTag": "Kometa-Exit",
++        "ruleTag": "Kometa-Exit-Rule",
++        "type": "field"
+       }
+     ]
+   }
+
+— outbounds и правила: было / стало
+  outbounds было : direct, blocked
+  outbounds стало: direct, blocked, Kometa-Exit
+  правила было : domainStrategy=AsIs, правил: 3
+      - без ruleTag → api [inboundTag: api]
+      - без ruleTag → blocked ip: 1 шт.
+      - без ruleTag → blocked
+  правила стало: domainStrategy=IPIfNonMatch, правил: 5
+      - без ruleTag → api [inboundTag: api]
+      - Kometa-Direct → direct domain: 8 шт. ip: 2 шт.
+      - без ruleTag → blocked ip: 1 шт.
+      - без ruleTag → blocked
+      - Kometa-Exit-Rule → Kometa-Exit
+
+══════════════════════════════════════════════════════════════
+ИДЕМПОТЕНТНОСТЬ
+══════════════════════════════════════════════════════════════
+  Повторный запуск с --apply: тег «Kometa-Exit» ищется в outbounds — если он
+  есть, скрипт обновляет его, не дублирую второй; наши правила помечены ruleTag
+  Kometa-Direct / Kometa-Exit-Rule, снимаются и ставятся заново в правильном
+  порядке. Второго outbound и вторых правил не появится.
+
+══════════════════════════════════════════════════════════════
+DRY-RUN: ЧТО БУДЕТ ЗАПИСАНО
+══════════════════════════════════════════════════════════════
+  outbound «Kometa-Exit» → 203.0.113.10:443 + 2 правила (Kometa-Direct, Kometa-Exit-Rule)
+  Запись делается одним вызовом POST /panel/setting/update с полем
+  xrayTemplateConfig (полный объект настроек, прочитанный из панели).
+  Бэкап ./backup-xray-20261009-145207.json создаётся только с --apply и строго до записи.
+
+[•] Сетевых запросов нет: ни GET /panel/setting/all, ни POST /panel/setting/update.
+[•] Ничего не изменено. Для реальной записи добавь --apply.
+
+══════════════════════════════════════════════════════════════
+КАК ПРОВЕРИТЬ (руками на входной ноде)
+══════════════════════════════════════════════════════════════
+  1. Перезапустить ядро и посмотреть, что конфиг принят:
+       x-ui restart
+       journalctl -u x-ui -n 50 --no-pager
+     В логе не должно быть «infra/conf: …» — это значит, что панель записала
+     шаблон, а Xray его не принял (откат — п. 7).
+
+  2. Что outbound и правила на месте (read-only):
+       curl -s -H "Authorization: Bearer $PANEL_TOKEN" \
+         https://127.0.0.1:2053/panel/setting/all \
+         | jq -r '.obj.xrayTemplateConfig' \
+         | jq '{outbounds: [.outbounds[].tag], rules: [.routing.rules[] | {ruleTag, outboundTag}]}'
+     Ожидаем тег Kometa-Exit и два наших правила: Kometa-Direct, Kometa-Exit-Rule.
+
+  3. Клиентская ссылка обязана указывать на ВХОДНОЙ адрес, а не на выход:
+       у подписки в vless://…@<АДРЕС_ВХОДА>:443 … должен стоять IP/домен ВХОДА.
+     Если в ссылке адрес выхода — в режиме БС клиент пойдёт напрямую на
+     зарубежный IP и не подключится.
+
+  4. Что «РФ — напрямую» реально работает:
+       * Госуслуги/банк/маркетплейс открываются с включённым туннелем;
+       * в логах Xray входа нет обращений клиента к этим доменам;
+       * внешний IP при этом — адрес ВЫХОДА:  curl -s https://api.ipify.org
+  5. НЕ гонять через вход разрешённые РФ-сервисы и держать лимит клиентов на
+     адрес: подсеть выгорает именно на «лишнем» трафике (docs/ОБХОД-БЕЛЫХ-СПИСКОВ-ПЛАН.md §5).
+  6. Разделять входной и выходной IP + ротация serverNames: Reality утекает
+     dest-IP входа (подтверждено 30.04.2026).
+  7. Откат: с --apply скрипт сам снимает бэкап в ./backup-xray-20261009-145207.json и печатает
+     готовую команду восстановления.
+
+=== Проверка bash-4 конструкций (mapfile/declare -A/${v,,}) ===
+найдено: 0

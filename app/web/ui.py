@@ -28,7 +28,7 @@ _CAPS: dict[str, frozenset[str]] = {
     ROLE_OWNER: frozenset(
         {
             "orders.view", "orders.act", "orders.refund",
-            "users.view", "users.act", "users.notes",
+            "users.view", "users.act", "users.notes", "users.erase",
             "finance.view", "finance.export",
             "nodes.view", "nodes.act", "nodes.secrets",
             "downtime.manage",
@@ -44,7 +44,7 @@ _CAPS: dict[str, frozenset[str]] = {
     ROLE_MODERATOR: frozenset(
         {
             "orders.view", "orders.act", "orders.refund",
-            "users.view", "users.act", "users.notes",
+            "users.view", "users.act", "users.notes", "users.erase",
             "finance.view", "finance.export",
             "nodes.view", "alerts.view", "alerts.act",
             "growth.view", "growth.act",
@@ -135,7 +135,6 @@ PROVIDER_LABELS: dict[str, str] = {
     "platega_intl": "Зарубежная карта (Platega)",
     "crypto": "Крипта (Crypto Pay)",
     "stars": "Telegram Stars",
-    "wata": "Карта/СБП (WATA)",
 }
 
 ORDER_KIND: dict[str, str] = {"purchase": "Покупка", "renew": "Продление", "trial": "Пробный"}
@@ -160,6 +159,9 @@ EVENT_LABELS: dict[str, str] = {
     "promo_redeemed": "Промокод использован",
     "panel_error": "Ошибка панели",
     "error": "Ошибка",
+    # Ретенция персональных данных: удаление по запросу и задача по сроку.
+    "user_anonymized": "Персональные данные удалены",
+    "retention_purged": "Ретенция: чистка журналов",
 }
 
 #: Действия администраторов — пишутся сервисом audit с префиксом admin.

@@ -74,9 +74,9 @@ def check_password(candidate: str) -> bool:
 
 # ------------------------------------------------------------------- сессия
 class Session:
-    """Кто вошёл в панель: имя, роль и (если есть) учётная запись."""
+    """Кто вошёл в панель: имя, роль, учётная запись и версия её сессий."""
 
-    __slots__ = ("name", "role", "account_id", "tg_id", "expires_at")
+    __slots__ = ("name", "role", "account_id", "tg_id", "expires_at", "version")
 
     def __init__(
         self,
@@ -86,12 +86,16 @@ class Session:
         account_id: int | None = None,
         tg_id: int | None = None,
         expires_at: int = 0,
+        version: int = 0,
     ) -> None:
         self.name = name
         self.role = role
         self.account_id = account_id
         self.tg_id = tg_id
         self.expires_at = expires_at
+        #: Версия сессий учётной записи на момент входа. Сверяется с БД при
+        #: каждом запросе: выход, смена пароля, роли и деактивация её поднимают.
+        self.version = int(version or 0)
 
     @property
     def role_label(self) -> str:
@@ -104,6 +108,7 @@ class Session:
             "role_label": self.role_label,
             "account_id": self.account_id,
             "tg_id": self.tg_id,
+            "version": self.version,
         }
 
 
@@ -124,16 +129,17 @@ def issue_session(
     role: str = ROLE_OWNER,
     account_id: int | None = None,
     tg_id: int | None = None,
+    version: int = 0,
 ) -> str:
     """Создать значение cookie: ``<истекает>.<данные>.<подпись>``.
 
-    Полезная нагрузка (имя и роль) подписана, но не шифруется: секретов в ней
-    нет, зато в журнале видно, кто действовал.
+    Полезная нагрузка (имя, роль, учётная запись и версия её сессий) подписана,
+    но не шифруется: секретов в ней нет, зато в журнале видно, кто действовал.
     """
     ttl = get_settings().admin_session_hours * 3600
     expires_at = int((now if now is not None else time.time()) + ttl)
     body = json.dumps(
-        {"n": name[:64], "r": role, "a": account_id, "t": tg_id},
+        {"n": name[:64], "r": role, "a": account_id, "t": tg_id, "v": int(version or 0)},
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -169,6 +175,7 @@ def read_session(token: str | None) -> Session | None:
         account_id=data.get("a"),
         tg_id=data.get("t"),
         expires_at=expires_at,
+        version=int(data.get("v") or 0),
     )
 
 
@@ -228,12 +235,57 @@ async def authenticate(session: AsyncSession, login: str, password: str) -> Sess
     return _session_for(account)
 
 
+async def current_account(session: AsyncSession, auth: Session) -> AdminAccount | None:
+    """Перечитать учётную запись по сессии: активна ли, та ли роль и версия.
+
+    Зачем на каждый запрос. Cookie живёт 12 часов. За это время учётку могут
+    выключить, понизить в роли или сменить ей пароль — и без перечитывания
+    украденная (или просто старая) cookie продолжала бы работать. Здесь мы
+    отвечаем на вопрос «эта сессия ещё действительна?» по базе, а не по данным
+    внутри cookie, которые могли устареть.
+
+    Для сессии владельца по паролю из .env учётной записи нет — такие сессии
+    проверяются настройками панели, и здесь возвращается ``None`` с признаком
+    «аккаунта нет» (см. :func:`session_is_valid`).
+    """
+    if auth.account_id is None:
+        return None
+    account = await session.get(AdminAccount, int(auth.account_id))
+    if account is None or not account.is_active:
+        return None
+    return account
+
+
+def session_matches_account(auth: Session, account: AdminAccount | None) -> bool:
+    """Совпадают ли роль и версия сессии с текущим состоянием учётной записи."""
+    if auth.account_id is None:
+        # Владелец по паролю из .env: учётной записи нет, проверять нечего.
+        return True
+    if account is None:
+        return False
+    if int(account.session_version or 1) != int(auth.version or 0):
+        return False
+    return account.role == auth.role
+
+
+async def bump_session_version(session: AsyncSession, account: AdminAccount) -> int:
+    """Поднять версию сессий учётной записи — все её cookie станут недействительны.
+
+    Вызывается при выходе, смене пароля, смене роли и деактивации. Возвращает
+    новую версию, чтобы вызывающий код при желании выдал свежую cookie.
+    """
+    account.session_version = int(account.session_version or 1) + 1
+    await session.flush()
+    return account.session_version
+
+
 def _session_for(account: AdminAccount) -> Session:
     return Session(
         name=account.name,
         role=account.role if account.role in ROLES else ROLE_MODERATOR,
         account_id=account.id,
         tg_id=account.tg_id,
+        version=int(account.session_version or 1),
     )
 
 

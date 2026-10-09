@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot import keyboards, texts
+from app.bot import keyboards, texts, view
 from app.config import get_settings
 from app.db.models import Order, User
 from app.panels.base import PanelError
@@ -27,7 +27,6 @@ PROVIDER_TITLES = {
         "manual": texts.PROVIDER_MANUAL,
         "crypto": texts.PROVIDER_CRYPTO,
         "stars": texts.PROVIDER_STARS,
-        "wata": texts.PROVIDER_WATA,
         "platega_sbp": "💳 СБП / QR-код",
         "platega_card": "💳 Карта МИР",
         "platega_intl": "💳 Зарубежная карта",
@@ -75,7 +74,7 @@ async def send_plans(target: Message | CallbackQuery, session: AsyncSession, use
                         show_promo_button=percent == 0,
                 )
         if isinstance(target, CallbackQuery):
-                await target.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+                await view.edit_screen(target.message, text, reply_markup=markup, disable_web_page_preview=True)
                 await target.answer()
         else:
                 await target.answer(text, reply_markup=markup, disable_web_page_preview=True)
@@ -95,7 +94,7 @@ async def show_payment_soon(target: Message | CallbackQuery, plan) -> None:  # n
         )
         markup = keyboards.docs_back_kb()
         if isinstance(target, CallbackQuery):
-                await target.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+                await view.edit_screen(target.message, text, reply_markup=markup, disable_web_page_preview=True)
         else:
                 await target.answer(text, reply_markup=markup, disable_web_page_preview=True)
 
@@ -186,7 +185,7 @@ async def _show_plan_card(
                 text += texts.PLAN_CARD_SOON_NOTE
 
         markup = keyboards.providers_kb(plan.id, providers, sbp_soon=sbp_soon)
-        await call.message.edit_text(text, reply_markup=markup)
+        await view.edit_screen(call.message, text, reply_markup=markup)
         await call.answer()
 
 
@@ -242,7 +241,7 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
                 )
         except PaymentError as exc:
                 logger.warning("Ошибка создания счёта: %s", exc)
-                await call.message.edit_text(texts.ERROR_GENERIC, reply_markup=keyboards.back_to_menu_kb())
+                await view.edit_screen(call.message, texts.ERROR_GENERIC, reply_markup=keyboards.back_to_menu_kb())
                 await call.answer("Не удалось создать счёт", show_alert=True)
                 return
 
@@ -269,9 +268,6 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
         elif provider.code == "crypto":
                 text = texts.ORDER_CREATED_CRYPTO.format(order_id=order.id, amount=order.amount_rub)
                 markup = keyboards.crypto_order_kb(order.id, invoice.pay_url or "")
-        elif provider.code == "wata":
-                text = texts.ORDER_CREATED_WATA.format(order_id=order.id, amount=order.amount_rub)
-                markup = keyboards.crypto_order_kb(order.id, invoice.pay_url or "")
         elif provider.code.startswith("platega"):
                 text = texts.ORDER_CREATED_PLATEGA.format(
                         order_id=order.id,
@@ -290,20 +286,38 @@ async def cb_pay(call: CallbackQuery, session: AsyncSession, user: User) -> None
                         stars=stars_price,
                 )
 
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 discount_note + text, reply_markup=markup, disable_web_page_preview=True
         )
         await call.answer()
 
 
-@router.callback_query(F.data.startswith("order:cancel:"))
-async def cb_cancel(call: CallbackQuery, session: AsyncSession) -> None:
+async def _own_order(session: AsyncSession, call: CallbackQuery, user: User) -> Order | None:
+        """Заказ из ``callback_data`` — но только свой.
+
+        Номера заказов последовательные, а кнопки заказа намеренно не закрыты гейтом
+        подписки (человек мог оплатить, когда подписка уже кончилась). Без этой
+        проверки посторонний, перебирая номера, мог отменить чужой заказ, отправить
+        по нему заявку владельцу под своим именем и — до починки 09.10.2026 —
+        получить в личку ссылку на чужую подписку.
+
+        Чужой заказ отвечает тем же текстом, что и несуществующий: иначе бот
+        подтверждал бы, что заказ с таким номером есть.
+        """
         order = await orders.get_order(session, int(call.data.rsplit(":", 1)[1]))
-        if order is None:
+        if order is None or order.user_id != user.id:
                 await call.answer(texts.ORDER_NOT_FOUND, show_alert=True)
+                return None
+        return order
+
+
+@router.callback_query(F.data.startswith("order:cancel:"))
+async def cb_cancel(call: CallbackQuery, session: AsyncSession, user: User) -> None:
+        order = await _own_order(session, call, user)
+        if order is None:
                 return
         await orders.cancel_order(session, order, reason="canceled by user")
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 texts.ORDER_CANCELED.format(order_id=order.id),
                 reply_markup=keyboards.back_to_menu_kb(),
         )
@@ -312,12 +326,14 @@ async def cb_cancel(call: CallbackQuery, session: AsyncSession) -> None:
 
 @router.callback_query(F.data.startswith("order:manual:"))
 async def cb_manual_paid(call: CallbackQuery, session: AsyncSession, user: User, bot: Bot) -> None:
-        order = await orders.get_order(session, int(call.data.rsplit(":", 1)[1]))
-        if order is None or order.status != "pending":
+        order = await _own_order(session, call, user)
+        if order is None:
+                return
+        if order.status != "pending":
                 await call.answer(texts.ORDER_NOT_FOUND, show_alert=True)
                 return
         plan = await orders.get_plan(session, order.plan_id) if order.plan_id else None
-        await call.message.edit_text(
+        await view.edit_screen(call.message,
                 texts.ORDER_WAITING_CONFIRM.format(order_id=order.id),
                 reply_markup=keyboards.back_to_menu_kb(),
         )
@@ -341,9 +357,8 @@ async def cb_manual_paid(call: CallbackQuery, session: AsyncSession, user: User,
 
 @router.callback_query(F.data.startswith("order:check:"))
 async def cb_check_payment(call: CallbackQuery, session: AsyncSession, user: User, bot: Bot) -> None:
-        order = await orders.get_order(session, int(call.data.rsplit(":", 1)[1]))
+        order = await _own_order(session, call, user)
         if order is None:
-                await call.answer(texts.ORDER_NOT_FOUND, show_alert=True)
                 return
         if order.status == "paid":
                 await call.answer("Заказ уже оплачен ✅")
@@ -369,11 +384,11 @@ async def cb_check_payment(call: CallbackQuery, session: AsyncSession, user: Use
                 await call.answer(texts.PAYMENT_NOT_FOUND, show_alert=True)
                 return
 
-        await finalize_order(session, order, bot, user)
+        await finalize_order(session, order, bot)
         await call.answer("Оплата получена ✅")
 
 
-async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> None:
+async def finalize_order(session: AsyncSession, order, bot: Bot) -> None:
         """Единая точка выдачи доступа после успешной оплаты.
 
         Сюда приходят только подтверждённые платежи: вебхук, опрос платёжной
@@ -381,7 +396,22 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
         который успел закрыться (клиент платил с телефона и не вернулся в бот),
         здесь открывается заново и обслуживается как обычный: человек заплатил —
         он не должен ждать, пока владелец посмотрит телефон и подтвердит вручную.
+
+        **Получателя берём из заказа, а не из аргумента.** Раньше сюда передавали
+        того, кто нажал кнопку, и доступ уходил ему: посторонний, нажав «Проверить
+        оплату» по чужому оплаченному заказу, получал в личку ссылку на чужую
+        подписку, а настоящий владелец — ничего. Теперь получатель один и тот же
+        на всех путях, и передать «не того» человека в принципе нельзя.
         """
+        owner = await session.get(User, order.user_id)
+        if owner is None:
+                logger.error(
+                        "Заказ #%s: владелец (user_id=%s) не найден — доставить доступ некому",
+                        order.id,
+                        order.user_id,
+                )
+                return
+
         if order.status in {"canceled", "expired"}:
                 logger.info(
                         "Заказ #%s был закрыт (%s), но оплата подтверждена — открываю и выдаю доступ",
@@ -391,7 +421,7 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
                 await events.log_event(
                         session,
                         events.ORDER_PAID,
-                        user_id=user.id,
+                        user_id=owner.id,
                         payload={"order_id": order.id, "reopened_from": order.status},
                 )
                 # Открываем заказ условным UPDATE, а не присваиванием в памяти:
@@ -418,7 +448,7 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
                 sub, already = await orders.mark_paid(session, order, panel, bot=bot)
         except PanelError as exc:
                 logger.error("Панель не выдала доступ по заказу %s: %s", order.id, exc)
-                await events.log_event(session, events.PANEL_ERROR, user_id=user.id, payload={"order_id": order.id})
+                await events.log_event(session, events.PANEL_ERROR, user_id=owner.id, payload={"order_id": order.id})
                 await notifications.notify_admins(bot, f"⚠️ Панель не выдала доступ по заказу #{order.id}: <code>{exc}</code>")
                 return
 
@@ -428,13 +458,13 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
                 if not already and order.gift_token:
                         from app.services import gift as gift_service
 
-                        sent = await gift_service.notify_buyer(session, order, bot, user)
+                        sent = await gift_service.notify_buyer(session, order, bot, owner)
                         plan = await orders.get_plan(session, order.plan_id) if order.plan_id else None
                         await notifications.notify_admins(
                                 bot,
                                 f"🎁 Подарок оплачен: заказ #{order.id}, {order.amount_rub} ₽, "
                                 f"{notifications.safe(plan.title) if plan else '—'}, покупатель "
-                                f"{notifications.safe(user.display_name)} (<code>{user.tg_id}</code>)"
+                                f"{notifications.safe(owner.display_name)} (<code>{owner.tg_id}</code>)"
                                 + ("" if sent else "\n⚠️ Сертификат не доставлен — напиши покупателю вручную."),
                         )
                         return
@@ -446,10 +476,12 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
                         await notifications.notify_admins(
                                 bot,
                                 f"⚠️ <b>Оплата подтверждена, но доступ по заказу #{order.id} не выдан</b>\n"
-                                f"Пользователь: {notifications.safe(user.display_name)} "
-                                f"(<code>{user.tg_id}</code>)\n"
-                                f"Сумма: {order.amount_rub} ₽, способ: {notifications.safe(order.provider)}\n\n"
-                                "Проверь заказ и выдай доступ вручную (/grant).",
+                                f"Пользователь: {notifications.safe(owner.display_name)} "
+                                f"(<code>{owner.tg_id}</code>)\n"
+                                f"Сумма: {order.amount_rub} ₽, способ: {notifications.safe(order.provider)}\n"
+                                f"Причина: {notifications.safe(order.grant_last_error or 'панель не ответила')}\n\n"
+                                "Выдачу повторю автоматически (job_grant_paid). "
+                                "Если не получится — проверь заказ в /admin.",
                         )
                 return
 
@@ -458,7 +490,7 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
                 order, expires=_expires_text(sub.expires_at), days=sub.days_left, link=link
         )
         await bot.send_message(
-                user.tg_id,
+                owner.tg_id,
                 text,
                 reply_markup=keyboards.connect_kb(link),
                 disable_web_page_preview=True,
@@ -469,7 +501,7 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
                 await notifications.payment_notice(
                         session,
                         order,
-                        user,
+                        owner,
                         provider=PROVIDER_TITLES.get(order.provider, order.provider),
                         plan_title=plan.title if plan else "",
                 ),
@@ -523,7 +555,7 @@ async def on_stars_paid(message: Message, session: AsyncSession, user: User, bot
                 await message.answer(texts.ORDER_NOT_FOUND)
                 return
 
-        await finalize_order(session, order, bot, user)
+        await finalize_order(session, order, bot)
 
         # Крупные покупки звёздами — под контроль: дешёвые звёзды у перекупов
         # бывают добыты мошенническим путём, и Telegram может списать их с баланса

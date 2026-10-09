@@ -138,7 +138,6 @@ def break_even_users(net_per_user: float, costs: Costs) -> float:
 CHANNEL_FEES: dict[str, float] = {
     "sbp": 8.0,  # СБП НСПК: QR-код или оплата по ссылке из банковского приложения
     "crypto": 5.0,  # криптоплатежи через платёжный сервис
-    "wata": 3.5,  # карты и СБП через WATA
     "stars": 5.0,  # вывод звёзд через Fragment
 }
 

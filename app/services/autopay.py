@@ -34,7 +34,7 @@ from app.db.models import Order, User
 from app.panels.base import PanelClient
 from app.payments.matching import parse_order_code
 from app.payments.statements import IncomingPayment, StatementError, StatementSource
-from app.services import events, notifications
+from app.services import alerts as alerts_service, events, notifications
 from app.services import orders as orders_service
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,26 @@ settings = get_settings()
 #: Сколько ключей обработанных платежей помним (защита от повторного подтверждения)
 MAX_REMEMBERED_KEYS = 1000
 
+#: Причина «не сопоставлено»: под сумму подходит больше одного заказа.
+#: Подтверждать автоматически нельзя — деньги одного клиента оплатят доступ
+#: другому. Такой платёж уходит админам как «неопознанный».
+AMBIGUOUS_MATCH = "несколько заказов на ту же сумму — нужен человек"
+
+#: Причина «не сопоставлено»: номер заказа в комментарии верный, а денег меньше.
+#: Номер заказа последовательный и виден клиенту (его печатает инструкция
+#: ``ManualProvider.create_invoice``), поэтому одного кода для подтверждения
+#: мало: перевод на 1 ₽ с комментарием «Kometa 7» закрывал заказ на 120 ₽.
+#: Такой платёж уходит админам как «неопознанный» — пусть решает человек.
+UNDERPAID_MATCH = "сумма меньше заказа — нужен человек"
+
+#: Причина «не сопоставлено»: в комментарии номер заказа, который уже не ждёт
+#: оплаты (оплачен, отменён или истёк). Раньше такой платёж проваливался дальше
+#: и по совпадению суммы попадал на ЧУЖОЙ pending-заказ: клиент A переводил свои
+#: 120 ₽ и оплачивал доступ клиенту B, а сам оставался без доступа и без
+#: уведомления. Копейки закрытого заказа к тому же освобождаются и мгновенно
+#: переиспользуются следующим заказом на ту же сумму — совпадение почти всегда.
+CLOSED_ORDER_CODE = "код закрытого заказа — нужен человек"
+
 
 @dataclass
 class ReconcileResult:
@@ -50,13 +70,20 @@ class ReconcileResult:
 
         fetched: int = 0
         confirmed: list[int] = field(default_factory=list)
+        #: Оплаченные заказы, по которым панель не подтвердила выдачу доступа:
+        #: деньги приняты, выдачу повторит фоновая задача (B2).
+        pending_grant: list[int] = field(default_factory=list)
         unmatched: list[IncomingPayment] = field(default_factory=list)
+        #: Почему платёж не сопоставлен (ключ → текст): «несколько заказов на
+        #: ту же сумму» и т.п. Нужно для уведомления и алерта.
+        unmatched_reasons: dict[str, str] = field(default_factory=dict)
         errors: list[str] = field(default_factory=list)
         skipped: int = 0
 
         def as_text(self) -> str:
                 return (
                         f"проверено поступлений: {self.fetched}, подтверждено: {len(self.confirmed)}, "
+                        f"ждут выдачи: {len(self.pending_grant)}, "
                         f"не сопоставлено: {len(self.unmatched)}, пропущено (уже видели): {self.skipped}"
                 )
 
@@ -167,22 +194,49 @@ async def find_order_for_payment(
         if not pending:
                 return None, ""
 
-        # 1. Код заказа в комментарии — самый надёжный признак
+        # 1. Код заказа в комментарии — самый надёжный признак. Но одного кода
+        #    мало: номер заказа последовательный и напечатан клиенту в инструкции,
+        #    поэтому сумму сверяем и здесь — иначе перевод на 1 ₽ подтверждал
+        #    заказ на 120 ₽.
+        #
+        #    Порог — цена заказа БЕЗ копеек-подписи (``amount_rub * 100``), а не
+        #    ``pay_amount_kopecks``: копейки нужны только для опознания платежа в
+        #    выписке, и банк вправе их не передать. Клиент, заплативший ровно цену
+        #    тарифа и указавший номер заказа, оплатил — подтверждаем. Переплата
+        #    тоже допустима, недобор — нет.
         code = parse_order_code(payment.comment)
         if code is not None:
                 for order in pending:
-                        if order.id == code:
-                                return order, "по коду заказа в комментарии"
+                        if order.id != code:
+                                continue
+                        if payment.amount_kopecks < order.amount_rub * 100 - tolerance:
+                                return None, UNDERPAID_MATCH
+                        return order, "по коду заказа в комментарии"
+                # Код в комментарии есть, но заказ по нему оплаты не ждёт. Если
+                # такой заказ вообще существует — значит он закрыт или уже
+                # оплачен, и угадывать по сумме нельзя: см. CLOSED_ORDER_CODE.
+                # Несуществующий код (опечатка) по-прежнему разбираем по сумме.
+                if await session.get(Order, code) is not None:
+                        return None, CLOSED_ORDER_CODE
 
         # 2. Точная сумма с уникальными копейками
-        for order in pending:
-                if abs(payment.amount_kopecks - order.pay_amount_kopecks) <= tolerance:
-                        return order, "по точной сумме"
+        exact = [order for order in pending if abs(payment.amount_kopecks - order.pay_amount_kopecks) <= tolerance]
+        if len(exact) == 1:
+                return exact[0], "по точной сумме"
+        if len(exact) > 1:
+                # Совпало несколько заказов (например, допуск копеек разрешён
+                # настройкой): выбирать «первый по дате» нельзя — это оплата
+                # чужого заказа.
+                return None, AMBIGUOUS_MATCH
 
-        # 3. Сумма без копеек — банк мог не передать надбавку
-        for order in pending:
-                if payment.amount_kopecks == order.amount_rub * 100:
-                        return order, "по сумме без копеек (уточнить вручную)"
+        # 3. Сумма без копеек — банк мог не передать надбавку. Подтверждаем
+        # ТОЛЬКО когда такой заказ ровно один: иначе платёж одного клиента
+        # выдаст доступ другому (PoC ревью: платёж клиента №2 подтвердил заказ №1).
+        bare = [order for order in pending if payment.amount_kopecks == order.amount_rub * 100]
+        if len(bare) == 1:
+                return bare[0], "по сумме без копеек (уточнить вручную)"
+        if len(bare) > 1:
+                return None, AMBIGUOUS_MATCH
 
         return None, ""
 
@@ -236,6 +290,8 @@ async def reconcile(
                 order, reason = await find_order_for_payment(session, payment)
                 if order is None:
                         result.unmatched.append(payment)
+                        if reason:
+                                result.unmatched_reasons[payment.key] = reason
                 else:
                         user = await session.get(User, order.user_id)
                         try:
@@ -249,6 +305,16 @@ async def reconcile(
                                 continue
 
                         result.confirmed.append(order.id)
+                        if sub is None and not already:
+                                # Оплата зафиксирована, но панель не подтвердила
+                                # выдачу: заказ подхватит job_grant_paid. В ошибки
+                                # выписки не пишем — окно проверки сдвигать можно.
+                                logger.warning(
+                                        "Заказ #%s оплачен, но доступ не выдан (%s) — повторю автоматически",
+                                        order.id,
+                                        order.grant_last_error or "панель не ответила",
+                                )
+                                result.pending_grant.append(order.id)
                         await events.log_event(
                                 session,
                                 events.ORDER_PAID,
@@ -281,15 +347,34 @@ async def reconcile(
                         "",
                 ]
                 for payment in result.unmatched[:10]:
+                        why = result.unmatched_reasons.get(payment.key, "")
                         lines.append(
                                 f"• {payment.amount_kopecks / 100:.2f} ₽"
                                 f"{' от ' + payment.counterparty if payment.counterparty else ''}"
                                 f"{' — «' + payment.comment + '»' if payment.comment else ''}"
                                 f" ({payment.received_at:%d.%m %H:%M}, {payment.source})"
+                                + (f"\n  ⚠️ {why}" if why else "")
                         )
                 lines.append("")
                 lines.append("Проверь выписку и подтверди заказ вручную в /admin.")
                 await notifications.notify_admins(bot, "\n".join(lines))
+
+        # Алерт в панели: сообщение в Telegram легко пропустить, а «деньги пришли,
+        # заказ не найден» — работа, которая не должна потеряться. Для неоднозначной
+        # суммы это ещё и защита: без человека доступ не выдаётся никому (B3).
+        for payment in result.unmatched[:10]:
+                why = result.unmatched_reasons.get(payment.key, "")
+                await alerts_service.raise_alert(
+                        session,
+                        "payment_unmatched",
+                        title=f"Поступление {payment.amount_kopecks / 100:.2f} ₽ без заказа",
+                        message=(
+                                f"{payment.amount_kopecks / 100:.2f} ₽, {payment.received_at:%d.%m %H:%M}, "
+                                f"источник: {payment.source or '—'}"
+                                f"{' — ' + why if why else ''}"
+                        ),
+                        fingerprint=f"payment:{payment.key}",
+                )
 
         if result.errors and bot is not None:
                 await notifications.notify_admins(

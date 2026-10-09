@@ -73,7 +73,7 @@ async def open_menu(call: CallbackQuery, session: AsyncSession, user: User) -> N
         message = call.message
         if isinstance(message, Message):
                 with contextlib.suppress(TelegramAPIError):
-                        await message.edit_text(menu.text, reply_markup=menu.markup)
+                        await view.edit_screen(message, menu.text, reply_markup=menu.markup)
                         return
         # Сообщение старое и недоступное (Telegram не отдаёт содержимое) — отвечаем
         # новым, с картинкой: человек проходит гейт впервые и hero ещё не видел.

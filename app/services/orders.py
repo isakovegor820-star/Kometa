@@ -6,25 +6,46 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from aiogram import Bot
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bot import texts
 from app.config import get_settings
 from app.db.models import Order, Plan, Subscription, User
-from app.panels.base import PanelClient
+from app.panels.base import PanelClient, PanelError
 from app.payments.matching import allocate_signature
-from app.services import events, notifications, partners, promo as promo_service, referral, subscriptions
+from app.services import (
+    alerts as alerts_service,
+    events,
+    notifications,
+    partners,
+    promo as promo_service,
+    referral,
+    subscriptions,
+)
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 KIND_PURCHASE = "purchase"
 KIND_RENEW = "renew"
 #: Покупка подписки в подарок: доступ выдаётся не покупателю, а получателю.
 KIND_GIFT = "gift"
+
+#: Сколько раз пробуем подобрать свободные копейки, если заказ не вставился
+#: из-за гонки: два клиента одновременно увидели одну и ту же надбавку.
+MAX_KOPECK_ATTEMPTS = 5
+
+#: Сколько раз фоновая задача пытается выдать доступ по оплаченному заказу.
+#: После лимита заказ оставляем человеку: алерт уже поднят, а бесконечно
+#: дёргать мёртвую панель бессмысленно и вредно.
+MAX_GRANT_ATTEMPTS = 10
 
 
 async def _allocate_pay_kopecks(session: AsyncSession, base_rub: int) -> int:
@@ -70,25 +91,18 @@ async def create_order(
         # оба по половинной цене.
         await _cancel_other_discounted(session, user)
 
-    order = Order(
-        user_id=user.id,
-        plan_id=plan.id,
+    order = await _insert_order(
+        session,
+        user=user,
+        plan=plan,
         kind=kind,
+        provider=provider,
         amount_rub=amount_rub,
-        base_amount_rub=base_rub,
+        base_rub=base_rub,
         discount_rub=discount_rub,
         promo_code=discount.code if discount else None,
         stars_amount=stars_amount,
-        # Уникальные копейки нужны только для ручных переводов: по ним система
-        # сама узнаёт, какой заказ оплатили.
-        pay_kopecks=await _allocate_pay_kopecks(session, amount_rub) if provider == "manual" else 0,
-        provider=provider,
-        status="pending",
-        external_id=f"ord-{uuid4().hex[:16]}",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.order_ttl_minutes),
     )
-    session.add(order)
-    await session.flush()
     await events.log_event(
         session,
         events.ORDER_CREATED,
@@ -112,6 +126,75 @@ async def create_order(
             payload={"order_id": order.id, "code": discount.code, "discount_rub": discount_rub},
         )
     return order
+
+
+async def _insert_order(
+    session: AsyncSession,
+    *,
+    user: User,
+    plan: Plan,
+    kind: str,
+    provider: str,
+    amount_rub: int,
+    base_rub: int,
+    discount_rub: int,
+    promo_code: str | None,
+    stars_amount: int,
+) -> Order:
+    """Вставить заказ, подбирая копейки так, чтобы не столкнуться с чужими.
+
+    Уникальность пары «сумма + копейки» среди pending-заказов держит частичный
+    UNIQUE-индекс (``uq_orders_pending_kopeck``). Два клиента могут нажать
+    «оплатить» одновременно: оба увидят одну и ту же свободную надбавку, и один
+    из INSERT-ов получит IntegrityError. Это не ошибка оплаты, а гонка за
+    подписью — здесь мы её разбираем: откатываем только свою вставку
+    (SAVEPOINT), подбираем следующие свободные копейки и пробуем снова.
+
+    Раньше такой гонки не ловили: два заказа на одну сумму получали одинаковые
+    копейки, и автоплатёж не мог понять, чей это перевод (H3).
+    """
+    for attempt in range(MAX_KOPECK_ATTEMPTS):
+        kopecks = await _allocate_pay_kopecks(session, amount_rub) if provider == "manual" else 0
+        order = Order(
+            user_id=user.id,
+            plan_id=plan.id,
+            kind=kind,
+            amount_rub=amount_rub,
+            base_amount_rub=base_rub,
+            discount_rub=discount_rub,
+            promo_code=promo_code,
+            stars_amount=stars_amount,
+            # Снимок условий на момент заказа: выдача обязана дать ровно то, что
+            # клиент оплатил, даже если прайс поправят, пока счёт не закрыт.
+            plan_days=plan.days,
+            plan_devices_limit=plan.devices_limit,
+            plan_traffic_gb=plan.traffic_limit_gb,
+            # Уникальные копейки нужны только для ручных переводов: по ним
+            # система сама узнаёт, какой заказ оплатили.
+            pay_kopecks=kopecks,
+            provider=provider,
+            status="pending",
+            external_id=f"ord-{uuid4().hex[:16]}",
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.order_ttl_minutes),
+        )
+        try:
+            # SAVEPOINT: откат неудачной вставки не рушит остальную транзакцию
+            # (скидку, отмену прежних заказов, лог событий).
+            async with session.begin_nested():
+                session.add(order)
+                await session.flush()
+            return order
+        except IntegrityError:
+            logger.info(
+                "Копейки %s для %s ₽ уже заняты другим pending-заказом — подбираю другие (попытка %s)",
+                kopecks,
+                amount_rub,
+                attempt + 1,
+            )
+    raise RuntimeError(
+        f"не удалось подобрать уникальные копейки для заказа на {amount_rub} ₽ "
+        f"за {MAX_KOPECK_ATTEMPTS} попыток"
+    )
 
 
 async def _cancel_other_discounted(session: AsyncSession, user: User) -> list[Order]:
@@ -138,6 +221,328 @@ async def _cancel_other_discounted(session: AsyncSession, user: User) -> list[Or
 
 async def get_order(session: AsyncSession, order_id: int) -> Order | None:
     return await session.get(Order, order_id)
+
+
+# ------------------------------------------------------- выдача доступа (B2)
+def _grant_fingerprint(order_id: int) -> str:
+    """Отпечаток алерта «оплаченный заказ без доступа» — один на заказ."""
+    return f"grant:order:{order_id}"
+
+
+def grant_terms(order: Order, plan: Plan) -> tuple[int, int, int]:
+    """Что именно оплатил клиент: (срок, устройств, ГБ) — из снимка заказа.
+
+    Выдача читала живой тариф, поэтому правка прайса в окне заказа меняла то,
+    что получит клиент: 120 ₽ за 364 дня вместо 959 ₽ в одну сторону и меньше
+    оплаченного — в другую.
+
+    ``None`` в снимке означает «заказа до 09.10.2026»: для них берём живой тариф,
+    как было раньше. Ноль — законное значение (безлимит по трафику), поэтому
+    проверяем именно на ``None``, а не на ложность.
+    """
+    days = order.plan_days if order.plan_days is not None else plan.days
+    devices = order.plan_devices_limit if order.plan_devices_limit is not None else plan.devices_limit
+    traffic = order.plan_traffic_gb if order.plan_traffic_gb is not None else plan.traffic_limit_gb
+    return int(days), int(devices), int(traffic)
+
+
+#: Сколько держим захват выдачи, если процесс упал между захватом и результатом.
+#: Больше любого ответа панели, но не настолько, чтобы заказ завис: повтор у
+#: фоновой задачи идёт каждые 3 минуты, и после истечения захвата она возьмёт
+#: заказ снова.
+GRANT_CLAIM_TTL_MINUTES = 5
+
+
+async def claim_grant(session: AsyncSession, order: Order) -> bool:
+    """Взять заказ на выдачу. ``False`` — его уже выдаёт кто-то другой.
+
+    Зачем. Деньги фиксируются в БД **до** обращения к панели (B2), поэтому
+    между этими двумя моментами заказ виден как ``paid`` + ``granted_at IS NULL``.
+    Фоновая задача брала такой заказ и звала панель второй раз по тому же
+    платежу — в худшем случае это лишний месяц доступа за одну оплату.
+
+    Захват атомарный: условный ``UPDATE`` выигрывает ровно один претендент.
+    Просроченный захват (упавший процесс) перехватывается по TTL.
+    """
+    now = datetime.now(timezone.utc)
+    stale_before = now - timedelta(minutes=GRANT_CLAIM_TTL_MINUTES)
+    result = await session.execute(
+        update(Order)
+        .where(
+            Order.id == order.id,
+            Order.granted_at.is_(None),
+            or_(Order.grant_claimed_at.is_(None), Order.grant_claimed_at < stale_before),
+        )
+        .values(grant_claimed_at=now)
+    )
+    await session.commit()
+    if result.rowcount:
+        order.grant_claimed_at = now
+        return True
+    return False
+
+
+def release_grant_claim(order: Order) -> None:
+    """Отпустить заказ: попытка закончилась, повтор снова возможен сразу."""
+    order.grant_claimed_at = None
+
+
+def _grant_target(sub: Subscription | None, plan: Plan, *, now: datetime | None = None) -> datetime:
+    """До какого срока подписка должна продлиться после оплаты.
+
+    Считаем от текущего срока (если подписка ещё жива) или от «сейчас»: это
+    минимум, который обязана подтвердить панель. Бонусные дни и ручные правки в
+    панели только увеличивают срок, поэтому проверка «не меньше цели» —
+    корректный способ убедиться, что выдача состоялась.
+    """
+    moment = now or datetime.now(timezone.utc)
+    base = sub.expires_at if sub is not None and sub.expires_at and sub.expires_at > moment else moment
+    return base + timedelta(days=max(0, plan.days))
+
+
+def _grant_problem(sub: Subscription | None, target: datetime | None) -> str:
+    """Расхождение «что ждали ↔ что выдала панель» текстом. Пусто — всё сошлось."""
+    if target is None:
+        return ""
+    if sub is None or sub.expires_at is None:
+        return "панель не вернула срок подписки"
+    if sub.expires_at < target:
+        return (
+            f"панель выдала доступ до {sub.expires_at:%d.%m.%Y %H:%M}, "
+            f"а ожидали минимум до {target:%d.%m.%Y %H:%M}"
+        )
+    return ""
+
+
+async def _record_grant_failure(
+    session: AsyncSession,
+    order: Order,
+    target: datetime | None,
+    exc: BaseException,
+    *,
+    bot: Bot | None = None,
+) -> None:
+    """Запомнить, что оплаченный заказ ждёт выдачи, и поднять алерт.
+
+    Коммитим сразу: факт «деньги приняты, доступ не выдан» должен пережить и
+    падение процесса, и rollback вызывающего. Иначе заказ снова станет
+    «оплачен и забыт» — ровно та дыра, из-за которой клиент платил и не получал
+    ничего (B2).
+
+    Про **немедленное сообщение**. Раньше здесь поднимался алерт вида
+    ``panel_error`` («ошибка панели», предупреждение) и дальше не происходило
+    ничего: в Telegram алерты не уходят вообще, а в 21:00 владелец видел
+    счётчик. Клиент, заплативший утром, мог ждать до вечера. Поэтому вид алерта
+    отдельный и денежный, а на первую же неудачу уходит пуш — в тот момент
+    человек ещё ждёт и всё исправимо. Повторы не шлём: ``raise_alert`` не плодит
+    строк, а увеличивает ``repeat_count``, поэтому признак «только что создан» —
+    это ``repeat_count == 1``.
+    """
+    order.grant_target_at = target or order.grant_target_at
+    order.grant_attempts = int(order.grant_attempts or 0) + 1
+    order.grant_last_error = str(exc)[:300]
+    alert = await alerts_service.raise_alert(
+        session,
+        "payment_not_granted",
+        title=f"Оплачен заказ #{order.id}, доступа нет",
+        message=(
+            f"Заказ #{order.id} на {order.amount_rub} ₽ оплачен, но доступ не выдан: "
+            f"{order.grant_last_error}. Фоновая задача повторит выдачу автоматически."
+        ),
+        fingerprint=_grant_fingerprint(order.id),
+        user_id=order.user_id,
+    )
+    if bot is not None and int(alert.repeat_count or 1) == 1:
+        await notifications.notify_admins(
+            bot,
+            "🔴 <b>Оплачено, доступа нет</b>\n\n"
+            f"Заказ #{order.id}, {order.amount_rub} ₽\n"
+            f"Клиент: <code>{order.user_id}</code>, попытка {order.grant_attempts}\n"
+            f"Причина: <code>{notifications.safe(order.grant_last_error)}</code>\n\n"
+            "Повторю выдачу автоматически каждые 3 минуты. "
+            "Если не получится — сообщу отдельно.",
+        )
+    await session.commit()
+
+
+def _grant_stuck_fingerprint(order_id: int) -> str:
+    """Отпечаток алерта «выдача исчерпала попытки» — один на заказ.
+
+    Отдельный от ``_grant_fingerprint``: там «повторяю», здесь «сам не справлюсь».
+    Разные отпечатки дают разный признак «только что создан» в ``repeat_count``,
+    поэтому сообщение «нужен человек» уходит ровно один раз, а не каждые 3 минуты.
+    """
+    return f"grant-stuck:order:{order_id}"
+
+
+async def grant_ungranted_orders(
+    session: AsyncSession,
+    panels: list[PanelClient] | None = None,
+    *,
+    bot: Bot | None = None,
+    limit: int = 50,
+) -> list[int]:
+    """Выдать доступ по оплаченным заказам, у которых выдача не подтверждена.
+
+    Покрывает два случая: панель лежала в момент оплаты и процесс упал между
+    оплатой и выдачей. Идемпотентность двойная:
+
+    * заказ берём только с пустым ``granted_at``;
+    * перед обращением к панели сверяем **факт**: если панель уже продлила
+      клиента (ответ потерялся, а панель успела), выдачу не повторяем — просто
+      отмечаем её выполненной.
+
+    Старые заказы без ``grant_target_at`` не трогаем: цель выдачи неизвестна,
+    автоматически продлевать их — значит дарить дни. Такие разбирает человек.
+    """
+    rows = list(
+        (
+            await session.scalars(
+                select(Order)
+                .where(
+                    Order.status == "paid",
+                    Order.granted_at.is_(None),
+                    Order.grant_target_at.is_not(None),
+                )
+                .order_by(Order.created_at)
+                .limit(limit)
+            )
+        ).all()
+    )
+
+    done: list[int] = []
+    for order in rows:
+        plan = await get_plan(session, order.plan_id) if order.plan_id else None
+        user = await session.get(User, order.user_id)
+        if plan is None or user is None:
+            continue
+
+        target = order.grant_target_at
+        sub = await subscriptions.get_subscription(session, user.id)
+        if not _grant_problem(sub, target):
+            # Панель уже выдала доступ — фиксируем факт и снимаем алерт.
+            order.granted_at = datetime.now(timezone.utc)
+            order.grant_last_error = ""
+            await alerts_service.resolve_by_fingerprint(session, _grant_fingerprint(order.id), by="auto")
+            done.append(order.id)
+            continue
+
+        if int(order.grant_attempts or 0) >= MAX_GRANT_ATTEMPTS:
+            logger.error(
+                "Заказ #%s: доступ не выдан после %s попыток (%s) — нужен человек",
+                order.id,
+                order.grant_attempts,
+                order.grant_last_error,
+            )
+            # Автоматика сделала всё, что могла. Молчать об этом нельзя: раньше
+            # здесь была только строка в логе, и заказ оставался оплаченным без
+            # доступа навсегда. Алерт с отдельным отпечатком уходит один раз.
+            alert = await alerts_service.raise_alert(
+                session,
+                "payment_not_granted",
+                title=f"Заказ #{order.id}: выдача не удалась за {MAX_GRANT_ATTEMPTS} попыток",
+                message=(
+                    f"Заказ #{order.id} на {order.amount_rub} ₽ оплачен, доступ так и не выдан. "
+                    f"Последняя причина: {order.grant_last_error}. Автоповторы остановлены — "
+                    "нужен человек: проверить панель и выдать доступ вручную."
+                ),
+                fingerprint=_grant_stuck_fingerprint(order.id),
+                user_id=order.user_id,
+            )
+            if bot is not None and int(alert.repeat_count or 1) == 1:
+                await notifications.notify_admins(
+                    bot,
+                    "🔴 <b>Оплачено, доступа нет — автоповторы остановлены</b>\n\n"
+                    f"Заказ #{order.id}, {order.amount_rub} ₽\n"
+                    f"Попыток: {order.grant_attempts}\n"
+                    f"Причина: <code>{notifications.safe(order.grant_last_error)}</code>\n\n"
+                    "Нужен человек: проверь панель и выдай доступ вручную "
+                    "(<code>/grant</code> или карточка заказа в /admin).",
+                )
+            await session.commit()
+            continue
+
+        # Захват: между «оплата зафиксирована» и ответом панели заказ виден как
+        # paid + granted_at IS NULL, поэтому без захвата панель звали дважды по
+        # одному платежу. Взяли — обрабатываем; не взяли — это делает кто-то другой.
+        if not await claim_grant(session, order):
+            logger.info("Заказ #%s: выдача уже выполняется другим путём — пропускаю", order.id)
+            continue
+
+        try:
+            days, devices, traffic = grant_terms(order, plan)
+            await subscriptions.activate_plan(
+                session,
+                user,
+                plan,
+                panels or await subscriptions.all_user_panels(session),
+                paid_days=days,
+                paid_devices=devices,
+                paid_traffic_gb=traffic,
+            )
+        except Exception as exc:  # noqa: BLE001 - панель может не ответить
+            logger.error("Повторная выдача по заказу #%s не удалась: %s", order.id, exc)
+            release_grant_claim(order)
+            await _record_grant_failure(session, order, target, exc, bot=bot)
+            continue
+
+        # Проверяем факт, а не «не было исключения»: панель могла ответить
+        # успехом и не продлить срок (ручная правка, чужой клиент, старая нода).
+        sub = await subscriptions.get_subscription(session, user.id)
+        problem = _grant_problem(sub, target)
+        if problem:
+            logger.error("Заказ #%s: %s", order.id, problem)
+            release_grant_claim(order)
+            await _record_grant_failure(session, order, target, PanelError(problem), bot=bot)
+            continue
+
+        # Пока панель отвечала, по заказу мог пройти возврат: чарджбэк приходит
+        # вебхуком в любой момент. Тогда доступ оставлять нельзя.
+        await session.refresh(order)
+        if order.status != "paid":
+            logger.warning("Заказ #%s стал %s во время выдачи — отзываю доступ", order.id, order.status)
+            await subscriptions.revoke_access(
+                session,
+                sub,
+                panels or await subscriptions.all_user_panels(session),
+                reason=f"{order.status} order #{order.id}",
+            )
+            release_grant_claim(order)
+            continue
+
+        order.granted_at = datetime.now(timezone.utc)
+        order.grant_last_error = ""
+        release_grant_claim(order)
+        await alerts_service.resolve_by_fingerprint(session, _grant_fingerprint(order.id), by="auto")
+        done.append(order.id)
+        if bot is not None:
+            await notify_granted(bot, user, sub, order)
+
+    await session.flush()
+    return done
+
+
+async def notify_granted(bot: Bot, user: User, sub: Subscription | None, order: Order) -> None:
+    """Сообщить клиенту, что оплата наконец дошла до доступа (после повторной выдачи)."""
+    if sub is None:
+        return
+    from app.bot import keyboards
+
+    expires = sub.expires_at.strftime("%d.%m.%Y %H:%M") if sub.expires_at else "—"
+    link = subscriptions.subscription_link(sub.subscription_token)
+    try:
+        await bot.send_message(
+            user.tg_id,
+            f"✅ Оплата по заказу #{order.id} дошла до доступа. Подписка активна до <b>{expires}</b>.",
+        )
+        await bot.send_message(
+            user.tg_id,
+            texts.SUBSCRIPTION_LINK_HINT.format(link=link),
+            reply_markup=keyboards.connect_kb(link),
+            disable_web_page_preview=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - сообщение не важнее выдачи
+        logger.warning("Не смог сообщить о выдаче доступа %s: %s", user.tg_id, exc)
 
 
 async def get_plan(session: AsyncSession, plan_id: int) -> Plan | None:
@@ -187,10 +592,17 @@ async def mark_paid(
     # «status = pending» проверяется и меняется одной инструкцией, поэтому
     # второй и последующие подтверждения получают rowcount = 0, даже если
     # пришли с устаревшим объектом заказа.
+    now = datetime.now(timezone.utc)
+    sub_before = await subscriptions.get_subscription(session, user.id)
+    target = _grant_target(sub_before, plan, now=now)
     values: dict[str, object] = {
         "status": "paid",
-        "paid_at": datetime.now(timezone.utc),
+        "paid_at": now,
         "confirmed_by": confirmed_by,
+        # Цель выдачи фиксируем ДО обращения к панели: по ней потом проверим
+        # факт, а фоновая задача поймёт, чего добиваться при повторе.
+        "grant_target_at": target,
+        "grant_last_error": "",
     }
     if provider_payment_id:
         values["comment"] = f"payment_id={provider_payment_id}"
@@ -231,8 +643,6 @@ async def mark_paid(
         )
         return sub, False
 
-    sub = await subscriptions.activate_plan(session, user, plan, panel)
-    await session.flush()
     await events.log_event(
         session,
         events.ORDER_PAID,
@@ -243,6 +653,7 @@ async def mark_paid(
             "discount": order.discount_rub,
             "promo": order.promo_code,
             "provider": order.provider,
+            "grant_target": target.isoformat(),
         },
     )
 
@@ -265,6 +676,66 @@ async def mark_paid(
                 owner = await session.get(User, promo_row.owner_user_id)
                 if owner is not None and owner.id != user.id:
                     await referral.attach_referrer(session, user, owner.referral_code)
+
+    # Деньги уже приняты — фиксируем это ДО обращения к панели. Раньше статус
+    # «paid» и выдача жили в одной транзакции: панель не ответила, вызывающий
+    # погасил ошибку и закоммитил — заказ выпадал из всех очередей ретрая
+    # («деньги приняты, доступа нет и не будет», B2).
+    #
+    # Захват ставим здесь же, тем же коммитом: с этой секунды заказ виден как
+    # «оплачен и не выдан», и без захвата фоновая задача звала бы панель второй
+    # раз по тому же платежу. Статус «paid» выставляется атомарным UPDATE выше,
+    # поэтому владелец выдачи ровно один.
+    order.grant_claimed_at = datetime.now(timezone.utc)
+    await session.commit()
+
+    try:
+        days, devices, traffic = grant_terms(order, plan)
+        sub = await subscriptions.activate_plan(
+            session,
+            user,
+            plan,
+            panel,
+            paid_days=days,
+            paid_devices=devices,
+            paid_traffic_gb=traffic,
+        )
+    except Exception as exc:  # noqa: BLE001 - панель может не ответить
+        logger.error("Панель не выдала доступ по заказу #%s: %s", order.id, exc)
+        release_grant_claim(order)
+        await _record_grant_failure(session, order, target, exc, bot=bot)
+        return None, False
+
+    # Выдача подтверждается фактом (срок в панели), а не отсутствием исключения.
+    problem = _grant_problem(sub, target)
+    if problem:
+        logger.error("Заказ #%s: %s", order.id, problem)
+        release_grant_claim(order)
+        await _record_grant_failure(session, order, target, PanelError(problem), bot=bot)
+        return sub, False
+
+    # Возврат мог прийти, пока панель выдавала доступ: чарджбэк приходит
+    # вебхуком в любой момент, а выдача занимает секунды. Без этой проверки итог
+    # был «деньги вернули И доступ живёт»: заказ refunded, granted_at проставлен,
+    # подписка активна, алертов ноль. Статус читаем из БД, а не из объекта в
+    # памяти: его изменил другой путь, и в памяти он уже устарел.
+    await session.refresh(order)
+    if order.status != "paid":
+        logger.warning("Заказ #%s стал %s во время выдачи — отзываю доступ", order.id, order.status)
+        await subscriptions.revoke_access(
+            session, sub, panel, reason=f"{order.status} order #{order.id}"
+        )
+        release_grant_claim(order)
+        await session.flush()
+        return sub, False
+
+    order.granted_at = datetime.now(timezone.utc)
+    order.grant_target_at = target
+    order.grant_last_error = ""
+    # Выдача состоялась — захват снимаем: держать его смысла нет, а повтор
+    # (например, ручная проверка в админке) должен видеть заказ свободным.
+    release_grant_claim(order)
+    await session.flush()
 
     reward = await referral.reward_on_payment(session, order, panel)
     # Временный атрибут (в БД не пишется): по нему вызывающий код добавляет
@@ -320,12 +791,30 @@ async def refund_order(
     order.refund_note = note or None
 
     sub = await subscriptions.get_subscription(session, order.user_id)
+
+    # Ищем оплату ПОЗЖЕ этой. Раньше здесь было «есть хоть какая-то другая
+    # оплата», и это ломало главный сценарий: клиент платит второй раз,
+    # возвращает ПОСЛЕДНИЙ платёж — доступ остаётся (в сообщении при этом
+    # писалось «есть более поздняя оплата», хотя она была раньше). Цикл
+    # «оплатил → чарджбэк → доступ остался» давал до 1440 ₽ в год на одного
+    # злоупотребляющего.
+    #
+    # Ничьи по времени разводим по id: два платежа в одну секунду — редкость,
+    # но порядок должен быть детерминированным.
+    this_paid_at = order.paid_at or order.created_at
     other_paid = await session.scalar(
-        select(Order.id).where(
+        select(Order.id)
+        .where(
             Order.user_id == order.user_id,
             Order.status == "paid",
             Order.id != order.id,
-        ).limit(1)
+            Order.paid_at.is_not(None),
+            or_(
+                Order.paid_at > this_paid_at,
+                and_(Order.paid_at == this_paid_at, Order.id > order.id),
+            ),
+        )
+        .limit(1)
     )
 
     await events.log_event(
