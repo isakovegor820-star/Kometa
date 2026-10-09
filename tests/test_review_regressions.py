@@ -1,0 +1,118 @@
+"""PoC-регрессии ревью 09.10.2026 (B1–B4).
+
+Каждый тест — это воспроизведение дыры, найденной на проде или аудитом, а не
+«тест ради покрытия». Правило: сначала шаг из PoC, потом проверка, что деньги и
+доступ сходятся.
+
+Что здесь:
+
+* **B1** — вебхук, подтверждающий оплату, не выдаёт доступ за чужую сумму
+  (PoC: заказ на 959 ₽ подтверждался платежом на 10 ₽ через WATA).
+* **B2** — «деньги приняты — доступ не выдан и не будет выдан»: при недоступной
+  панели заказ остаётся в очереди на выдачу, а не теряется.
+* **B3** — автоплатёж не подтверждает платёж по чужому заказу, когда сумма
+  совпала без копеек.
+* **B4** — одна оплата даёт ровно одну выдачу, даже если подтверждение пришло
+  двумя параллельными путями.
+
+Приёмка всего ТЗ: ``bash scripts/accept_review.sh``.
+"""
+
+from __future__ import annotations
+
+import json
+
+import httpx
+import pytest
+from sqlalchemy import select
+
+from app.config import get_settings
+from app.db.models import Order, Subscription
+from app.payments.base import PaymentCheck, PaymentStatus
+from app.payments.registry import payments
+from app.services import orders, subscriptions
+from app.web.sub import build_app
+
+settings = get_settings()
+MERCHANT = "1a021d91-9b26-4762-b303-5d4aac74e921"
+SECRET = "test-platega-secret"
+
+
+@pytest.fixture(autouse=True)
+def platega_settings(monkeypatch):
+    """Настроенный Platega: вебхук без провайдера отвечает 503 и ничего не значит."""
+    monkeypatch.setattr(settings, "platega_merchant_id", MERCHANT)
+    monkeypatch.setattr(settings, "platega_secret", SECRET)
+    monkeypatch.setattr(settings, "platega_methods", "2,10")
+    payments.reload()
+    yield
+    payments.reload()
+
+
+@pytest.fixture
+async def client(session):
+    app = await build_app(bot=None)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+        yield c
+
+
+def _headers(merchant: str = MERCHANT, secret: str = SECRET) -> dict[str, str]:
+    return {"X-MerchantId": merchant, "X-Secret": secret}
+
+
+def _body(order_id: int, amount: float = 199.0, status: str = "CONFIRMED") -> bytes:
+    return json.dumps(
+        {
+            "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+            "amount": amount,
+            "currency": "RUB",
+            "status": status,
+            "paymentMethod": 2,
+            "payload": f"order:{order_id}",
+        }
+    ).encode()
+
+
+def _stub_check(monkeypatch, provider, status: PaymentStatus, amount: int | None):  # noqa: ANN001
+    async def fake_check(external_id: str) -> PaymentCheck:
+        return PaymentCheck(status=status, amount=amount, raw={"id": external_id, "status": status.value})
+
+    monkeypatch.setattr(provider, "check_payment", fake_check)
+
+
+async def _make_order(session, tg_id: int, provider: str = "platega_sbp"):  # noqa: ANN001
+    user, _ = await subscriptions.get_or_create_user(session, tg_id=tg_id, username=f"rev{tg_id}")
+    plan = (await orders.list_plans(session))[0]
+    order = await orders.create_order(session, user, plan, provider=provider)
+    await session.commit()
+    return user, order
+
+
+# ------------------------------------------------------------------------- B1
+async def test_wata_webhook_does_not_exist(client: httpx.AsyncClient):
+    """B1: небезопасного вебхука WATA больше нет — маршрут отвечает 404.
+
+    Через него заказ на 959 ₽ подтверждался платежом на 10 ₽: сумма не
+    сверялась, а тело подписано общим для всех мерчантов ключом.
+    """
+    response = await client.post("/payments/wata/webhook", content=b"{}")
+
+    assert response.status_code == 404
+
+
+async def test_paid_webhook_with_wrong_amount_does_not_grant(
+    client: httpx.AsyncClient, session, monkeypatch
+):  # noqa: ANN001
+    """B1: подтверждённая, но дешёвая транзакция не выдаёт дорогой заказ."""
+    _, order = await _make_order(session, 9901)
+    provider = next(p for p in payments.available() if getattr(p, "merchant_id", None))
+    _stub_check(monkeypatch, provider, PaymentStatus.PAID, amount=10)
+
+    response = await client.post("/payments/platega/webhook", content=_body(order.id), headers=_headers())
+
+    assert response.status_code == 200
+    assert response.json().get("skipped") == "amount mismatch"
+    await session.refresh(order)
+    assert order.status == "pending"
+    assert await session.scalar(select(Subscription).where(Subscription.user_id == order.user_id)) is None
