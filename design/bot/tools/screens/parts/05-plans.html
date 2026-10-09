@@ -1,0 +1,87 @@
+<main class="canvas">
+  <aside class="side">
+    <div class="eyebrow">Экран 05 · тарифы</div>
+    <h1 class="title">Три срока, цена за месяц<br>и честная выгода</h1>
+    <p class="lead">Вместо списка кнопок — три варианта с ценой, ценой за месяц и сроком.
+    Рядом видно, сколько экономит длинный тариф: это считается из настоящих цен, а не
+    пишется «на глаз».</p>
+    <ul class="notes">
+      <li><b>Цена и цена за месяц</b> — ровно те поля, что бот считает для кнопок:
+      <code>price / days × 30</code>. Подписи кнопок — по <code>START-COPY.md</code> 4.</li>
+      <li><b>Выгода посчитана.</b> 3 месяца — 299 ₽ вместо 360 ₽ (−17 %),
+      12 месяцев — 959 ₽ вместо 1 440 ₽ (−34 %).</li>
+      <li><b>Один главный путь.</b> Три кнопки-тарифа, промокод и «Назад» — и всё.
+      Никаких «узнать цену» и «оставить заявку».</li>
+      <li><b>Оплата звёздами видна сразу</b> — <code>STARS_ENABLED=true</code>,
+      в карточке есть строка «или N ⭐».</li>
+    </ul>
+  </aside>
+
+  <section class="stage">
+    <!--PHONE-->
+    <div class="tg">
+      {{STATUS}}
+      {{HEAD}}
+      <div class="tg-body">
+        <div class="msg">
+          <b>Тарифы</b><br><br>
+          Оплата активируется сразу после подтверждения. Один тариф — до 3 устройств,
+          трафик без ограничений.<br><br>
+          Выбери срок:
+          <div class="quote" style="margin-top:10px">
+            <div class="q-top"><span class="q-title">1 месяц</span><span class="q-price">120 ₽</span></div>
+            <div class="q-sub">120 ₽ в месяц · 30 дней · до 3 устройств</div>
+            <div class="q-sub">или 110 ⭐ в Telegram Stars</div>
+          </div>
+          <div class="quote">
+            <div class="q-top"><span class="q-title">3 месяца</span><span class="badge">выгоднее на 17 %</span></div>
+            <div class="q-top"><span class="q-price">299 ₽</span><span class="q-sub">100 ₽ в месяц</span></div>
+            <div class="q-sub">90 дней · до 3 устройств · или 270 ⭐</div>
+          </div>
+          <div class="quote">
+            <div class="q-top"><span class="q-title">12 месяцев</span><span class="badge">лучшая цена · −34 %</span></div>
+            <div class="q-top"><span class="q-price">959 ₽</span><span class="q-sub">79 ₽ в месяц</span></div>
+            <div class="q-sub">365 дней · до 3 устройств · или 860 ⭐</div>
+          </div>
+        </div>
+        <div class="kb">
+          <div class="kbrow one"><div class="btn primary">1 месяц — 120 ₽ · 120 ₽/мес</div></div>
+          <div class="kbrow one"><div class="btn">3 месяца — 299 ₽ · 100 ₽/мес</div></div>
+          <div class="kbrow one"><div class="btn">12 месяцев — 959 ₽ · 79 ₽/мес</div></div>
+          <div class="kbrow one"><div class="btn">У меня есть промокод</div></div>
+          <div class="kbrow one"><div class="btn ghost">← Назад</div></div>
+        </div>
+      </div>
+      <div class="tg-input">
+        <div class="field">Сообщение</div>
+        <svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="8" y="2.5" width="6" height="11" rx="3"/><path d="M4.5 10.5a6.5 6.5 0 0 0 13 0"/><path d="M11 17v3"/></svg>
+      </div>
+    </div>
+    <!--/PHONE-->
+    <div class="stage-cap">Мокап клиента Telegram · 420 px · карточки — blockquote с подписью</div>
+  </section>
+
+  <aside class="side right">
+    <h2>Тексты и цены — из бота</h2>
+    <ul class="src">
+      <li><code>texts.PLANS_HEADER</code> — «💎 Тарифы», «Оплата активируется сразу
+      после подтверждения», «Выбери срок»</li>
+      <li><code>texts.PLAN_CARD</code> — «Цена: {price} ₽ ({per_month} ₽ в месяц)»,
+      «Срок: {days} дней», «Устройств: до {devices}», «Трафик: без ограничений»</li>
+      <li><code>texts.STARS_LINE</code> — «Или {stars} ⭐ в Telegram Stars —
+      доступ включится сразу»</li>
+      <li><code>keyboards.plans_kb()</code> — новая подпись «{title} — {price} ₽ ·
+      {per_month} ₽/мес», «У меня есть промокод», «← Назад»
+      (<code>START-COPY.md</code>, раздел 4, пункты 14–16)</li>
+      <li><code>seed_plans()</code> — 1 мес / 120 ₽ / 110 ⭐ · 3 мес / 299 ₽ / 270 ⭐ ·
+      6 мес / 539 ₽ / 485 ⭐ · 12 мес / 959 ₽ / 860 ⭐, у всех до 3 устройств</li>
+      <li><code>texts.REFERRAL_TEASER</code> — приглашение друга со скидкой
+      <code>{percent}%</code> (30 % по .env)</li>
+    </ul>
+    <div class="callout warn"><b>Про «выгоднее на 35 %».</b> Цифры тарифов это не
+    подтверждают: 3 месяца дают −17 % (299 ₽ вместо 360 ₽), 12 месяцев — −34 %
+    (959 ₽ вместо 1 440 ₽). В макете стоят посчитанные значения, а не круглые.</div>
+    <div class="callout"><b>Тариф «6 месяцев» (539 ₽)</b> в боте есть, но в макет не попал:
+    три варианта читаются быстрее четырёх. Показать все — правка одной карточки.</div>
+  </aside>
+</main>

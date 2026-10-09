@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="brand-e-hourglass" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+    </linearGradient>
+    <linearGradient id="ring-e-hourglass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="46" fill="none" stroke="url(#ring-e-hourglass)" stroke-width="2.6" opacity="0.62"/>
+  <g transform="translate(-3.65 -3.65) scale(4.4706)" fill="none" stroke="#FFFFFF" stroke-width="0.492" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h10"/><path d="M7 20.5h10"/><path d="M8 3.5v3.2c0 2 4 3.2 4 5.3s-4 3.3-4 5.3v3.2"/><path d="M16 3.5v3.2c0 2-4 3.2-4 5.3s4 3.3 4 5.3v3.2"/></g>
+</svg>

@@ -66,15 +66,19 @@ async def test_trial_is_not_given_twice(bot, dispatcher, session):
 
 
 async def test_plans_are_listed_with_prices(bot, dispatcher, session):
+    from app.services import orders
+
+    plans = await orders.list_plans(session)
+
     await dispatcher.feed_update(bot, make_update("/start", user_id=7401))
     bot.session.clear()
 
     await dispatcher.feed_update(bot, make_update(callback_data="plans", user_id=7401))
 
     sent = bot.session.all_text()
-    assert "199" in sent
-    # Цены в кнопках с разделителем разрядов: «1 590 ₽» (неразрывный пробел).
-    assert "1\u00a0590" in sent
+    for plan in plans:
+        assert str(plan.price_rub) in sent, f"нет цены тарифа {plan.code}"
+        assert str(plan.price_stars) in sent, f"нет цены в звёздах тарифа {plan.code}"
 
 
 async def test_unknown_text_gets_helpful_answer(bot, dispatcher, session):

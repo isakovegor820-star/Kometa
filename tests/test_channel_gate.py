@@ -10,7 +10,9 @@ from __future__ import annotations
 import pytest
 from aiogram.exceptions import TelegramBadRequest
 
+from app.bot import texts
 from app.config import get_settings
+from app.bot import view
 from app.services import channel_gate, orders, subscriptions
 from tests.fakes import make_stars_payment_update, make_update
 
@@ -18,6 +20,9 @@ CHANNEL = "@kometa_test"
 CHANNEL_URL = "https://t.me/kometa_test"
 #: Начало экрана подписки — по нему и отличаем «гейт сработал» от меню.
 GATE_MARK = "Остался один шаг"
+#: Метка открытого меню. Новый человек видит hero: фото + подпись, поэтому
+#: проверяем не «Главное меню», а сам факт, что бот пустил и показал меню.
+MENU_MARK = texts.MENU_NO_SUB
 
 
 @pytest.fixture
@@ -47,8 +52,19 @@ def telegram_silent(bot, message: str = "Bad Request: chat not found") -> None:
 
 
 def shown(bot) -> str:
-    """Всё, что бот отправил: сообщения, кнопки и тексты всплывающих окон."""
+    """Всё, что бот отправил: сообщения, подписи к фото, кнопки и алерты."""
     return bot.session.all_text()
+
+
+def _menu_shown(bot) -> bool:
+    """Показал ли бот меню (а не экран подписки).
+
+    Новому человеку меню уходит hero-сообщением: у фото нет ``text``, только
+    подпись. Поэтому метка — либо текст меню, либо строка из hero-подписи.
+    """
+    sent = shown(bot)
+    marks = (texts.MENU_NO_SUB, "3 дня бесплатно", texts.MENU_ACTIVE, texts.MENU_EXPIRED)
+    return any(mark in sent for mark in marks)
 
 
 async def user_subscription(session, tg_id: int):  # noqa: ANN001
@@ -101,7 +117,7 @@ async def test_button_after_subscribing_opens_the_bot(bot, dispatcher, session, 
     )
 
     assert "Подписка подтверждена" in shown(bot)
-    assert "Главное меню" in shown(bot)
+    assert _menu_shown(bot)
 
     # и дальше бот работает как обычно — пробный доступ выдаётся
     await dispatcher.feed_update(bot, make_update(callback_data="trial:start", user_id=8301))
@@ -185,7 +201,7 @@ async def test_stale_check_button_with_gate_off_opens_menu(bot, dispatcher, sess
     )
 
     assert "Не получилось проверить" not in shown(bot)
-    assert "Главное меню" in shown(bot)
+    assert _menu_shown(bot)
 
 
 # ------------------------------------------------------- кого гейт не трогает

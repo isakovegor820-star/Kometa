@@ -14,6 +14,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -82,11 +83,38 @@ class User(Base):
     #: подписки). Кэш, чтобы не спрашивать Telegram API на каждый апдейт;
     #: пусто — ещё не подтверждали или срок доверия истёк.
     channel_verified_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    #: Источник привлечения: откуда человек пришёл — «ref», «promo», «placement».
+    #: Ставится один раз, при первом входе. Нужен, чтобы считать стоимость
+    #: привлечения по каналам, а не «в среднем по больнице».
+    source: Mapped[str] = mapped_column(String(32), default="")
+    #: Уточнение источника: код размещения, название канала, id кампании.
+    source_detail: Mapped[str] = mapped_column(String(64), default="")
+    #: Когда источник зафиксирован (первый вход).
+    source_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    #: Партнёр, который привёл человека (ссылка ``?start=src_<код>``).
+    #: Пусто — пришёл сам, по рефералке друга или по акции.
+    partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"), default=None, index=True)
+    #: Персональная ссылка, по которой пришёл человек (``?start=p_<код>``).
+    #: Скидка такой ссылки применяется к его заказам автоматически.
+    personal_link_id: Mapped[int | None] = mapped_column(
+        ForeignKey("personal_links.id"), default=None, index=True
+    )
+    #: Когда последний раз отправляли автосценарий (подсказка, win-back, апселл).
+    #: Нужно, чтобы бот не превращался в спамера: между сообщениями держим паузу.
+    last_lifecycle_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    #: Код последнего отправленного сценария — для отчёта «что сработало».
+    last_lifecycle_kind: Mapped[str] = mapped_column(String(32), default="")
 
     subscription: Mapped["Subscription | None"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
-    orders: Mapped[list["Order"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    orders: Mapped[list["Order"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        # Явно: у orders два внешних ключа на users (покупатель и тот, кто
+        # активировал подарок), и связь строится по покупателю.
+        foreign_keys="Order.user_id",
+    )
 
     @property
     def display_name(self) -> str:
@@ -184,7 +212,37 @@ class Order(Base):
     #: Причина: «клиент передумал», «чарджбэк», «двойная оплата».
     refund_note: Mapped[str | None] = mapped_column(Text, default=None)
 
-    user: Mapped[User] = relationship(back_populates="orders")
+    #: Когда админам сообщили, что по **закрытому** заказу всё-таки пришли деньги
+    #: (заказ отменён или истёк, а платёж состоялся: бот спал, вебхук не дошёл).
+    #: Нужно, чтобы фоновая проверка не писала об одном платеже каждые 2 минуты,
+    #: и чтобы админ вообще узнал о деньгах, за которые ничего не выдано.
+    payment_alerted_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+
+    # --- подарочный сертификат ---------------------------------------------
+    #: Токен подарка (``KOMETA-GIFT-XXXXXXXX``). Заполнен — заказ подарочный:
+    #: оплата покупателя выдаёт дни не ему, а получателю по этому токену.
+    gift_token: Mapped[str | None] = mapped_column(String(32), unique=True, default=None)
+    #: tg_id получателя, если покупатель его указал. Пусто — подарили ссылкой.
+    gift_recipient_tg_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    #: Что написать на открытке.
+    gift_message: Mapped[str | None] = mapped_column(String(200), default=None)
+    #: Когда получатель активировал подарок. Пусто — ещё не активирован.
+    gift_activated_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    #: Партнёр, с платежа которого начисляется выплата. Снимок на момент оплаты:
+    #: если партнёра потом удалят, история расчётов не поедет.
+    partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"), default=None, index=True)
+    #: Сколько начислено партнёру за этот платёж (рубли). Копится один раз.
+    partner_reward_rub: Mapped[float] = mapped_column(Float, default=0.0)
+
+    #: Кто активировал (id пользователя), чтобы подарок нельзя было использовать дважды.
+    #: Отдельный внешний ключ на users: из-за него связь «заказ → покупатель»
+    #: ниже задаётся явно через ``foreign_keys``.
+    gift_activated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
+
+    #: Покупатель заказа. foreign_keys указан явно: у таблицы есть второй
+    #: внешний ключ на users (``gift_activated_by``), и без этого SQLAlchemy
+    #: не понимает, по какому из них строить связь.
+    user: Mapped[User] = relationship(back_populates="orders", foreign_keys=[user_id])
 
     @property
     def price_before_discount(self) -> int:
@@ -229,7 +287,143 @@ class Referral(Base):
     paid_order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), default=None)
     #: Когда награда начислена. По этой дате считается лимит «не больше N в месяц».
     rewarded_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    #: Сколько дней пригласивший получил за продления друга (вторая и следующие
+    #: оплаты). Привязывает рефералку к удержанию: пока друг платит — дни идут.
+    renewal_bonus_days: Mapped[int] = mapped_column(Integer, default=0)
+    #: Сколько раз друг оплатил продление. По счётчику видно, кто из
+    #: приглашённых остался, а кто ушёл после первого месяца.
+    renewals_count: Mapped[int] = mapped_column(Integer, default=0)
+    #: Когда последний раз начисляли награду за продление.
+    renewal_rewarded_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow)
+
+
+class Partner(Base):
+    """Партнёр сервиса: реферал, блогер, админ чата, реселлер.
+
+    Зачем отдельная сущность, а не промокод. У партнёра есть **своя ссылка**,
+    свой процент скидки и, главное, **выплата ему** — процент с платежей
+    приведённых людей или фиксированная сумма за каждую оплату. Промокод без
+    партнёра этого не выражает: он даёт скидку, но не отвечает на вопрос
+    «сколько мы должны этому человеку».
+
+    Что отслеживается (см. ``app/services/partners.py``):
+
+      * **переходы** — сколько людей открыли бота по ссылке ``?start=src_<код>``;
+      * **регистрации** — сколько из них осталось в боте (``users.partner_id``);
+      * **оплаты** — сколько привели денег (``orders`` с их платежами);
+      * **выручка** — сумма оплат этих людей;
+      * **наша выплата** — процент с платежей или фикс за каждую оплату;
+      * **ROI** — сколько рублей пришло на каждый рубль выплаты.
+
+    Выплата растёт с **каждым** платежом приведённого человека, а не только с
+    первым: партнёру выгодно приводить тех, кто остаётся, а нам — платить за
+    удержание, а не за регистрацию.
+    """
+
+    __tablename__ = "partners"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    #: Название для админки: «Иван, канал про удалёнку».
+    name: Mapped[str] = mapped_column(String(64))
+    #: Код в ссылке: ``t.me/<bot>?start=src_<slug>``. Латиница, цифры, дефис.
+    slug: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    #: Скидка, которую получает приведённый человек, %. 0 — без скидки.
+    discount_percent: Mapped[int] = mapped_column(Integer, default=0)
+    #: Потолок скидки в рублях (0 — без потолка).
+    discount_max_rub: Mapped[int] = mapped_column(Integer, default=0)
+    #: Как считаем выплату партнёру: ``percent`` — процент с платежей,
+    #: ``fixed`` — фиксированная сумма за каждую оплату, ``none`` — без выплаты.
+    reward_kind: Mapped[str] = mapped_column(String(16), default="percent")
+    #: Значение выплаты: проценты (``percent``) или рубли (``fixed``).
+    reward_value: Mapped[float] = mapped_column(Float, default=30.0)
+    #: Сколько уже выплачено вручную (рубли). Остальное — текущий долг.
+    paid_out_rub: Mapped[float] = mapped_column(Float, default=0.0)
+    #: Когда последний раз рассчитывались с партнёром.
+    paid_out_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str | None] = mapped_column(String(200), default=None)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow)
+
+    @property
+    def reward_text(self) -> str:
+        """Выплата словами — для таблицы в админке."""
+        if self.reward_kind == "none":
+            return "без выплаты"
+        if self.reward_kind == "fixed":
+            return f"{self.reward_value:.0f} ₽ за оплату"
+        return f"{self.reward_value:g} % с платежей"
+
+
+class PersonalLink(Base):
+    """Персональная ссылка под конкретного человека.
+
+    Чем отличается от партнёрской ссылки и от промокода.
+
+    * **Партнёрская ссылка** одна на партнёра: любой, кто по ней пришёл, получает
+      условия партнёра, и партнёру платим за каждого.
+    * **Промокод** человек должен ввести руками.
+    * **Персональная ссылка** — под одного адресата: своя скидка, свой срок, свой
+      лимит. Скидка применяется автоматически, вводить ничего не нужно.
+
+    Зачем это нужно на практике:
+
+      * блогер просит «дай ссылку под меня с 40 %» — под каждый пост своя ссылка,
+        и видно, какой именно пост сработал, а не «канал в целом»;
+      * другу, коллеге или админу чата можно дать особые условия, не меняя общие
+        правила для всех клиентов;
+      * у ссылки есть срок: акция на выходные не останется рабочей через полгода;
+      * у ссылки есть лимит активаций: «только для первых 20 человек».
+
+    Ссылка вида ``t.me/<bot>?start=p_<код>``. Владелец — либо партнёр
+    (``partner_id``), либо просто подпись (``owner_name``) для памяти.
+    """
+
+    __tablename__ = "personal_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    #: Код в ссылке: ``?start=p_<код>``. Латиница, цифры, дефис.
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    #: Название для админки: «Пост у Ивана 12.10» или «Сергей, коллега».
+    title: Mapped[str] = mapped_column(String(64))
+    #: Кому выдали — для памяти. Клиент этого не видит.
+    owner_name: Mapped[str] = mapped_column(String(64), default="")
+    #: Партнёр, под которого сделана ссылка (пусто — частное лицо).
+    partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"), default=None, index=True)
+    #: Скидка по этой ссылке, %. Своя: у каждого адресата может быть разная.
+    discount_percent: Mapped[int] = mapped_column(Integer, default=20)
+    #: Потолок скидки в рублях (0 — без потолка).
+    discount_max_rub: Mapped[int] = mapped_column(Integer, default=0)
+    #: Сколько человек могут активировать ссылку (0 — без ограничения).
+    uses_limit: Mapped[int] = mapped_column(Integer, default=0)
+    #: Сколько уже активировали.
+    uses_count: Mapped[int] = mapped_column(Integer, default=0)
+    #: До какого момента ссылка работает (пусто — бессрочно).
+    expires_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str | None] = mapped_column(String(200), default=None)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow)
+
+    @property
+    def uses_left(self) -> int | None:
+        """Сколько активаций осталось (None — без ограничения)."""
+        if not self.uses_limit:
+            return None
+        return max(0, self.uses_limit - (self.uses_count or 0))
+
+    @property
+    def is_expired(self) -> bool:
+        """Срок ссылки вышел."""
+        return self.expires_at is not None and self.expires_at <= utcnow()
+
+    @property
+    def is_usable(self) -> bool:
+        """Ссылку ещё можно активировать."""
+        if not self.is_active or self.is_expired:
+            return False
+        if self.uses_limit and (self.uses_count or 0) >= self.uses_limit:
+            return False
+        return True
 
 
 class PromoCode(Base):
@@ -246,13 +440,26 @@ class PromoCode(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    kind: Mapped[str] = mapped_column(String(16), default="admin")  # referral|admin
+    #: referral — код клиента, admin — код из админки, partner — код партнёра,
+    #: personal — код персональной ссылки под конкретного человека.
+    kind: Mapped[str] = mapped_column(String(16), default="admin")
     owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
+    #: Партнёрский код: привязан к партнёру, а не к обычному пользователю.
+    #: ``owner_user_id`` у таких кодов пусто — заслуга идёт партнёру.
+    partner_id: Mapped[int | None] = mapped_column(ForeignKey("partners.id"), default=None)
+    #: Код персональной ссылки: своя скидка под конкретного адресата.
+    personal_link_id: Mapped[int | None] = mapped_column(
+        ForeignKey("personal_links.id"), default=None
+    )
     percent: Mapped[int] = mapped_column(Integer, default=50)
     #: Потолок скидки в рублях: 0 — без потолка.
     max_discount_rub: Mapped[int] = mapped_column(Integer, default=0)
     #: Скидка только на первую оплату клиента (для акций можно выключить).
     first_only: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: Многоразовый код: работает даже если клиент уже пользовался скидкой.
+    #: Нужен для тестовых прогонов и компенсаций: обычное правило «одна скидка
+    #: на аккаунт за всю жизнь» блокирует повторное применение любого кода.
+    repeatable: Mapped[bool] = mapped_column(Boolean, default=False)
     #: Сколько раз код может сработать: 0 — без ограничения.
     uses_limit: Mapped[int] = mapped_column(Integer, default=0)
     uses_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -353,6 +560,13 @@ class Node(Base):
     #: Причина последней неудачной пробы — и «порт не пускает», и «проба не
     #: состоялась». Пусто — проба прошла.
     last_probe_error: Mapped[str] = mapped_column(String(300), default="")
+    #: Замер по КАЖДОМУ TCP-порту ноды, JSON-строкой:
+    #: ``[{"port": 443, "ok": true, "ms": 12}, {"port": 8443, "ok": false, …}]``.
+    #: Зачем, если есть ``last_probe_ok``: он отвечает «жив ли хоть один порт»,
+    #: а оператору нужен ответ «какой именно не пускает». У ноды в подписке
+    #: несколько портов, и «ок» при одном открытом скрывало закрытый второй —
+    #: из-за этого диагноз «работает» и жалоба клиента не сходились.
+    last_probe_ports: Mapped[str] = mapped_column(Text, default="")
 
 
 class Event(Base):

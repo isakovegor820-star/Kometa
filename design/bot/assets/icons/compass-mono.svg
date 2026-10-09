@@ -1,0 +1,7 @@
+<!-- Kometa icon set · compass · 24×24 · stroke 1.75 · #45E698 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+ width="24" height="24"
+ fill="none" stroke="#45E698" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="12" cy="12" r="9"/>
+  <path d="M15.9 8.1 10.6 10.6 8.1 15.9 13.4 13.4Z"/>
+</svg>

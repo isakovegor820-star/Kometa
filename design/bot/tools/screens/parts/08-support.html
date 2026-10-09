@@ -1,0 +1,81 @@
+<main class="canvas">
+  <aside class="side">
+    <div class="eyebrow">Экран 08 · поддержка</div>
+    <h1 class="title">Честные сроки и один шаг<br>до живого человека</h1>
+    <p class="lead">Никаких «ответим мгновенно». В тексте — настоящие сроки из бота:
+    обычно в течение 15 минут, сложные технические вопросы — до 24 часов.
+    И список того, что написать, чтобы решить вопрос с первого сообщения.</p>
+    <ul class="notes">
+      <li><b>Время ответа честное.</b> 15 минут и «до 24 часов» — это
+      <code>texts.SUPPORT</code>, а не обещание маркетинга.</li>
+      <li><b>Что написать.</b> Номер заказа или <code>/id</code>, что именно
+      не работает (телефон, ноутбук, ТВ) и какое приложение — три пункта из текста.</li>
+      <li><b>Четыре выхода</b>: написать, канал, «если не открывается»,
+      документы и цены. Больше на экране поддержки не нужно.</li>
+      <li><b>Документы в один тап.</b> Требование банка-партнёра выполняется
+      и здесь: «📄 Документы и цены» — прямо в клавиатуре поддержки.</li>
+    </ul>
+  </aside>
+
+  <section class="stage">
+    <!--PHONE-->
+    <div class="tg">
+      {{STATUS}}
+      {{HEAD}}
+      <div class="tg-body">
+        <div class="msg">
+          <b>Поддержка</b><br><br>
+          Написать: <b>@egorTech888</b><br>
+          Отвечаем в порядке очереди: обычно в течение 15 минут, сложные технические
+          вопросы — до 24 часов.<br><br>
+          <b>Чтобы решить вопрос с первого сообщения</b>, укажите:<br>
+          • номер заказа (например, #123) или ваш Telegram ID (команда /id);<br>
+          • что именно не работает — телефон, ноутбук или ТВ;<br>
+          • приложение, которым пользуетесь.<br><br>
+          Документы и цены — в разделе «Документы и цены».
+        </div>
+        <div class="kb">
+          <div class="kbrow one"><div class="btn primary">Написать в поддержку</div></div>
+          <div class="kbrow one"><div class="btn">Наш канал</div></div>
+          <div class="kbrow one"><div class="btn">Если не открывается</div></div>
+          <div class="kbrow one"><div class="btn">Документы и цены</div></div>
+          <div class="kbrow one"><div class="btn ghost">← В меню</div></div>
+        </div>
+      </div>
+      <div class="tg-input">
+        <div class="field">Сообщение</div>
+        <svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="8" y="2.5" width="6" height="11" rx="3"/><path d="M4.5 10.5a6.5 6.5 0 0 0 13 0"/><path d="M11 17v3"/></svg>
+      </div>
+    </div>
+    <!--/PHONE-->
+    <div class="stage-cap">Мокап клиента Telegram · 420 px · контакт и канал — из .env</div>
+  </section>
+
+  <aside class="side right">
+    <h2>Тексты — из бота</h2>
+    <ul class="src">
+      <li><code>texts.SUPPORT</code> — «Написать: {support}», «обычно в течение
+      15 минут, сложные технические вопросы — до 24 часов», три пункта «что указать»</li>
+      <li><code>keyboards.support_kb()</code> — «Написать в поддержку» (primary),
+      «Наш канал», «Документы и цены», «← В меню» — подписи без эмодзи
+      (<code>START-COPY.md</code>, раздел 4, пункты 45–48)</li>
+      <li><code>keyboards.BTN_RESERVE</code> — «Если не открывается»
+      (текст <code>texts.RESERVE_HELP</code>)</li>
+      <li><code>texts.LEGAL_HEADER</code> — «Открывается без регистрации и в любой
+      момент — документы не прячутся за оплатой»</li>
+      <li><code>settings.support_username = egorTech888</code>,
+      <code>channel_url = t.me/KometaVPN888</code> — оттуда контакт и канал
+      в макете (плейсхолдеров вида «@support» нет)</li>
+      <li><code>texts.SUPPORT_NO_CONTACT</code> — что бот покажет, если канал
+      поддержки ещё не подключён: «напишите нам чуть позже»</li>
+      <li>команда <code>/support</code> в <code>handlers/start.py</code> отвечает
+      этим же текстом — тот же экран, другая точка входа</li>
+      <li>Эмодзи в заголовке убран: в дизайн-системе «☎️» — декор,
+      смысл несёт слово «Поддержка» (R1–R3)</li>
+    </ul>
+    <div class="callout"><b>Пустое состояние продумано:</b> если
+    <code>SUPPORT_USERNAME</code> не задан, бот не показывает битую кнопку —
+    он отвечает текстом <code>SUPPORT_NO_CONTACT</code>. В макете показан
+    рабочий вариант с живым контактом.</div>
+  </aside>
+</main>

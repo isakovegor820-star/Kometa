@@ -95,8 +95,13 @@ async def cryptobot_webhook(request: Request) -> JSONResponse:
             await _notify_paid(bot, user, sub, order)
             await notifications.notify_admins(
                 bot,
-                f"🪙 <b>Оплата криптой</b>\nЗаказ #{order.id}, {order.amount_rub} ₽\n"
-                f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>)",
+                await notifications.payment_notice(
+                    session,
+                    order,
+                    user,
+                    title="Оплата криптой",
+                    provider="CryptoBot",
+                ),
             )
 
     return JSONResponse({"ok": True})
@@ -216,9 +221,14 @@ async def wata_webhook(request: Request) -> JSONResponse:
             await _notify_paid(bot, user, sub, order)
             await notifications.notify_admins(
                 bot,
-                f"💳 <b>Оплата через WATA</b>\nЗаказ #{order.id}, {data.get('amount')} "
-                f"{data.get('currency')} ({data.get('transactionType')})\n"
-                f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>)",
+                await notifications.payment_notice(
+                    session,
+                    order,
+                    user,
+                    title="Оплата через WATA",
+                    provider=f"WATA ({data.get('transactionType')})",
+                    note=f"Платёж: {data.get('amount')} {data.get('currency')}",
+                ),
             )
 
     return JSONResponse({"ok": True})
@@ -226,23 +236,40 @@ async def wata_webhook(request: Request) -> JSONResponse:
 
 # ------------------------------------------------------------------- Platega
 async def _find_order(session, order_id: int | None, transaction_id: str) -> "Order | None":  # noqa: ANN001
-    """Найти заказ по payload из колбэка или по id транзакции.
+    """Найти заказ по id транзакции провайдера, а при неудаче — по payload.
 
-    Platega может не вернуть payload в колбэке — тогда опираемся на id транзакции,
-    который мы сами и сгенерировали при создании платежа.
+    Порядок именно такой. ``id`` транзакции приходит от Platega и подтверждается
+    запросом к API, а ``payload`` — просто поле в теле вебхука, которое можно
+    подставить. Раньше поиск шёл от payload, и с утёкшим секретом хватало
+    переиграть дешёвую оплаченную транзакцию с payload дорогого заказа.
+
+    Поиск по payload оставлен для заказов, созданных до того, как заказ начал
+    хранить id счёта провайдера.
     """
     from sqlalchemy import select
 
-    order = await session.get(Order, order_id) if order_id else None
-    if order is None and transaction_id:
+    order = None
+    if transaction_id:
         order = await session.scalar(select(Order).where(Order.external_id == transaction_id))
         if order is not None:
-            logger.info("Заказ #%s найден по id транзакции Platega", order.id)
+            logger.info("Заказ #%s найден по id транзакции", order.id)
+    if order is None and order_id:
+        order = await session.get(Order, order_id)
+        if order is not None:
+            logger.info("Заказ #%s найден по payload вебхука", order.id)
     return order
 
 
 async def _revoke_after_refund(request: Request, order_id: int | None, transaction_id: str, raw: dict) -> None:
-    """Отключить доступ после возврата денег (чарджбэк по карте)."""
+    """Отключить доступ после возврата денег (чарджбэк по карте).
+
+    Возврат оформляем через общий сервис ``orders.refund_order``, а не руками:
+    только он переводит заказ в ``refunded`` с датой возврата, и только после
+    этого деньги уходят из выручки и попадают в отчёт возвратов. Раньше здесь
+    статус заказа оставался ``paid`` — сервис показывал прибыль, которой нет.
+    Доступ при этом сохраняется, если у клиента есть более поздняя оплата
+    (это тоже логика сервиса).
+    """
     from app.db.session import SessionMaker
 
     bot: Bot | None = getattr(request.app.state, "bot", None)
@@ -252,16 +279,17 @@ async def _revoke_after_refund(request: Request, order_id: int | None, transacti
             logger.warning("Возврат Platega: заказ не найден (payload=%s, id=%s)", order_id, transaction_id)
             return
 
+        if order.status != "paid":
+            logger.info("Возврат Platega по заказу #%s в статусе %s — учитывать нечего", order.id, order.status)
+            return
+
         user = await session.get(User, order.user_id)
-        sub = await subscriptions.get_subscription(session, order.user_id) if user else None
-        if user is not None and sub is not None:
-            await subscriptions.set_enabled(sub, await subscriptions.all_user_panels(session), False)
-            sub.status = "blocked"
-        await events.log_event(
+        ok, message, _sub = await orders_service.refund_order(
             session,
-            events.ORDER_REFUNDED,
-            user_id=order.user_id,
-            payload={"order_id": order.id, "source": "platega_webhook", "raw": raw},
+            order,
+            await subscriptions.all_user_panels(session),
+            actor="platega-webhook",
+            note="чарджбэк Platega",
         )
         await session.commit()
 
@@ -269,8 +297,9 @@ async def _revoke_after_refund(request: Request, order_id: int | None, transacti
             await notifications.notify_admins(
                 bot,
                 f"↩️ <b>Возврат платежа (Platega)</b>\nЗаказ #{order.id}, {order.amount_rub} ₽\n"
-                f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>)\n"
-                "Доступ отключён.",
+                f"Пользователь: {notifications.safe(user.display_name)} "
+                f"(<code>{user.tg_id}</code>)\n"
+                f"{notifications.safe(message) if ok else 'не удалось оформить возврат'}",
             )
 
 
@@ -283,14 +312,26 @@ async def platega_webhook(request: Request) -> JSONResponse:
     заголовков перепроверяем транзакцию через API и выдаём доступ только если
     Platega сама подтверждает статус CONFIRMED. Подделанный вебхук не даст
     бесплатный доступ, даже если секрет утечёт.
+
+    Отдельный случай — **проверка адреса при сохранении в кабинете**: Platega
+    отправляет на Callback URL пустой POST и считает адрес валидным только при
+    ответе 200 OK. Поэтому пустое или не-JSON тело мы принимаем молча
+    (``skipped``), не трогая ни заказы, ни доступ: терять из-за этого
+    возможность сохранить адрес нельзя. Ничего не выдавая, такой ответ
+    безопасен — 200 здесь не подтверждает ни один платёж.
     """
     from app.payments.base import PaymentStatus
     from app.payments.registry import payments as payment_registry
 
     try:
         body = await request.json()
-    except Exception as exc:  # noqa: BLE001 - тело может быть не JSON
-        raise HTTPException(status_code=400, detail="invalid json") from exc
+    except Exception:  # noqa: BLE001 - пустое тело это норма: так проверяют адрес
+        logger.info("Platega: пустой или не-JSON POST — отвечаю 200 (проверка Callback URL)")
+        return JSONResponse({"ok": True, "skipped": "empty body"})
+
+    if not isinstance(body, dict) or not body.get("id"):
+        logger.info("Platega: POST без id транзакции — отвечаю 200 (проверка адреса)")
+        return JSONResponse({"ok": True, "skipped": "no transaction id"})
 
     provider = next((p for p in payment_registry.available() if getattr(p, "merchant_id", None)), None)
     if provider is None:
@@ -328,22 +369,29 @@ async def platega_webhook(request: Request) -> JSONResponse:
         )
         return JSONResponse({"ok": True, "skipped": f"api says {check.status.value}"})
 
-    from sqlalchemy import select
-
     from app.db.session import SessionMaker
 
     bot: Bot | None = getattr(request.app.state, "bot", None)
     async with SessionMaker() as session:
-        order = await session.get(Order, order_id) if order_id else None
-        if order is None and transaction_id:
-            # Platega может не вернуть payload в колбэке — тогда ищем заказ
-            # по id транзакции, который мы сами и сгенерировали.
-            order = await session.scalar(select(Order).where(Order.external_id == transaction_id))
-            if order is not None:
-                logger.info("Заказ #%s найден по id транзакции Platega", order.id)
+        order = await _find_order(session, order_id, transaction_id)
         if order is None:
             logger.warning("Вебхук Platega: заказ не найден (payload=%s, id=%s)", order_id, transaction_id)
             return JSONResponse({"ok": True, "skipped": "unknown order"})
+
+        # Сумма: заказ мог быть оплачен «не тем» платежом — например, при утечке
+        # секрета дешёвую оплаченную транзакцию переигрывают с чужим payload.
+        # Требуем, чтобы заплатили не меньше, чем стоит заказ; больше — можно
+        # (Platega умеет перекладывать свою комиссию на клиента, счёт тогда выше).
+        expected_rub = order.pay_amount_kopecks // 100
+        if check.amount is not None and check.amount < expected_rub:
+            logger.warning(
+                "Вебхук Platega: по заказу #%s ждали %s ₽, а транзакция %s на %s ₽ — доступ не выдаю",
+                order.id,
+                expected_rub,
+                transaction_id,
+                check.amount,
+            )
+            return JSONResponse({"ok": True, "skipped": "amount mismatch"})
 
         user = await session.get(User, order.user_id)
         sub, already = await orders_service.mark_paid(
@@ -366,9 +414,13 @@ async def platega_webhook(request: Request) -> JSONResponse:
             await _notify_paid(bot, user, sub, order)
             await notifications.notify_admins(
                 bot,
-                f"💳 <b>Оплата через Platega</b>\nЗаказ #{order.id}, {order.amount_rub} ₽ "
-                f"(метод {raw.get('paymentMethod')})\n"
-                f"Пользователь: {user.display_name} (<code>{user.tg_id}</code>)",
+                await notifications.payment_notice(
+                    session,
+                    order,
+                    user,
+                    title="Оплата через Platega",
+                    provider=f"Platega (метод {raw.get('paymentMethod')})",
+                ),
             )
 
     return JSONResponse({"ok": True})

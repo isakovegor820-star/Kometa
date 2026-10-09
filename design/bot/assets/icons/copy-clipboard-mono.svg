@@ -1,0 +1,7 @@
+<!-- Kometa icon set · copy-clipboard · 24×24 · stroke 1.75 · #45E698 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+ width="24" height="24"
+ fill="none" stroke="#45E698" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/>
+  <path d="M4.25 16.5c-.97 0-1.75-.78-1.75-1.75V4.5c0-.97.78-1.75 1.75-1.75h10.25c.97 0 1.75.78 1.75 1.75"/>
+</svg>

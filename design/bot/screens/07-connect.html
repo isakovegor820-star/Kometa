@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Как подключить — Kometa Bot</title>
+<style>
+/* Kometa Bot — общий кит макетов экранов.
+   ЕДИНСТВЕННЫЙ источник значений — design/bot/tokens.css (копия значений ниже,
+   потому что каждый HTML самодостаточен и не ходит за внешними файлами). */
+
+:root {
+  --brand-ink: #04140F;
+  --brand-900: #02231A;
+  --brand-800: #06432F;
+  --brand-700: #0A5C3F;
+  --brand-600: #0E7350;
+  --brand-500: #1AAB75;
+  --brand-400: #2BC57F;
+  --brand-300: #45E698;
+  --brand-200: #8FF8AA;
+  --brand-100: #DCFF5C;
+
+  --accent-cyan: #35D6E8;
+  --accent-violet: #8B7BF7;
+
+  --action-primary-bg: var(--brand-500);
+  --action-primary-fg: #04140F;
+  --action-success-bg: var(--brand-300);
+  --action-success-fg: #04140F;
+  --action-danger-bg: #F04452;
+  --action-danger-fg: #FFFFFF;
+  --action-neutral-bg: transparent;
+
+  --surface-canvas: #0B0F12;
+  --surface-chat: #17212B;
+  --surface-1: #10171E;
+  --surface-2: #1B2733;
+  --surface-3: #22313F;
+  --surface-glass: rgba(255, 255, 255, 0.04);
+  --surface-glass-strong: rgba(255, 255, 255, 0.08);
+
+  --text-1: #F2F6F4;
+  --text-2: #A8B6B0;
+  --text-3: #6F7F7A;
+  --text-on-brand: #04140F;
+
+  --border-1: rgba(255, 255, 255, 0.07);
+  --border-2: rgba(255, 255, 255, 0.12);
+  --border-brand: rgba(69, 230, 152, 0.35);
+
+  --status-ok: var(--brand-300);
+  --status-warn: #F5B544;
+  --status-error: #F04452;
+  --status-info: var(--accent-cyan);
+
+  --grad-brand: linear-gradient(135deg, #2BC57F 0%, #45E698 52%, #DCFF5C 100%);
+  --grad-orbit: conic-gradient(from 200deg, #35D6E8, #8B7BF7, #45E698, #DCFF5C, #35D6E8);
+  --grad-hero: radial-gradient(120% 90% at 78% 18%, rgba(53, 214, 232, 0.18), transparent 60%),
+               radial-gradient(100% 80% at 12% 22%, rgba(69, 230, 152, 0.22), transparent 62%),
+               linear-gradient(160deg, #04140F 0%, #06432F 58%, #02231A 100%);
+
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --shadow-2: 0 6px 18px rgba(0, 0, 0, 0.36);
+  --shadow-3: 0 18px 44px rgba(0, 0, 0, 0.46);
+  --glow-brand: 0 0 0 1px rgba(69, 230, 152, 0.22), 0 8px 28px rgba(43, 197, 127, 0.28);
+
+  --font-ui: -apple-system, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --fs-caption: 13px;
+  --fs-body: 15px;
+  --fs-lead: 17px;
+  --fs-h3: 20px;
+  --fs-h2: 26px;
+  --fs-h1: 34px;
+
+  --lh-tight: 1.15;
+  --lh-body: 1.45;
+  --ls-caps: 0.06em;
+
+  --chat-max: 720px;
+  --btn-row-h: 44px;
+  --safe-bottom: 28px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Экспорт снимает всю высоту документа: полоса прокрутки попала бы в PNG. */
+html { scrollbar-width: none; }
+::-webkit-scrollbar { width: 0; height: 0; }
+
+body {
+  width: 1440px;
+  background: #05080a;
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------- страница -- */
+.canvas {
+  width: 1440px;
+  padding: 52px 56px 56px;
+  display: grid;
+  grid-template-columns: 400px 448px 400px;
+  gap: 40px;
+  align-items: start;
+}
+
+.side { display: flex; flex-direction: column; gap: var(--sp-4); }
+.side.right { padding-top: var(--sp-10); }
+
+.eyebrow {
+  font-size: var(--fs-caption);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--brand-300);
+  font-weight: 600;
+}
+
+h1.title { font-size: var(--fs-h2); line-height: var(--lh-tight); font-weight: 700; }
+
+.lead { font-size: var(--fs-body); color: var(--text-2); }
+
+.notes { list-style: none; display: flex; flex-direction: column; gap: var(--sp-3); }
+.notes li {
+  position: relative;
+  padding-left: 26px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+.notes li::before {
+  content: "";
+  position: absolute; left: 6px; top: 9px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--grad-brand);
+}
+.notes li b { color: var(--text-1); font-weight: 600; }
+
+.side.right h2 {
+  font-size: var(--fs-caption);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.src { list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); }
+.src li { font-size: var(--fs-caption); color: var(--text-2); line-height: 1.5; }
+.src code { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--brand-200); }
+.src em { color: var(--text-1); font-style: normal; }
+
+.callout {
+  border: 1px solid var(--border-1);
+  border-left: 3px solid var(--border-brand);
+  border-radius: var(--r-sm);
+  background: var(--surface-glass);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+.callout b { color: var(--text-1); }
+.callout.warn { border-left-color: var(--status-warn); }
+
+/* ---------------------------------------------------------------- сцена -- */
+.stage { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
+.stage-cap { font-size: var(--fs-caption); color: var(--text-3); text-align: center; }
+
+/* ------------------------------------------------- мокап клиента Telegram */
+.tg {
+  width: 420px;
+  min-height: 620px;
+  background: var(--surface-chat);
+  border: 1px solid var(--border-2);
+  border-radius: 26px;
+  overflow: hidden;
+  box-shadow: var(--shadow-3);
+  display: flex;
+  flex-direction: column;
+}
+
+.tg-status {
+  height: 44px; padding: 0 var(--sp-5);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--fs-caption); color: var(--text-2); font-weight: 600;
+}
+.tg-status .ico { display: flex; align-items: center; gap: 6px; }
+.tg-status svg { width: 20px; height: 20px; display: block; }
+
+.tg-head {
+  height: 58px; padding: 0 var(--sp-3);
+  display: flex; align-items: center; gap: var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+  background: rgba(255, 255, 255, 0.025);
+}
+.tg-back { width: 22px; height: 22px; color: var(--text-2); flex: none; }
+.tg-ava { width: 36px; height: 36px; border-radius: 50%; display: block; flex: none; }
+.tg-who { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.tg-name { font-size: var(--fs-body); font-weight: 600; }
+.tg-sub { font-size: var(--fs-caption); color: var(--brand-300); }
+.tg-dots { color: var(--text-2); font-size: var(--fs-lead); letter-spacing: 2px; }
+
+.tg-body {
+  flex: 1;
+  padding: var(--sp-3) var(--sp-2) var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+
+/* сообщения */
+.msg {
+  align-self: flex-start;
+  max-width: 356px;
+  background: var(--surface-1);
+  border-radius: var(--r-lg);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text-1);
+}
+.msg b { font-weight: 600; }
+.msg .dim { color: var(--text-2); }
+.msg .fine { font-size: var(--fs-caption); color: var(--text-3); }
+.msg.photo { padding: 0; overflow: hidden; width: 356px; }
+.msg.photo img { display: block; width: 100%; height: auto; }
+/* Баннер приветствия: в исходнике внизу тёмная полоса от кропа — обрезаем её,
+   оставляя только живую часть кадра (1280×601). */
+.msg.photo.crop img { aspect-ratio: 1280 / 601; object-fit: cover; object-position: top center; }
+.msg.photo .cap { padding: var(--sp-3) var(--sp-4); }
+.msg.tight { padding: var(--sp-2) var(--sp-4); }
+.msg.headline { font-size: var(--fs-lead); }
+
+/* блоки внутри сообщений */
+.rows { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-2); }
+.row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3);
+  font-size: var(--fs-body);
+}
+.row .k { color: var(--text-2); }
+.row .v { font-weight: 600; text-align: right; }
+.row .v.ok { color: var(--status-ok); }
+.row .v.warn { color: var(--status-warn); }
+.row .v.err { color: var(--status-error); }
+
+.divider { height: 1px; background: var(--border-1); margin: var(--sp-2) 0; }
+
+.locs { display: flex; flex-direction: column; margin-top: var(--sp-1); }
+.loc {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: 7px 0; font-size: var(--fs-body);
+  border-bottom: 1px solid var(--border-1);
+}
+.loc:last-child { border-bottom: 0; }
+.loc .ping { font-size: var(--fs-caption); color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+.loc .ping .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
+.loc .ping.ok .dot { background: var(--status-ok); }
+.loc .ping.err .dot { background: var(--status-error); }
+.loc .ping.err { color: var(--status-error); }
+.loc .ping.warn .dot { background: var(--status-warn); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--r-pill);
+  background: var(--surface-glass-strong);
+  border: 1px solid var(--border-1);
+  font-size: var(--fs-caption); color: var(--text-2);
+}
+.chip.ok { color: var(--brand-200); border-color: var(--border-brand); background: rgba(69, 230, 152, 0.10); }
+.chip.warn { color: var(--status-warn); border-color: rgba(245, 181, 68, 0.32); background: rgba(245, 181, 68, 0.10); }
+.chip.err { color: #FFB4B9; border-color: rgba(240, 68, 82, 0.35); background: rgba(240, 68, 82, 0.12); }
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: var(--sp-2); }
+
+/* «карточка тарифа» — в Telegram это blockquote: полоса слева, углы прямые
+   (так его рисует клиент; заодно это снимает P0 линтера про «карточку с левым акцентом»). */
+.quote {
+  border-left: 3px solid var(--border-brand);
+  background: var(--surface-glass);
+  border-radius: 0;
+  padding: var(--sp-3) var(--sp-4);
+  display: flex; flex-direction: column; gap: 5px;
+}
+.quote + .quote { margin-top: var(--sp-2); }
+.quote .q-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.quote .q-title { font-size: var(--fs-body); font-weight: 600; }
+.quote .q-price { font-size: var(--fs-body); font-weight: 600; }
+.quote .q-sub { font-size: var(--fs-caption); color: var(--text-2); }
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: var(--r-pill);
+  background: rgba(69, 230, 152, 0.14);
+  border: 1px solid var(--border-brand);
+  color: var(--brand-200);
+  font-size: var(--fs-caption); font-weight: 600; white-space: nowrap;
+}
+.badge.gold { background: rgba(220, 255, 92, 0.14); border-color: rgba(220, 255, 92, 0.35); color: var(--brand-100); }
+
+/* строка суммы: тариф / скидка / итог */
+.sum { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-2); }
+.sum .line { display: flex; justify-content: space-between; font-size: var(--fs-body); }
+.sum .line.discount { color: var(--brand-200); }
+.sum .total {
+  display: flex; justify-content: space-between; align-items: baseline;
+  border-top: 1px solid var(--border-1); padding-top: var(--sp-2); margin-top: 2px;
+  font-size: var(--fs-lead); font-weight: 700;
+}
+
+/* шаги инструкции */
+.steps { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); }
+.step { display: flex; gap: var(--sp-3); font-size: var(--fs-body); }
+.step .n {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(69, 230, 152, 0.14); border: 1px solid var(--border-brand);
+  color: var(--brand-200); font-size: var(--fs-caption); font-weight: 700;
+  display: flex; align-items: center; justify-content: center; margin-top: 2px;
+}
+.step .t { color: var(--text-1); }
+.step .t span { color: var(--text-2); font-size: var(--fs-caption); display: block; }
+
+/* ------------------------------------------------------ inline-клавиатура */
+/* Кнопки в Telegram живут под сообщением, а не внутри пузыря: тот же столбец,
+   ширина — по самому широкому ряду. */
+.kb { width: 356px; display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.kbrow { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.kbrow.one { grid-template-columns: 1fr; }
+.btn {
+  min-height: var(--btn-row-h);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: var(--fs-body);
+  display: flex; align-items: center; justify-content: center;
+  padding: 6px 10px; text-align: center;
+}
+.btn.primary { background: var(--action-primary-bg); color: var(--action-primary-fg); font-weight: 600; }
+.btn.success { background: var(--action-success-bg); color: var(--action-success-fg); font-weight: 600; }
+.btn.danger { background: var(--action-danger-bg); color: var(--action-danger-fg); font-weight: 600; }
+.btn.ghost { background: transparent; border: 1px solid var(--border-2); color: var(--text-2); }
+.btn.sm { font-size: var(--fs-caption); min-height: 40px; }
+
+/* ------------------------------------------------- постоянное меню снизу -- */
+.reply {
+  border-top: 1px solid var(--border-1);
+  background: var(--surface-1);
+  padding: var(--sp-2) 10px var(--sp-3);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.reply .rrow { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.reply .rb {
+  height: 40px; border-radius: var(--r-sm); background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-caption); color: var(--text-1);
+}
+
+/* -------------------------------------------------- поле ввода сообщения */
+.tg-input {
+  display: flex; align-items: center; gap: 10px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--border-1);
+  background: var(--surface-1);
+}
+.tg-input .field {
+  flex: 1; height: 40px; border-radius: 20px; background: var(--surface-2);
+  display: flex; align-items: center; padding: 0 var(--sp-4);
+  font-size: var(--fs-caption); color: var(--text-3);
+}
+.tg-input svg { width: 22px; height: 22px; color: var(--text-3); flex: none; }
+
+/* подпись под мокапом в борде */
+.board {
+  width: 1440px; padding: 48px 60px 56px;
+  display: flex; flex-direction: column; gap: var(--sp-8);
+}
+.board-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-8); }
+.board-head h1 { font-size: var(--fs-h1); line-height: var(--lh-tight); }
+.board-head .sub { font-size: var(--fs-lead); color: var(--text-2); max-width: 620px; }
+.grid { display: grid; grid-template-columns: repeat(3, 380px); gap: 30px 32px; justify-content: center; }
+.cell { display: flex; flex-direction: column; gap: var(--sp-3); }
+.shot { zoom: 0.904; }
+.cell figcaption {
+  display: flex; flex-direction: column; gap: 2px;
+  border-top: 1px solid var(--border-1); padding-top: var(--sp-2); margin-top: auto;
+}
+.cell .no { font-size: var(--fs-caption); color: var(--brand-300); font-weight: 600; letter-spacing: var(--ls-caps); }
+.cell .nm { font-size: var(--fs-body); font-weight: 600; }
+.cell .ds { font-size: var(--fs-caption); color: var(--text-3); }
+.legend { display: flex; gap: var(--sp-6); flex-wrap: wrap; font-size: var(--fs-caption); color: var(--text-2); }
+.legend b { color: var(--text-1); }
+
+</style>
+</head>
+<body>
+<main class="canvas">
+  <aside class="side">
+    <div class="eyebrow">Экран 07 · подключение</div>
+    <h1 class="title">Три шага и кнопка<br>своего приложения</h1>
+    <p class="lead">Инструкция <code>HOWTO</code> целиком, без сокращений: поставить
+    приложение, добавить подписку, обновить и подключиться. Кнопки приложений —
+    под сообщением, профиль добавляется сам.</p>
+    <ul class="notes">
+      <li><b>Три шага, а не десять.</b> Список приложений — по платформам, как в боте:
+      Android, iPhone/iPad, Windows, macOS.</li>
+      <li><b>Одно нажатие — профиль в приложении.</b> Telegram запрещает схемы
+      <code>happ://</code>, <code>v2rayng://</code>, <code>hiddify://</code> в кнопках,
+      поэтому кнопка ведёт на нашу https-страницу <code>/connect/&lt;token&gt;</code>.</li>
+      <li><b>Есть запасной путь.</b> «Скопировать ссылку» — если кнопка не сработала:
+      вставить ссылку в приложении вручную.</li>
+      <li><b>Ровно пять рядов.</b> Как в <code>connect_kb</code>: три приложения, ссылка
+      и выход. Если не работает — инструкция и так ведёт в поддержку (R9: рядов ≤ 5).</li>
+    </ul>
+  </aside>
+
+  <section class="stage" data-od-id="stage">
+    <!--PHONE-->
+    <div class="tg">
+      <div class="tg-status">
+      <span>18:05</span>
+      <span class="ico">
+        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="0" y="12" width="3" height="6" rx="1"/><rect x="4.5" y="9" width="3" height="9" rx="1"/><rect x="9" y="6" width="3" height="12" rx="1"/><rect x="13.5" y="3" width="3" height="15" rx="1" opacity=".45"/></svg>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2 7.2c4.6-3.9 11.4-3.9 16 0"/><path d="M4.8 10.6c3-2.6 7.4-2.6 10.4 0"/><path d="M7.6 13.9c1.4-1.2 3.4-1.2 4.8 0"/><circle cx="10" cy="16.6" r="1" fill="currentColor" stroke="none"/></svg>
+        <svg viewBox="0 0 24 20" fill="none" aria-hidden="true"><rect x="1" y="5" width="18" height="10" rx="3" stroke="currentColor" stroke-width="1.4"/><rect x="3" y="7" width="12" height="6" rx="1.6" fill="currentColor"/><path d="M21 8.5v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </span>
+    </div>
+      <div class="tg-head">
+      <svg class="tg-back" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 5 7 11l6.5 6"/></svg>
+      <img class="tg-ava" src="data:image/png;base64,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" alt="Kometa">
+      <div class="tg-who"><span class="tg-name">Kometa</span><span class="tg-sub">бот</span></div>
+      <span class="tg-dots">⋮</span>
+    </div>
+      <div class="tg-body">
+        <div class="msg">
+          <b>Как подключить</b><br><br>
+          <b>1. Установи приложение</b><br>
+          • Android: v2rayNG, Hiddify или Happ<br>
+          • iPhone/iPad: Streisand или Happ<br>
+          • Windows: Hiddify или v2rayN<br>
+          • macOS: Hiddify или sing-box<br><br>
+          <b>2. Добавь подписку</b><br>
+          Открой приложение → «Подписки» / «Subscription» → «+» → вставь ссылку
+          из раздела «Моя подписка» → сохрани.<br><br>
+          <b>3. Обнови и подключись</b><br>
+          Нажми «Обновить подписки», выбери локацию с меньшим пингом и включи
+          соединение.<br><br>
+          Если не работает — напиши в поддержку, поможем за несколько минут.
+        </div>
+        <div class="kb">
+          <div class="kbrow one"><div class="btn primary">Подключить в Happ</div></div>
+          <div class="kbrow one"><div class="btn">Подключить в v2rayNG</div></div>
+          <div class="kbrow one"><div class="btn">Подключить в Hiddify</div></div>
+          <div class="kbrow one"><div class="btn">Скопировать ссылку</div></div>
+          <div class="kbrow one"><div class="btn ghost">← В меню</div></div>
+        </div>
+      </div>
+      <div class="tg-input">
+        <div class="field">Сообщение</div>
+        <svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="8" y="2.5" width="6" height="11" rx="3"/><path d="M4.5 10.5a6.5 6.5 0 0 0 13 0"/><path d="M11 17v3"/></svg>
+      </div>
+    </div>
+    <!--/PHONE-->
+    <div class="stage-cap">Мокап клиента Telegram · 420 px · тексты инструкции — из бота</div>
+  </section>
+
+  <aside class="side right">
+    <h2>Тексты — из бота</h2>
+    <ul class="src">
+      <li><code>texts.HOWTO</code> — инструкция целиком: «1. Установи приложение»,
+      «2. Добавь подписку», «3. Обнови и подключись», список приложений по платформам</li>
+      <li><code>keyboards.connect_kb()</code> — пять кнопок: «Подключить в Happ»,
+      «Подключить в v2rayNG», «Подключить в Hiddify», «Скопировать ссылку»,
+      «← В меню» (подписи — <code>START-COPY.md</code>, раздел 4, пункты 35–39)</li>
+      <li><code>texts.SUBSCRIPTION_COPY</code> — точные пути в приложениях:
+      «Happ → «+» → «Добавить подписку»», «v2rayNG → «+» → «Импорт из буфера обмена»»,
+      «Hiddify → «Новый профиль» → «Добавить из ссылки»»</li>
+      <li>комментарий в <code>connect_kb()</code> — Telegram отвечает
+      <code>Bad Request: Unsupported URL protocol</code> на схемы приложений
+      (проверено на живом боте 06.10.2026), поэтому кнопки ведут на
+      <code>/connect/&lt;token&gt;</code></li>
+      <li><code>texts.SUBSCRIPTION_LINK_HINT</code> — «Ссылка постоянная: не удаляй
+      профиль, при смене сервера она обновится сама»</li>
+    </ul>
+    <div class="callout warn"><b>«Как подключить ТВ» в боте нет.</b> В <code>HOWTO</code>
+    перечислены Android, iPhone/iPad, Windows и macOS — инструкции для телевизора
+    в текстах не существует. Ставить кнопку, за которой пусто, нельзя: в макете
+    ровно те пять кнопок, что есть в <code>connect_kb</code>. ТВ упоминается только
+    как поддерживаемое устройство — в приветствии и в тексте поддержки.</div>
+    <div class="callout"><b>Ссылки-схемы не выдуманы:</b> кнопка «Подключить в Happ» —
+    это https-страница бота, которая открывает приложение по схеме. Так это
+    работает в коде, так нарисовано.</div>
+  </aside>
+</main>
+</body>
+</html>

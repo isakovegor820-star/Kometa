@@ -31,6 +31,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -76,6 +77,8 @@ PAGES: dict[str, str] = {
 VARIANTS: dict[str, tuple[str, dict]] = {
     "dashboard-dark": ("/admin", {"dark": True}),
     "dashboard-mobile": ("/admin", {"mobile": True}),
+    # Мастер-деталь: список клиентов с открытой боковой карточкой.
+    "users-card": ("/admin/users?card=1", {}),
 }
 
 
@@ -335,8 +338,20 @@ def postprocess(html: str, *, dark: bool = False, mobile: bool = False) -> str:
     css = (STATIC / "admin.css").read_text(encoding="utf-8")
     js = (STATIC / "admin.js").read_text(encoding="utf-8")
 
-    html = html.replace('<link rel="stylesheet" href="/admin/static/admin.css">', f"<style>\n{css}\n</style>")
-    html = html.replace('<script src="/admin/static/admin.js" defer></script>', f"<script>\n{js}\n</script>")
+    # Ссылки на статику идут с версией (?v=…), поэтому ищем по шаблону без неё.
+    html = re.sub(
+        r'<link rel="stylesheet" href="/admin/static/admin\.css[^"]*">',
+        lambda _match: f"<style>\n{css}\n</style>",
+        html,
+    )
+    # В проде скрипт подключён с defer — то есть выполняется после разбора
+    # страницы. В макете он инлайновый, поэтому оборачиваем в DOMContentLoaded:
+    # иначе палитра и тосты не находят свою разметку (она ниже по документу).
+    html = re.sub(
+        r'<script src="/admin/static/admin\.js[^"]*" defer></script>',
+        lambda _match: '<script>\nwindow.addEventListener("DOMContentLoaded", function() {\n' + js + "\n});\n</script>",
+        html,
+    )
 
     # Снимок делается по всей высоте страницы: липкие блоки в таком рендере
     # дублируются на каждом экране, поэтому в макете они обычные.

@@ -30,6 +30,9 @@ class ManualProvider(PaymentProvider):
         *,
         price_override: int | None = None,
         exact_kopecks: int | None = None,
+        payer_user_id: int | str | None = None,  # антифрод: нужен только Platega
+        payer_user_name: str = "",
+        payer_ip: str = "",
     ) -> Invoice:
         kopecks = exact_kopecks if exact_kopecks is not None else amount_rub * 100
         total = f"{kopecks // 100}.{kopecks % 100:02d}" if kopecks % 100 else str(kopecks // 100)

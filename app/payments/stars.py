@@ -115,6 +115,9 @@ class StarsProvider(PaymentProvider):
         *,
         price_override: int | None = None,
         exact_kopecks: int | None = None,
+        payer_user_id: int | str | None = None,  # антифрод: нужен только Platega
+        payer_user_name: str = "",
+        payer_ip: str = "",
     ) -> Invoice:
         """Создать ссылку на счёт в звёздах.
 

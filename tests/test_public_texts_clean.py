@@ -120,7 +120,15 @@ def public_python_files() -> list[Path]:
 
 
 def public_text_files() -> list[Path]:
-    files = [ROOT / "docs" / "КАНАЛ.md", ROOT / "README.md"]
+    # Условия акций добавляем сюда намеренно: они публикуются в канале, значит
+    # обязаны проходить ту же проверку, что описание бота и документы для банка.
+    # Иначе текст акции «протухает» незамеченным.
+    files = [
+        ROOT / "docs" / "КАНАЛ.md",
+        ROOT / "docs" / "КОНКУРС-УСЛОВИЯ.md",
+        ROOT / "docs" / "СТОРИ.md",
+        ROOT / "README.md",
+    ]
     legal_dir = ROOT / "docs" / "legal"
     if legal_dir.exists():
         files.extend(sorted(legal_dir.glob("*.md")))

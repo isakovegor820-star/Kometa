@@ -142,6 +142,8 @@
           <td>
             {% if row.kind == 'referral' %}
             <span class="badge badge-accent">реферальный</span>
+            {% elif row.kind == 'partner' %}
+            <span class="badge badge-accent">партнёрский</span>
             {% else %}
             <span class="badge">обычный</span>
             {% endif %}

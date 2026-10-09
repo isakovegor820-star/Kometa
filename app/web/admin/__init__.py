@@ -22,10 +22,11 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-from app.web.admin import auth, dashboard, exports, finance, growth, infra, orders, team, users
+from app.web.admin import auth, dashboard, exports, finance, growth, infra, orders, search, team, users
 
 router = APIRouter(prefix="/admin")
 router.include_router(auth.router)
+router.include_router(search.router)
 router.include_router(dashboard.router)
 # `/admin` без слэша регистрируем на самом роутере: FastAPI запрещает пустой путь
 # во вложенном роутере, а редирект на `/admin/` ломает закладки и привычный адрес.

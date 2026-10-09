@@ -14,13 +14,14 @@ from app import legal_texts
 from app.config import get_settings
 from app.legal_texts import LegalContext, PriceRow
 
-#: Тарифы по умолчанию — те же, что сеются в БД (app/db/session.py).
-#: Нужны, когда документы собираются без обращения к базе (скрипт публикации, тесты).
+#: Тарифы по умолчанию — те же, что сеются в БД (app/db/session.py) и считает
+#: финмодель (app/services/finmodel.py). Нужны, когда документы собираются без
+#: обращения к базе (скрипт публикации, тесты).
 DEFAULT_PRICES: tuple[PriceRow, ...] = (
-    PriceRow(title="1 месяц", price_rub=199, days=30),
-    PriceRow(title="3 месяца", price_rub=499, days=90),
-    PriceRow(title="6 месяцев", price_rub=890, days=180),
-    PriceRow(title="12 месяцев", price_rub=1590, days=365),
+    PriceRow(title="1 месяц", price_rub=120, days=30),
+    PriceRow(title="3 месяца", price_rub=299, days=90),
+    PriceRow(title="6 месяцев", price_rub=539, days=180),
+    PriceRow(title="12 месяцев", price_rub=959, days=365),
 )
 
 
@@ -43,6 +44,7 @@ def build_context(prices: tuple[PriceRow, ...] | list[PriceRow] = (), devices: i
         trial_days=settings.trial_days,
         trial_gb=settings.trial_gb,
         order_ttl_minutes=settings.order_ttl_minutes,
+        gift_valid_days=settings.gift_valid_days,
         prices=tuple(prices) or DEFAULT_PRICES,
         privacy_url=settings.privacy_url,
         terms_url=settings.terms_url,

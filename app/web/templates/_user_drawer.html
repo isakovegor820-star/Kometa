@@ -1,0 +1,128 @@
+{# Боковая карточка клиента в списке (мастер-деталь).
+   Показывает главное и позволяет действовать, не уходя со страницы: подписка,
+   ссылка, быстрые действия, заметки, последние заказы и события. Полная
+   страница клиента остаётся отдельным экраном — здесь только сводка. #}
+{% from "_icons.html" import icon %}
+<aside class="card side-card" id="user-card" aria-label="Карточка клиента">
+  <div class="card-head">
+    <h2>
+      <span class="avatar" style="width:26px;height:26px;font-size:11px">{{ initials(user.display_name) }}</span>
+      {{ user.display_name }}
+    </h2>
+    <div class="actions">
+      <a class="btn btn-sm" href="/admin/users/{{ user.id }}">Открыть</a>
+      <a class="icon-btn" href="/admin/users?{{ query_string(current, status=status, page=page_data.page) }}"
+         data-drawer-close title="Закрыть карточку" aria-label="Закрыть карточку">{{ icon('x') }}</a>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="small dim mb-12">
+      <code>{{ user.tg_id }}</code>{% if user.username %} · @{{ user.username }}{% endif %} · #{{ user.id }}
+      {% if user.is_blocked %}<span class="badge badge-err">заблокирован</span>{% endif %}
+      {% for tag in card_tags %}<span class="tag tag-accent">{{ tag }}</span>{% endfor %}
+    </div>
+
+    <dl class="kv kv-tight">
+      <dt>Подписка</dt>
+      <dd>
+        {% if sub %}
+          <span class="badge badge-{{ status_label[1] if status_label[1] != 'neutral' else '' }}">{{ status_label[0] }}</span>
+          · {{ plan.title if plan else 'без тарифа' }}
+        {% else %}<span class="badge">нет подписки</span>{% endif %}
+      </dd>
+      <dt>Действует до</dt>
+      <dd>{{ dt(sub.expires_at) if sub else '—' }}{% if sub %} <span class="dim">({{ days_word(sub.days_left) }})</span>{% endif %}</dd>
+      <dt>Оплачено</dt>
+      <dd>{{ money(paid_total) }}{% if refunded_total %} <span class="dim">· возвращено {{ money(refunded_total) }}</span>{% endif %}</dd>
+      {% if link %}
+      <dt>Ссылка</dt>
+      <dd>
+        <span class="copy-chip is-flex" title="{{ link }}">
+          <span class="v">{{ link_label(link) }}</span>
+          <a class="icon-btn" href="{{ link }}" target="_blank" rel="noopener" title="Открыть ссылку">{{ icon('external') }}</a>
+          <button type="button" data-copy="{{ link }}" title="Скопировать" aria-label="Скопировать ссылку">{{ icon('copy') }}</button>
+        </span>
+      </dd>
+      {% endif %}
+    </dl>
+
+    {% if 'users.act' in caps %}
+    <div class="side-actions">
+      <form method="post" action="/admin/users/{{ user.id }}/grant" class="inline-form" title="Начислить дни">
+        <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
+        <button class="btn btn-sm" type="submit">{{ icon('plus') }} дни</button>
+      </form>
+      <form method="post" action="/admin/users/{{ user.id }}/write-off" class="inline-form"
+            data-confirm="Списать дни? Доступ сократится и в панели, и в ссылке-подписке.">
+        <input class="input-days" type="number" name="days" value="1" min="1" max="3650" aria-label="Дней к списанию">
+        <button class="btn btn-sm" type="submit">− дни</button>
+      </form>
+      {% if sub %}
+        {% if user.is_blocked %}
+        <form method="post" action="/admin/users/{{ user.id }}/block" class="inline-form">
+          <input type="hidden" name="block" value="0">
+          <button class="btn btn-sm" type="submit">Разблокировать</button>
+        </form>
+        {% else %}
+        <form method="post" action="/admin/users/{{ user.id }}/block" class="inline-form"
+              data-confirm="Заблокировать аккаунт? Клиент потеряет доступ и не сможет писать боту.">
+          <input type="hidden" name="block" value="1">
+          <button class="btn btn-sm btn-danger" type="submit">Заблокировать</button>
+        </form>
+        {% endif %}
+        <form method="post" action="/admin/users/{{ user.id }}/revoke" class="inline-form"
+              data-confirm="Отозвать доступ? Аккаунт в боте останется активным.">
+          <button class="btn btn-sm btn-danger" type="submit">{{ icon('x') }} доступ</button>
+        </form>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if notes %}
+    <div class="side-title">Заметки</div>
+    <div class="side-notes">
+      {% for note in notes %}
+      <div class="side-note">
+        <div class="xs dim">{{ note.author }} · {{ dt_short(note.created_at) }}</div>
+        <div class="small">{{ note.text }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if 'users.notes' in caps %}
+    <form method="post" action="/admin/users/{{ user.id }}/notes" class="inline-form side-note-form">
+      <input type="text" name="text" placeholder="Заметка для команды" aria-label="Текст заметки" maxlength="4000">
+      <button class="btn btn-sm" type="submit">{{ icon('note') }}</button>
+    </form>
+    {% endif %}
+
+    {% if orders %}
+    <div class="side-title">Последние заказы</div>
+    <div class="side-list">
+      {% for row in orders %}
+      {% set badge = ORDER_STATUS.get(row.order.status, (row.order.status, 'neutral')) %}
+      <div class="side-row">
+        <span class="mono dim">#{{ row.order.id }}</span>
+        <span class="grow">{{ row.plan.title if row.plan else '—' }}</span>
+        <span class="badge badge-{{ badge[1] if badge[1] != 'neutral' else '' }}">{{ badge[0] }}</span>
+        <span class="nowrap"><b>{{ money(row.order.amount_rub) }}</b></span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if events %}
+    <div class="side-title">События</div>
+    <div class="side-list">
+      {% for event in events %}
+      <div class="side-row">
+        <span class="dim xs nowrap">{{ dt_short(event.created_at) }}</span>
+        <span class="grow xs">{{ event_label(event.kind) }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</aside>

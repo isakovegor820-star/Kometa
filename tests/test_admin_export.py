@@ -159,14 +159,14 @@ async def test_revenue_by_plan_groups_and_sorts_by_net(session, panel):
 
 
 async def test_revenue_by_plan_merges_same_plan(session, panel):
-    await paid_order(session, panel, tg_id=9203)
-    await paid_order(session, panel, tg_id=9204)
+    _, first, _ = await paid_order(session, panel, tg_id=9203)
+    _, second, _ = await paid_order(session, panel, tg_id=9204)
 
     result = await stats.revenue_by_plan(session, 30)
 
     assert len(result) == 1
     assert result[0].orders == 2
-    assert result[0].gross_rub == 398  # 199 + 199
+    assert result[0].gross_rub == first.amount_rub + second.amount_rub
 
 
 async def test_revenue_by_plan_skips_refunds(session, panel):

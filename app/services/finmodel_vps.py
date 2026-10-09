@@ -44,10 +44,14 @@ def rub(amount: float, currency: str = "RUB", rates: dict[str, float] | None = N
 #: Ставка, которую теряем с каждого чека: 8 % СБП + 2 % конвертации в USDT
 #: (`net_after_partner_payout` в app/services/finmodel.py). Одна константа на всю
 #: модель, чтобы безубыточность в CLI и в документе не расходилась на десятую.
-DEFAULT_CHANNEL_FEE_PERCENT: float = 10.0
+#: Считаем не «10 %», а точную эффективную ставку: проценты применяются
+#: последовательно, 1 − 0,92 × 0,98 = 9,84 %. В таблицах это по-прежнему «10 %».
+DEFAULT_CHANNEL_FEE_PERCENT: float = round(100 * (1 - 0.92 * 0.98), 2)
 
-#: Средний чек с клиента в месяц (тарифы 199/499/890/1590 ₽).
-DEFAULT_AVERAGE_CHECK_RUB: float = 182.0
+#: Средний чек с клиента в месяц (тарифы 120/299/539/959 ₽, микс 50/25/15/10
+#: и поправка на звёзды +3 %: 106,3 × 1,03 ≈ 109,5). Держать в согласии с
+#: ``finmodel.DEFAULT_PLANS`` — расхождение ловит tests/test_price_consistency.py.
+DEFAULT_AVERAGE_CHECK_RUB: float = 109.5
 
 #: Сколько доходит до нас с одного клиента в месяц.
 DEFAULT_NET_PER_USER: float = DEFAULT_AVERAGE_CHECK_RUB * (1 - DEFAULT_CHANNEL_FEE_PERCENT / 100)
@@ -1120,7 +1124,7 @@ def breakeven_users(
 ) -> float:
     """Сколько платящих нужно, чтобы схема окупала себя.
 
-    `net_per_user` по умолчанию — средний чек 182 ₽ минус 8 % СБП
+    `net_per_user` по умолчанию — средний чек 109,5 ₽ минус 8 % СБП
     (см. `app.services.finmodel`), то есть деньги, которые реально доходят.
     """
     if net_per_user <= 0:

@@ -161,7 +161,20 @@ STATUS_CACHE_SECONDS = 60
 
 
 async def _service_status() -> dict:
-    """Собрать состояние сервиса (с кэшем на минуту)."""
+    """Собрать состояние сервиса (с кэшем на минуту).
+
+    Показываем **два независимых слоя**, потому что это разные правды:
+
+    * ``panel`` — отвечает ли панель управления (авторизация, список инбаундов);
+    * ``probe`` — пускает ли порт клиента (TCP-соединение «глазами клиента»).
+
+    Раньше в ответе было только первое, а подпись обещала второе: страница
+    писала «доступна», когда панель отвечала, хотя порт для клиента мог быть
+    закрыт. И наоборот: панель недоступна (например 3x-ui закрыт по IP), а
+    локация работает — и страница говорила «недоступна» про живую локацию.
+    Ровно это противоречие владелец видел как «везде сообщает, что Нидерланды
+    не работают».
+    """
     now = time.time()
     cached = _STATUS_CACHE.get("value")
     if cached is not None and now - float(_STATUS_CACHE["at"]) < STATUS_CACHE_SECONDS:
@@ -170,22 +183,67 @@ async def _service_status() -> dict:
     from app.config import get_settings
     from app.db.session import SessionMaker
     from app.panels.registry import registry
+    from app.services import probe as probe_service
 
     settings = get_settings()
     nodes: list[dict] = []
     async with SessionMaker() as session:
-        for panel in await registry.all_panels(session):
-            entry = {"title": panel_label(panel), "ok": False}
+        for node, panel in await registry.all_panels_with_nodes(session):
+            title = (
+                (node.title if node is not None else "")
+                or getattr(panel, "location_title", "")
+                or panel_label(panel)
+            )
+            entry: dict = {"title": title, "ok": False, "panel": False}
             try:
-                entry["ok"] = await panel.health()
+                entry["panel"] = await panel.health()
             except Exception as exc:  # noqa: BLE001 - панель может быть недоступна
                 logger.warning("Статус: панель %s не ответила: %s", panel_label(panel), exc)
+            entry["ok"] = bool(entry["panel"])
+
+            if node is not None:
+                # Порт важнее панели для ответа на вопрос «подключусь ли я».
+                state, text = probe_service.probe_state(node)
+                entry["probe"] = state
+                entry["probe_text"] = text
+                entry["probe_ms"] = int(node.last_probe_ms or 0)
+                entry["probe_at"] = (
+                    node.last_probe_at.strftime("%d.%m %H:%M") if node.last_probe_at else ""
+                )
+                entry["ports"] = [
+                    {"port": item.get("port"), "ok": bool(item.get("ok"))}
+                    for item in probe_service.probe_ports(node)
+                ]
+                # Клиенту отвечает порт, а не панель: если замер есть, решает он.
+                # Панель нужна как запасной признак — когда пробы не было вовсе
+                # (свежая установка), иначе все локации выглядели бы мёртвыми.
+                if state == probe_service.PROBE_PORT_FAILED:
+                    entry["ok"] = False
+                elif state == probe_service.PROBE_OK:
+                    entry["ok"] = True
+                elif state == probe_service.PROBE_NOT_CONFIGURED:
+                    # UDP-канал (например AmneziaWG): TCP-проба неприменима, и
+                    # «не настроена» — это не «сломана». Верим панели.
+                    entry["ok"] = bool(entry["panel"])
+                else:
+                    entry["ok"] = bool(entry["panel"])
+                entry["ready"] = entry["ok"] and state == probe_service.PROBE_OK
+            else:
+                # Основная панель из .env: пробы к ней нет, порт не измеряли.
+                # Это НЕ «готово»: панель отвечает — значит можно выдать конфиг,
+                # но пускает ли порт клиента, мы не проверяли. Пометка «ready»
+                # остаётся ложной, иначе страница снова начнёт утверждать
+                # «всё работает» без единого замера.
+                entry["probe"] = "unknown"
+                entry["probe_text"] = "проба не настроена"
+                entry["ready"] = False
             nodes.append(entry)
 
-    # Источник подписок доступен, если жива хотя бы одна панель
+    # Пустая выдача — не «всё хорошо»: значит панелей нет вовсе.
+    ready_nodes = [node for node in nodes if node.get("ready")]
     value = {
-        "ok": bool(nodes) and any(node["ok"] for node in nodes),
-        "subscriptions_available": bool(nodes) and any(node["ok"] for node in nodes),
+        "ok": bool(nodes) and bool(ready_nodes) and all(node["ok"] for node in nodes),
+        "subscriptions_available": bool(nodes) and any(node["panel"] for node in nodes),
         "payments": {
             "stars": settings.stars_enabled,
             "manual": bool(settings.manual_payment_details),
@@ -214,6 +272,20 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
 
     app = FastAPI(title="Kometa subscription service", docs_url=None, redoc_url=None)
     app.state.bot = bot
+
+    @app.middleware("http")
+    async def panel_ajax_flag(request: Request, call_next):  # noqa: ANN001, ANN202
+        """Пометить запросы панели, пришедшие из JS (заголовок X-Panel-Ajax).
+
+        Нужно, чтобы действия отвечали JSON-ом (тост + обновление списка), а не
+        редиректом с сообщением в cookie. Флаг живёт в contextvar и читается
+        flash_redirect, поэтому маршруты об этом ничего не знают.
+        """
+        from app.web.admin import common as admin_common
+
+        admin_common.set_ajax(request.headers.get(admin_common.AJAX_HEADER) == "1")
+        return await call_next(request)
+
     # Статика панели (CSS/JS) отдаётся только вместе с /admin: никаких CDN,
     # панель обязана работать на localhost без интернета.
     app.mount("/admin/static", StaticFiles(directory=str(STATIC_DIR)), name="admin-static")
@@ -247,13 +319,74 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
         if request.query_params.get("format") == "json":
             return JSONResponse(snapshot)
 
-        rows = "".join(
-            f"<li><span class='dot {'ok' if node['ok'] else 'bad'}'></span>"
-            f"{node['title']} — {'доступна' if node['ok'] else 'недоступна'}</li>"
-            for node in snapshot["nodes"]
-        ) or "<li class='muted'>Ноды ещё не настроены</li>"
+        def _row(node: dict) -> str:
+            """Строка локации: панель и порт — отдельными словами.
+
+            Клиенту важно второе («подключусь ли»), но починить можно только
+            зная первое: панель — это вход оператора, порт — путь клиента.
+            Одинаковые подписи на два разных состояния и рождали путаницу.
+            """
+            ok = bool(node.get("ok"))
+            probe = node.get("probe", "unknown")
+            ports = node.get("ports") or []
+            # Про локацию без замера нельзя сказать ни «работает», ни «сломалась»:
+            # серый кружок и слово «без замера» — честный ответ. Иначе панель из
+            # .env, к которой пробы не ставятся, всегда висела зелёной.
+            unknown = probe in ("unknown", "unavailable", "not_configured")
+            details: list[str] = []
+            details.append("панель отвечает" if node.get("panel") else "панель не отвечает")
+            details.append(node.get("probe_text") or "порт не проверяли")
+            if ports:
+                details.append(
+                    "порты: "
+                    + ", ".join(f"{item['port']} {'✓' if item['ok'] else '✗'}" for item in ports)
+                )
+            # Цифру задержки отдельно не добавляем: она уже внутри подписи пробы
+            # («порт открыт, 42 мс»), иначе строка читалась как «42 мс · 42 мс».
+            note = ""
+            if probe == "port" and node.get("panel"):
+                # Самое дорогое противоречие: панель жива, порт для клиента закрыт.
+                note = (
+                    "<div class='small warn'>Панель отвечает, но порт для подключения "
+                    "закрыт — напишите в поддержку.</div>"
+                )
+            elif not node.get("panel") and probe == "ok":
+                # Обратный случай: панель закрыта, а клиенты подключаются.
+                note = (
+                    "<div class='small muted'>Панель управления сейчас не отвечает, "
+                    "но подключение работает.</div>"
+                )
+            elif unknown:
+                note = "<div class='small muted'>Замер порта ещё не проходил.</div>"
+            measured_at = node.get("probe_at") or ""
+            if unknown:
+                dot, verdict = "unknown", "без замера"
+            else:
+                dot, verdict = ("ok" if ok else "bad"), ("работает" if ok else "есть проблема")
+            return (
+                f"<li><span class='dot {dot}'></span>"
+                f"<b>{node['title']}</b> — {verdict}"
+                f"<div class='small muted'>{' · '.join(details)}"
+                f"{' · замер ' + measured_at if measured_at else ''}</div>{note}</li>"
+            )
+
+        rows = "".join(_row(node) for node in snapshot["nodes"]) or (
+            "<li class='muted'>Ноды ещё не настроены</li>"
+        )
 
         overall_ok = snapshot["ok"]
+        # Три состояния, а не два: «всё работает» нельзя показывать, когда
+        # замеров ещё не было — это утверждение, которого мы не проверяли.
+        # «Проверяем» — только когда проблем нет, но и подтверждения нет.
+        broken = [node for node in snapshot["nodes"] if not node.get("ok")]
+        measured = [node for node in snapshot["nodes"] if node.get("probe") == "ok"]
+        if overall_ok and measured:
+            badge_text, badge_bg, badge_fg = "Всё работает", "#16301f", "#a7e6c1"
+        elif broken:
+            badge_text, badge_bg, badge_fg = "Есть проблемы", "#33191c", "#f3b6b6"
+        else:
+            badge_text, badge_bg, badge_fg = "Проверяем", "#2a2f3f", "#c9cfdd"
+
         html = f"""<!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -265,21 +398,25 @@ async def build_app(bot: "Bot | None" = None) -> FastAPI:
  .card{{background:#171a23;border:1px solid #2a2f3f;border-radius:14px;padding:22px}}
  h1{{font-size:20px;margin:0 0 14px}}
  .badge{{display:inline-block;padding:4px 12px;border-radius:999px;font-size:14px;
-        background:{'#16301f' if overall_ok else '#33191c'};color:{'#a7e6c1' if overall_ok else '#f3b6b6'}}}
+        background:{badge_bg};color:{badge_fg}}}
  ul{{list-style:none;padding:0;margin:16px 0 0}}
- li{{padding:6px 0;border-bottom:1px solid #2a2f3f}}
+ li{{padding:8px 0;border-bottom:1px solid #2a2f3f}}
  li:last-child{{border:none}}
  .dot{{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:9px}}
  .dot.ok{{background:#45c07d}} .dot.bad{{background:#ef6b6b}}
- .muted{{color:#98a0b3}}
+ .dot.unknown{{background:#5b6478}}
+ .muted{{color:#98a0b3}} .small{{font-size:13px}} .warn{{color:#f3b6b6}}
  footer{{margin-top:16px;font-size:13px}}
  a{{color:#6ea8fe;text-decoration:none}}
 </style></head>
 <body><main><div class="card">
  <h1>🛰 Kometa — состояние сервиса</h1>
- <span class="badge">{'Всё работает' if overall_ok else 'Есть проблемы'}</span>
+ <span class="badge">{badge_text}</span>
  <ul>{rows}</ul>
- <p class="muted" style="margin-top:16px">Обновлено: {snapshot['checked_at']} UTC</p>
+ <p class="muted small" style="margin-top:16px">
+   «Порт открыт» — замер с нашего сервера до локации, а не скорость вашего
+   интернета: её показывает приложение при подключении.</p>
+ <p class="muted" style="margin-top:8px">Обновлено: {snapshot['checked_at']} UTC</p>
  <footer class="muted">
    Страница обновляется автоматически — её можно открыть в любой момент.<br>
    Вопросы и помощь: {settings.support_contact or 'поддержка в боте'}.

@@ -1,0 +1,74 @@
+<main class="canvas">
+  <aside class="side">
+    <div class="eyebrow">Экран 03 · подписка закончилась</div>
+    <h1 class="title">Доступ отключён,<br>настройки целы</h1>
+    <p class="lead">Экран истёкшей подписки — про доверие, а не про давление.
+    По <code>START-COPY.md</code> 3.3: что случилось, что не потеряно, что нажать.</p>
+    <ul class="notes">
+      <li><b>Честный статус.</b> «Подписка закончилась», «доступ отключён 3 дня назад» —
+      без «Баланс: 0 ₽» вместо ответа.</li>
+      <li><b>Снимаем страх потери.</b> Настройки в приложении сохранены, после оплаты
+      доступ вернётся сразу: <code>activate_plan</code> включает клиента заново.</li>
+      <li><b>Один главный призыв.</b> «Продлить подписку» — success.
+      Промокод и помощь рядом, вторым и третьим рядом.</li>
+      <li><b>Кнопки без эмодзи.</b> По <code>START-COPY.md</code> раздел 4 эмодзи
+      убраны из подписей полностью: смысл несут текст и порядок.</li>
+    </ul>
+  </aside>
+
+  <section class="stage">
+    <!--PHONE-->
+    <div class="tg">
+      {{STATUS}}
+      {{HEAD}}
+      <div class="tg-body">
+        <div class="msg">
+          <b>Подписка закончилась</b><br>
+          доступ отключён 3 дня назад<br><br>
+          Настройки в приложении сохранены: после оплаты доступ вернётся сразу.
+          <div class="chip-row">
+            <span class="chip warn">доступ остановлен</span>
+            <span class="chip">ссылка та же</span>
+          </div>
+        </div>
+        <div class="kb">
+          <div class="kbrow one"><div class="btn success">Продлить подписку</div></div>
+          <div class="kbrow one"><div class="btn">У меня есть промокод</div></div>
+          <div class="kbrow"><div class="btn">Как подключить</div><div class="btn">Помощь</div></div>
+        </div>
+        <div class="msg tight">Меню с кнопками — внизу: пригодится, если потеряешь это сообщение.</div>
+      </div>
+      <div class="reply">
+        <div class="rrow"><div class="rb">Моя подписка</div><div class="rb">Тарифы</div></div>
+        <div class="rrow"><div class="rb">Как подключить</div><div class="rb">Если не открывается</div></div>
+        <div class="rrow"><div class="rb">Документы и цены</div><div class="rb">Помощь</div></div>
+      </div>
+    </div>
+    <!--/PHONE-->
+    <div class="stage-cap">Мокап клиента Telegram · 420 px · «3 дня назад» — пример</div>
+  </section>
+
+  <aside class="side right">
+    <h2>Тексты — из START-COPY.md 3.3</h2>
+    <ul class="src">
+      <li>Сообщение целиком: «<b>Подписка закончилась</b> / доступ отключён {ago} /
+      Настройки в приложении сохранены: после оплаты доступ вернётся сразу»</li>
+      <li>Факт под текстом: <code>activate_plan</code>
+      (<code>services/subscriptions.py:296-345</code>) при оплате включает клиента
+      заново и продлевает срок — приложение не перенастраивается</li>
+      <li>Кнопка 1: <b>Продлить подписку</b> — <code>plans</code>, success
+      (в дизайн-системе 3.3 у истёкшего состояния это главное действие)</li>
+      <li>Кнопка 2: <b>У меня есть промокод</b> — <code>promo:enter</code>, neutral</li>
+      <li>Кнопки 3–4: <b>Как подключить</b> (<code>sub:howto</code>) и <b>Помощь</b>
+      (<code>help</code>), neutral</li>
+      <li>Статусы: <code>STATUS_EXPIRED</code> «⌛️ истекла» в коде,
+      в макете — чип «доступ остановлен» без эмодзи</li>
+    </ul>
+    <div class="callout warn"><b>Пока продажи закрыты</b> (<code>SALES_ENABLED=false</code>),
+    вторая строка заменяется честной: «Оплата подключается — напишем в канале, когда
+    всё будет готово» (<code>START-COPY.md</code> 3.3, по смыслу <code>SALES_CLOSED</code>).
+    В макете — целевое состояние с работающей оплатой.</div>
+    <div class="callout"><b>Дата и «3 дня назад»</b> подставлены для примера; в боте это
+    <code>{ago}</code> из разницы с <code>expires_at</code>.</div>
+  </aside>
+</main>

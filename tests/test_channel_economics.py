@@ -26,57 +26,57 @@ async def make_paid_order(session, tg_id: int, provider: str, plan_code: str = "
 
 
 async def test_manual_channel_keeps_full_amount(session):
-    await make_paid_order(session, 9901, "manual")
+    _, plan = await make_paid_order(session, 9901, "manual")
     await session.flush()
 
     channels = await stats.channel_economics(session, days=30)
     manual = next(c for c in channels if c.provider == "manual")
 
     assert manual.orders == 1
-    assert manual.gross_rub == 199
-    assert manual.net_rub == 199
+    assert manual.gross_rub == plan.price_rub
+    assert manual.net_rub == plan.price_rub
     assert manual.fee_percent == 0
 
 
 async def test_wata_channel_subtracts_acquiring_fee(session, monkeypatch):
     monkeypatch.setattr(settings, "fee_percent_wata", 3.5)
-    await make_paid_order(session, 9902, "wata")
+    _, plan = await make_paid_order(session, 9902, "wata")
     await session.flush()
 
     channels = await stats.channel_economics(session, days=30)
     wata = next(c for c in channels if c.provider == "wata")
 
-    assert wata.gross_rub == 199
-    assert wata.net_rub == 192  # 199 − 3.5 %
+    assert wata.gross_rub == plan.price_rub
+    assert wata.net_rub == round(plan.price_rub * (1 - 0.035))
     assert 3.0 < wata.fee_percent < 4.0
 
 
 async def test_sbp_partner_channel_subtracts_eight_percent(session, monkeypatch):
     """СБП через банк-партнёра: 8 % с оборота (условия партнёра от 06.10.2026)."""
     monkeypatch.setattr(settings, "fee_percent_sbp", 8.0)
-    await make_paid_order(session, 9940, "platega_sbp")
+    _, plan = await make_paid_order(session, 9940, "platega_sbp")
     await session.flush()
 
     channels = await stats.channel_economics(session, days=30)
     sbp = next(c for c in channels if c.provider == "platega_sbp")
 
-    assert sbp.gross_rub == 199
-    assert sbp.net_rub == 183  # 199 − 8 %
+    assert sbp.gross_rub == plan.price_rub
+    assert sbp.net_rub == round(plan.price_rub * 0.92)
     assert 7.5 < sbp.fee_percent < 8.5
     # Прямой перевод на карту комиссии не платит — это разные каналы.
-    assert 183 < 199
+    assert sbp.net_rub < plan.price_rub
 
 
 async def test_crypto_channel_subtracts_five_percent(session, monkeypatch):
     """Криптоплатежи: 5 % по условиям партнёра."""
     monkeypatch.setattr(settings, "fee_percent_crypto", 5.0)
-    await make_paid_order(session, 9941, "crypto")
+    _, plan = await make_paid_order(session, 9941, "crypto")
     await session.flush()
 
     channels = await stats.channel_economics(session, days=30)
     crypto = next(c for c in channels if c.provider == "crypto")
 
-    assert crypto.net_rub == 189  # 199 − 5 %
+    assert crypto.net_rub == round(plan.price_rub * 0.95)
     assert 4.5 < crypto.fee_percent < 5.5
 
 
@@ -93,7 +93,7 @@ async def test_stars_channel_counts_telegram_payout(session, monkeypatch):
     stars = next(c for c in channels if c.provider == "stars")
 
     expected = round(plan.price_stars * 0.013 * 92.0 * 0.95)
-    assert stars.gross_rub == 199
+    assert stars.gross_rub == plan.price_rub
     assert stars.net_rub == expected
     # и это не меньше рублёвой цены — иначе канал убыточен
     assert stars.net_rub >= plan.price_rub
@@ -113,16 +113,21 @@ async def test_channel_report_sorted_by_net(session):
 
 async def test_profit_summary_subtracts_monthly_costs(session, monkeypatch):
     monkeypatch.setattr(settings, "monthly_costs_rub", 750.0)
-    for index in range(5):
-        await make_paid_order(session, 9910 + index, "manual")
+    # Заказов должно хватить, чтобы перекрыть постоянные расходы (при чеке
+    # 120 ₽ пяти мало) — иначе маржа отрицательная и смысл теста теряется.
+    orders_count = 8
+    price = 0
+    for index in range(orders_count):
+        _, plan = await make_paid_order(session, 9910 + index, "manual")
+        price = plan.price_rub
     await session.flush()
 
     summary = await stats.profit_summary(session, days=30)
 
-    assert summary["gross"] == 5 * 199
-    assert summary["net"] == 5 * 199
+    assert summary["gross"] == orders_count * price
+    assert summary["net"] == orders_count * price
     assert summary["costs"] == 750
-    assert summary["profit"] == 5 * 199 - 750
+    assert summary["profit"] == orders_count * price - 750
     assert summary["margin_percent"] > 0
 
 

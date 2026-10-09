@@ -95,9 +95,15 @@ class FakeSession(BaseSession):
 
     # --- удобные выборки для проверок -----------------------------------
     def texts(self) -> list[str]:
+        """Тексты, которые увидел человек.
+
+        У фото-сообщения текста нет — есть подпись (``caption``). Hero-экран
+        бота отправляется именно так, поэтому подпись здесь обязательна: иначе
+        тесты «что видит клиент» не видели бы половину экранов.
+        """
         result: list[str] = []
         for request in self.requests:
-            text = getattr(request, "text", None)
+            text = getattr(request, "text", None) or getattr(request, "caption", None)
             if isinstance(text, str) and text:
                 result.append(text)
         return result

@@ -403,11 +403,11 @@ def test_breakeven_matches_average_check():
     plan = SCENARIOS_BY_KEY["now"]
     net = average_monthly_revenue(DEFAULT_PLANS, PlanMix()) * (1 - DEFAULT_CHANNEL_FEE_PERCENT / 100)
 
-    # полная стоимость (счета + фонд замены) ÷ 167 ₽ на руки ≈ 4 клиента
+    # полная стоимость (счета + фонд замены) ÷ 98,7 ₽ на руки ≈ 6,6 клиента
     assert breakeven_users(plan, net_per_user=net) == pytest.approx(
         plan.monthly_with_replacement_rub / net
     )
-    assert 3 < breakeven_users(plan, net_per_user=net) < 4.5
+    assert 5.5 < breakeven_users(plan, net_per_user=net) < 7.5
 
 
 def test_breakeven_grows_for_full_schema():

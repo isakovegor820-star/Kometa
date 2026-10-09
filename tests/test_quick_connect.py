@@ -29,9 +29,9 @@ def test_connect_kb_buttons_are_telegram_safe():
         assert url.startswith(("http://", "https://")), f"недопустимая схема в «{text}»: {url}"
 
     # ведём на страницу подключения и подсказываем, какое приложение открыть
-    assert urls["🟢 Подключить в Happ"].endswith("/connect/abc123?app=happ")
-    assert urls["🔵 Подключить в v2rayNG"].endswith("/connect/abc123?app=v2rayng")
-    assert urls["🟣 Подключить в Hiddify"].endswith("/connect/abc123?app=hiddify")
+    assert urls["Подключить в Happ"].endswith("/connect/abc123?app=happ")
+    assert urls["Подключить в v2rayNG"].endswith("/connect/abc123?app=v2rayng")
+    assert urls["Подключить в Hiddify"].endswith("/connect/abc123?app=hiddify")
 
 
 def test_bot_keyboards_have_no_custom_url_schemes():
@@ -107,9 +107,9 @@ def test_connect_buttons_point_to_connect_page(monkeypatch):
     """Кнопки ведут на страницу подключения — она и открывает приложение."""
     urls = button_urls(keyboards.connect_kb(SUB))
 
-    assert urls["🟢 Подключить в Happ"].endswith("/connect/abc123?app=happ")
-    assert urls["🔵 Подключить в v2rayNG"].endswith("/connect/abc123?app=v2rayng")
-    assert urls["🟣 Подключить в Hiddify"].endswith("/connect/abc123?app=hiddify")
+    assert urls["Подключить в Happ"].endswith("/connect/abc123?app=happ")
+    assert urls["Подключить в v2rayNG"].endswith("/connect/abc123?app=v2rayng")
+    assert urls["Подключить в Hiddify"].endswith("/connect/abc123?app=hiddify")
 
 
 def test_bot_shows_forever_subscription_without_huge_days_left():

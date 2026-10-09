@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 
 from app.config import get_settings
 from app.db.models import Order
-from app.services import subscriptions
+from app.services import orders, subscriptions
 from tests.fakes import make_update
 
 settings = get_settings()
@@ -36,8 +36,9 @@ async def test_plans_screen_shows_tariffs_even_when_closed(bot, dispatcher, sess
 
     await dispatcher.feed_update(bot, make_update(callback_data="plans", user_id=9901))
 
+    plans = await orders.list_plans(session)
     sent = bot.session.all_text()
-    assert "199" in sent  # цены на кнопках тарифов
+    assert str(plans[0].price_rub) in sent  # цены на кнопках тарифов
     assert "ближайшие дни" in sent  # честно про сроки оплаты
     buttons = bot.session.buttons()
     assert any("1 месяц" in label for label in buttons)
@@ -49,8 +50,9 @@ async def test_closed_sales_full_path_plan_to_sbp_to_stub(bot, dispatcher, sessi
     await dispatcher.feed_update(bot, make_update("/start", user_id=9910))
     bot.session.clear()
 
+    plans = await orders.list_plans(session)
     await dispatcher.feed_update(bot, make_update(callback_data="plans", user_id=9910))
-    assert "199" in bot.session.all_text()
+    assert str(plans[0].price_rub) in bot.session.all_text()
 
     bot.session.clear()
     await dispatcher.feed_update(bot, make_update(callback_data="plan:1", user_id=9910))
@@ -123,6 +125,7 @@ async def test_plans_visible_when_sales_open(bot, dispatcher, session, monkeypat
 
     await dispatcher.feed_update(bot, make_update(callback_data="plans", user_id=9904))
 
+    plans = await orders.list_plans(session)
     sent = bot.session.all_text()
-    assert "199" in sent
+    assert str(plans[0].price_rub) in sent
     assert "Продажи ещё не открыты" not in sent

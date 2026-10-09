@@ -1,0 +1,80 @@
+<main class="canvas">
+  <aside class="side">
+    <div class="eyebrow">Экран 02 · /start — действующий клиент</div>
+    <h1 class="title">Три строки о главном<br>и четыре кнопки</h1>
+    <p class="lead">Сейчас <code>/start</code> у действующего клиента отвечает одной
+    строкой «Главное меню 👇» и восемью кнопками. По <code>START-COPY.md</code> 3.2
+    вместо этого — короткий статус и четыре кнопки.</p>
+    <ul class="notes">
+      <li><b>Ответ на вопрос клиента.</b> До какой даты, сколько дней осталось,
+      что ссылку перенастраивать не нужно.</li>
+      <li><b>Один главный призыв.</b> «Моя подписка» — primary: ради неё экран
+      и открывают. «Продлить подписку» — success.</li>
+      <li><b>Восемь кнопок → четыре.</b> Остальное живёт в нижнем меню (3.4).
+      Лимит по дизайн-системе: ≤ 7 кнопок, ≤ 5 рядов.</li>
+      <li><b>Никаких «Баланс: 0 ₽».</b> Пока подписка работает, экран говорит
+      только о том, что работает.</li>
+    </ul>
+  </aside>
+
+  <section class="stage">
+    <!--PHONE-->
+    <div class="tg">
+      {{STATUS}}
+      {{HEAD}}
+      <div class="tg-body">
+        <div class="msg">
+          <b>Подписка активна</b><br>
+          до 12 ноября · осталось 35 дн.<br><br>
+          Ссылка та же: в приложении перенастраивать ничего не нужно.
+          <div class="chip-row">
+            <span class="chip ok">до 3 устройств</span>
+            <span class="chip">безлимитный трафик</span>
+          </div>
+        </div>
+        <div class="kb">
+          <div class="kbrow"><div class="btn primary">Моя подписка</div><div class="btn">Продлить подписку</div></div>
+          <div class="kbrow"><div class="btn">Пригласить друга</div><div class="btn">Подарить подписку</div></div>
+        </div>
+        <div class="msg tight">Меню с кнопками — внизу: пригодится, если потеряешь это сообщение.</div>
+      </div>
+      <div class="reply">
+        <div class="rrow"><div class="rb">Моя подписка</div><div class="rb">Тарифы</div></div>
+        <div class="rrow"><div class="rb">Как подключить</div><div class="rb">Если не открывается</div></div>
+        <div class="rrow"><div class="rb">Документы и цены</div><div class="rb">Помощь</div></div>
+      </div>
+    </div>
+    <!--/PHONE-->
+    <div class="stage-cap">Мокап клиента Telegram · 420 px · дата и дни — пример</div>
+  </section>
+
+  <aside class="side right">
+    <h2>Тексты — из START-COPY.md 3.2</h2>
+    <ul class="src">
+      <li>Сообщение целиком: «<b>Подписка активна</b> / до {expires} · осталось {days} дн. /
+      Ссылка та же: в приложении перенастраивать ничего не нужно»</li>
+      <li>Дата — из <code>sub.expires_at</code>, формат «до 12 ноября» вместо
+      <code>%d.%m.%Y %H:%M</code>, для бессрочной — «бессрочно»
+      (<code>handlers/subscription.py:32-46</code>)</li>
+      <li>Кнопка 1: <b>Моя подписка</b> — <code>sub:show</code>, primary
+      (было «📡 Моя подписка»)</li>
+      <li>Кнопка 2: <b>Продлить подписку</b> — <code>plans</code> (было «💎 Продлить»).
+      В START-COPY помечена success, но в Telegram и primary, и success рисуются
+      одним зелёным — двух зелёных на экране быть не может (R6), поэтому
+      в макете она нейтральная</li>
+      <li>Кнопка 3: <b>Пригласить друга</b> — <code>ref:show</code>, neutral</li>
+      <li>Кнопка 4: <b>Подарить подписку</b> — <code>gift:show</code>, neutral,
+      только при <code>gift_enabled and sales_enabled</code></li>
+      <li>Нижнее меню — <code>START-COPY.md</code> 3.4: «Моя подписка · Тарифы ·
+      Как подключить · Если не открывается · Документы и цены · Помощь»</li>
+    </ul>
+    <div class="callout warn"><b>Про подарок.</b> Сейчас <code>SALES_ENABLED=false</code>,
+    поэтому бот кнопку «Подарить подписку» не покажет — она включится вместе с продажами
+    (<code>START-COPY.md</code>, 3.2 и правило 2.5). В макете она показана как целевое
+    состояние.</div>
+    <div class="callout"><b>Один зелёный на экран.</b> Главная кнопка в макете —
+    изумрудная <code>--action-primary-bg</code>; в Telegram главное действие получит
+    <code>style="success"</code>. Синий <code>style="primary"</code> не используем
+    (P1, DESIGN-SYSTEM 2.3–3.1): он чужой бренду и раздваивает стиль.</div>
+  </aside>
+</main>

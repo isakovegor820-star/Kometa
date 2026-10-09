@@ -316,7 +316,10 @@ async def test_failed_probe_still_alerts_when_port_really_closed(session, monkey
     opened = await alerts_service.list_alerts(session, status="open")
     assert opened[0].kind == "node_probe_failed"
     assert opened[0].severity == "err"
-    assert "порт не пускает клиента" in opened[0].title
+    # Заголовок называет КОНКРЕТНЫЕ порты: «порт 443 не пускает» — это действие
+    # («открой фаервол»), «порт не пускает» — тема для размышления. Панель-двойник
+    # отдаёт два инбаунда (443 и 444), оба закрыты, поэтому названы оба.
+    assert "порт 443, 444 не пускает клиента" in opened[0].title
 
 
 async def test_probe_job_stays_silent_about_port_when_panel_gave_no_inbounds(session, bot, monkeypatch):

@@ -103,6 +103,37 @@ def _panel_error_text(exc: BaseException) -> str:
     return f"ошибка при обращении к панели: {exc}"
 
 
+def node_ready(node: Node) -> bool:
+    """Готова ли локация выдать клиенту рабочий профиль.
+
+    Две независимые проверки: панель (``last_check_ok`` — авторизация, список
+    инбаундов) и порт (``probe_verdict`` — TCP-соединение). Локация готова,
+    когда живы обе. Проба ещё не запускалась — не считаем ни готовой, ни
+    сломанной: «не измеряли» и «работает» — разные утверждения, и подменять
+    одно другим значит повторить историю «сервер везде сообщает, что
+    Нидерланды не работают».
+    """
+    from app.services import probe as probe_service
+
+    if not node.is_active or not node.last_check_ok:
+        return False
+    verdict = probe_service.probe_verdict(node)
+    return verdict in (probe_service.PROBE_OK, probe_service.PROBE_UNKNOWN)
+
+
+def _probe_view(node: Node) -> dict:
+    """Состояние пробы для шаблона: ``{state, text, ports}``.
+
+    Обёртка над ``app.services.probe`` — шаблон получает готовые слова и не
+    разбирает поля ноды сам. Именно из-за такого разбора «порт не пускает» и
+    «проба не выполнена» выглядели в карточке одинаково.
+    """
+    from app.services import probe as probe_service
+
+    state, text = probe_service.probe_state(node)
+    return {"state": state, "text": text, "ports": probe_service.probe_ports(node)}
+
+
 def _configured_ids(node: Node | None) -> list[int]:
     """Настроенные ID инбаундов: у ноды — из её строки, у основной — из .env."""
     if node is None:
@@ -194,6 +225,10 @@ async def nodes_page(request: Request):
     # Сеть панелей — уже вне сессии БД: соединение не должно ждать чужие таймауты.
     views = await _panel_views(panels, [node for node in nodes if node.is_active])
     alive = sum(1 for node in nodes if node.is_active and node.last_check_ok)
+    # «Готова» — не то же, что «отвечает»: панель может быть жива, а порт для
+    # клиента закрыт. Плитка «живых локаций» считает именно готовность, иначе
+    # на дашборде горело «3/3», пока клиенты не могли подключиться.
+    ready = sum(1 for node in nodes if node.is_active and node_ready(node))
 
     return await page(
         request,
@@ -206,6 +241,11 @@ async def nodes_page(request: Request):
         edit_node=edit_node,
         nodes_active=sum(1 for node in nodes if node.is_active),
         nodes_alive=alive,
+        nodes_ready=ready,
+        # Состояние пробы одной функцией: шаблон не должен разбирать поля ноды
+        # сам — именно из-за такого разбора «порт не пускает» и «проба не
+        # выполнена» выглядели одинаково.
+        node_probe=_probe_view,
         last_check_at=next((node.last_check_at for node in nodes if node.last_check_at), None),
         # Права передаём в контекст: в Jinja функции can() нет, а прятать кнопки
         # по роли в шаблоне — единственный способ не показывать их поддержке.

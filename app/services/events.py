@@ -40,6 +40,18 @@ ERROR = "error"
 DOWNTIME_STARTED = "downtime_started"
 DOWNTIME_FINISHED = "downtime_finished"
 DOWNTIME_GRANTED = "downtime_granted"
+#: Подарочный сертификат: куплен и активирован получателем.
+GIFT_BOUGHT = "gift_bought"
+GIFT_ACTIVATED = "gift_activated"
+#: Автосценарий жизненного цикла (приглашение, win-back, апселл).
+LIFECYCLE_SENT = "lifecycle_sent"
+#: Партнёрская программа: партнёр создан, ему начислена выплата, выплата закрыта.
+PARTNER_CREATED = "partner_created"
+PARTNER_REWARDED = "partner_rewarded"
+PARTNER_PAID_OUT = "partner_paid_out"
+#: Персональная ссылка под конкретного человека: создана и активирована.
+PERSONAL_LINK_CREATED = "personal_link_created"
+PERSONAL_LINK_USED = "personal_link_used"
 
 
 async def log_event(

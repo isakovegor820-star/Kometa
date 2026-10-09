@@ -6,11 +6,16 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <title>{% block title %}{{ page_title|default('Админ-панель') }} — Kometa{% endblock %}</title>
-{# Тема применяется до первой отрисовки, иначе экран мигает белым. #}
+{# Тема, плотность и свёрнутое меню применяются до первой отрисовки, иначе
+   экран мигает светлым и «прыгает» при загрузке. #}
 <script>
-(function(){try{var t=localStorage.getItem("kometa-admin-theme");if(t==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}})();
+(function(){try{
+  if(localStorage.getItem("kometa-admin-theme")==="dark")document.documentElement.setAttribute("data-theme","dark");
+  var d=localStorage.getItem("kometa-admin-density");if(d)document.documentElement.setAttribute("data-density",d);
+  if(localStorage.getItem("kometa-admin-nav")==="min")document.documentElement.setAttribute("data-nav","min");
+}catch(e){}})();
 </script>
-<link rel="stylesheet" href="/admin/static/admin.css">
+<link rel="stylesheet" href="/admin/static/admin.css?v={{ static_version }}">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232563eb'/><path d='M9 21l7-12 7 12' stroke='white' stroke-width='2.4' fill='none' stroke-linejoin='round'/></svg>">
 </head>
 <body>
@@ -28,7 +33,7 @@
 
     <nav class="nav" aria-label="Разделы">
       {% macro navlink(href, key, name, label, count=0, badge='') -%}
-      <a href="{{ href }}" class="{{ 'active' if page == key else '' }}"
+      <a href="{{ href }}" class="{{ 'active' if page == key else '' }}" title="{{ label }}"
          {{ 'aria-current=page' if page == key else '' }}>
         {{ icon(name) }}<span>{{ label }}</span>
         {% if count %}<span class="count">{{ count }}</span>{% elif badge %}<span class="count" style="background:var(--warn)">{{ badge }}</span>{% endif %}
@@ -62,6 +67,8 @@
       <div class="nav-group">
         <div class="nav-title">Рост</div>
         {% if 'growth.view' in caps %}{{ navlink('/admin/referrals', 'referrals', 'gift', 'Рефералы и промокоды') }}{% endif %}
+        {% if 'growth.view' in caps %}{{ navlink('/admin/partners', 'referrals', 'users', 'Партнёры') }}{% endif %}
+        {% if 'growth.view' in caps %}{{ navlink('/admin/links', 'referrals', 'link', 'Персональные ссылки') }}{% endif %}
         {% if 'broadcast.send' in caps %}{{ navlink('/admin/broadcast', 'broadcast', 'megaphone', 'Рассылки') }}{% endif %}
       </div>
       {% if 'audit.view' in caps or 'team.manage' in caps %}
@@ -98,9 +105,21 @@
       </div>
       <div class="spacer"></div>
       {% block topbar_search %}{% endblock %}
-      <button class="btn btn-ghost btn-icon" data-theme-toggle type="button" aria-label="Тема">
-        <span data-theme-icon>☾</span>
-      </button>
+      <div class="tools">
+        <button class="btn btn-ghost btn-sm" data-cmdk-open type="button"
+                title="Быстрый переход: клиент, заказ или раздел (⌘K)" aria-label="Быстрый переход">
+          {{ icon('search') }}<span class="cmdk-hint">⌘K</span>
+        </button>
+        <button class="btn btn-ghost btn-sm density-toggle" data-density-toggle type="button"
+                title="Плотность таблиц: обычная / компактная" aria-label="Плотность таблиц">
+          {{ icon('rows') }}<span data-density-label>Обычно</span>
+        </button>
+        <button class="btn btn-ghost btn-icon" data-nav-min type="button"
+                title="Свернуть меню" aria-label="Свернуть меню">{{ icon('panel') }}</button>
+        <button class="btn btn-ghost btn-icon" data-theme-toggle type="button" aria-label="Тема">
+          <span data-theme-icon>☾</span>
+        </button>
+      </div>
     </header>
     {% endif %}
 
@@ -111,7 +130,27 @@
     </main>
   </div>
 </div>
-<script src="/admin/static/admin.js" defer></script>
+<script src="/admin/static/admin.js?v={{ static_version }}" defer></script>
+{# Тосты: результат действия без перезагрузки страницы. #}
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="true"></div>
+{% if session_active %}
+{# Командная палитра: разделы отдаём из прав роли (см. ui.CMD_SECTIONS),
+   клиентов и заказы ищет /admin/search. #}
+<div class="cmdk" id="cmdk" role="dialog" aria-modal="true" aria-label="Быстрый переход">
+  <div class="cmdk-back" data-cmdk-close></div>
+  <div class="cmdk-panel">
+    <input type="text" id="cmdk-input" placeholder="Клиент, заказ или раздел…" autocomplete="off" spellcheck="false"
+           aria-label="Поиск по панели" aria-controls="cmdk-list">
+    <div class="cmdk-list" id="cmdk-list" role="listbox"></div>
+    <div class="cmdk-foot">
+      <span><kbd>↑</kbd> <kbd>↓</kbd> выбор</span>
+      <span><kbd>↵</kbd> открыть</span>
+      <span><kbd>esc</kbd> закрыть</span>
+    </div>
+  </div>
+</div>
+<script type="application/json" id="cmdk-sections">{{ (cmdk_sections or [])|tojson }}</script>
+{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

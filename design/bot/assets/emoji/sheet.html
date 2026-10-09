@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Kometa · premium-эмодзи</title>
+<style>
+  /* Значения скопированы из design/bot/tokens.css. */
+  :root{
+    --brand-300:#45E698; --brand-100:#DCFF5C; --surface-1:#10171E; --surface-2:#1B2733;
+    --surface-chat:#17212B; --text-1:#F2F6F4; --text-2:#A8B6B0; --text-3:#6F7F7A;
+    --border-1:rgba(255,255,255,.07);
+    --font-ui:-apple-system,"SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:1440px;background:var(--surface-chat);color:var(--text-1);font-family:var(--font-ui);padding:56px 60px 44px;position:relative}
+  body::before{content:"";position:absolute;inset:0 0 auto;height:4px;background:linear-gradient(135deg,#2BC57F 0%,#45E698 52%,#DCFF5C 100%)}
+  .kicker{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--brand-300);font-weight:600}
+  h1{font-size:34px;line-height:1.15;margin:10px 0 12px;letter-spacing:-.01em}
+  .sub{font-size:15px;line-height:1.45;color:var(--text-2);max-width:940px}
+  .meta{display:flex;gap:10px;flex-wrap:wrap;margin:22px 0 8px}
+  .chip{font-family:var(--font-mono);font-size:12.5px;color:var(--text-2);border:1px solid var(--border-1);border-radius:999px;padding:6px 12px;background:rgba(255,255,255,.03)}
+  .chip b{color:var(--brand-300);font-weight:600}
+  .band{border-top:1px solid var(--border-1);padding-top:22px;margin-top:30px}
+  .band-title{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:18px}
+  .row{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;align-items:end}
+  .cell{background:rgba(255,255,255,.03);border:1px solid var(--border-1);border-radius:18px;padding:14px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:10px;min-height:calc(var(--s) + 56px)}
+  .cell .em{display:flex}
+  .cell span{font-family:var(--font-mono);font-size:12px;color:var(--text-3)}
+  .chat{background:var(--surface-1);border:1px solid var(--border-1);border-radius:18px;padding:22px 26px;max-width:900px}
+  .bubble{background:var(--surface-2);border-radius:14px;padding:14px 18px;font-size:17px;line-height:1.5;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .bubble .em{display:flex;vertical-align:middle}
+  .who{font-size:13px;color:var(--text-3);margin-bottom:10px}
+  footer{margin-top:34px;font-size:13px;color:var(--text-3);font-family:var(--font-mono)}
+  footer b{color:var(--text-2);font-weight:500}
+</style>
+</head>
+<body>
+  <div class="kicker">Kometa · Bot Design System</div>
+  <h1>Premium-эмодзи · 12 медальонов</h1>
+  <p class="sub">Концепт-заготовки под собственный набор custom_emoji: круглый медальон 88px,
+  градиентная окантовка 4px (--grad-brand), внутри — глиф из иконочного набора.
+  Фон медальона #0B1410, вокруг — прозрачность. Это PNG-эстимейт: анимацию (TGS/WebM) считает
+  спецификация <b>emoji/SPEC-TGS.md</b>.</p>
+  <div class="meta">
+    <span class="chip">PNG <b>100×100</b></span>
+    <span class="chip">медальон <b>88px</b></span>
+    <span class="chip">окантовка <b>4px · --grad-brand</b></span>
+    <span class="chip">фон диска <b>#0B1410</b></span>
+    <span class="chip">TGS-цель <b>512×512 · ≤64 КБ</b></span>
+  </div>
+
+  <div class="band">
+    <div class="band-title">100px · крупный размер (стикер, hero-сообщение)</div>
+    <div class="row" style="--s:100px"><div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-kometa-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-kometa-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-kometa-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-kometa-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-kometa-100)" stroke-width="4"/>
+  <circle cx="50" cy="50" r="35" fill="none" stroke="#45E698" stroke-width="0.75" opacity="0.28"/>
+  <circle cx="50" cy="50" r="46.5" fill="none" stroke="#45E698" stroke-width="1" opacity="0.16"/>
+  <g transform="translate(50 50) rotate(-42) scale(0.13) translate(-143 0)">
+  <path d="M 0 0 C 46 -12 108 -32 186 -40 L 186 -76 L 286 0 L 186 76 L 186 40 C 108 32 46 12 0 0 Z" fill="url(#fill-kometa-100)"/>
+  </g>
+</svg></div><span>kometa</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-fire-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-fire-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-fire-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-fire-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-fire-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M12 3c2.9 4.1 6.25 6.6 6.25 10.75a6.25 6.25 0 0 1-12.5 0C5.75 9.6 9.1 7.1 12 3Z"/>
+    <path d="M12 20.5c-1.9 0-3.25-1.45-3.25-3.25 0-1.5 1.3-2.75 3.25-5.25 1.95 2.5 3.25 3.75 3.25 5.25 0 1.8-1.35 3.25-3.25 3.25Z"/>
+  </g>
+</svg></div><span>fire</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-diamond-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-diamond-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-diamond-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-diamond-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-diamond-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="url(#fill-diamond-100)" stroke="none">
+    <path d="M12 20.75 3.5 9.5 6.6 4.75h10.8L20.5 9.5 12 20.75Z"/>
+  </g>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#08170F" stroke-width="1.6">
+    <path d="M3.5 9.5h17"/>
+    <path d="M8.4 9.5 12 20.75 15.6 9.5"/>
+  </g>
+</svg></div><span>diamond</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-gift-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-gift-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-gift-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-gift-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-gift-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <rect x="3.25" y="7.75" width="17.5" height="3.5" rx="1.25"/>
+    <path d="M4.75 11.25v7.25c0 .97.78 1.75 1.75 1.75h11c.97 0 1.75-.78 1.75-1.75v-7.25"/>
+    <path d="M12 7.75v12.5"/>
+    <path d="M12 7.6c-.75-2.3-2.4-3.2-3.6-2.35-1.2.85-.55 2.35 1.1 2.35H12"/>
+    <path d="M12 7.6c.75-2.3 2.4-3.2 3.6-2.35 1.2.85.55 2.35-1.1 2.35H12"/>
+  </g>
+</svg></div><span>gift</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-ticket-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-ticket-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-ticket-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-ticket-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-ticket-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <g transform="translate(12 12) scale(1.12) translate(-12 -12)">
+      <path d="M6.75 6.5h10.5c1.1 0 2 .9 2 2v1.9a1.6 1.6 0 0 0 0 3.2v1.9c0 1.1-.9 2-2 2H6.75c-1.1 0-2-.9-2-2v-1.9a1.6 1.6 0 0 0 0-3.2V8.5c0-1.1.9-2 2-2Z"/>
+      <path d="M9.5 7.25v9.5" stroke-dasharray="1.6 2.4"/>
+    </g>
+  </g>
+</svg></div><span>ticket</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-star-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-star-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-star-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-star-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-star-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="url(#fill-star-100)" stroke="none">
+    <path d="M12 2.9L14.23 9.33L21.04 9.46L15.61 13.57L17.58 20.09L12 16.2L6.42 20.09L8.39 13.57L2.96 9.46L9.77 9.33Z"/>
+  </g>
+</svg></div><span>star</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-rocket-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-rocket-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-rocket-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-rocket-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-rocket-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M12 2.75c2.6 2.05 4.1 5 4.1 8.45v4.3H7.9v-4.3c0-3.45 1.5-6.4 4.1-8.45Z"/>
+    <circle cx="12" cy="9.4" r="1.85"/>
+    <path d="M7.9 12.4 5.35 15.1c-.4.42-.6.97-.6 1.54v1.86l3.15-1.65"/>
+    <path d="M16.1 12.4l2.55 2.7c.4.42.6.97.6 1.54v1.86l-3.15-1.65"/>
+    <path d="M10.6 17.9c.45.95.95 1.9 1.4 2.85.45-.95.95-1.9 1.4-2.85"/>
+  </g>
+</svg></div><span>rocket</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-shield-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-shield-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-shield-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-shield-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-shield-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M12 2.75 19.15 5.4v6.05c0 4.3-2.88 8.2-7.15 9.55-4.27-1.35-7.15-5.25-7.15-9.55V5.4L12 2.75Z"/>
+    <circle cx="12" cy="10.4" r="1.7"/>
+    <path d="M12 12.1v3.4"/>
+  </g>
+</svg></div><span>shield</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-clock-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-clock-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-clock-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-clock-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-clock-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <circle cx="12" cy="12" r="9"/>
+    <path d="M12 6.75V12l3.5 2.15"/>
+  </g>
+</svg></div><span>clock</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-wallet-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-wallet-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-wallet-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-wallet-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-wallet-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M20.25 10.5V8.25c0-1.1-.9-2-2-2H5.75c-1.1 0-2 .9-2 2v7.5c0 1.1.9 2 2 2h12.5c1.1 0 2-.9 2-2V13.5"/>
+    <path d="M15.5 10.5h4.75v3H15.5a1.5 1.5 0 0 1 0-3Z"/>
+  </g>
+</svg></div><span>wallet</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-crown-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-crown-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-crown-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-crown-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-crown-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M3.5 8.75 8.25 12.5 12 5.75l3.75 6.75L20.5 8.75l-1.4 9.05c-.1.6-.6 1.05-1.2 1.05H6.1c-.6 0-1.1-.45-1.2-1.05L3.5 8.75Z"/>
+  </g>
+</svg></div><span>crown</span></div>
+<div class="cell" style="--s:100px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+  <linearGradient id="ring-party-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-party-100" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-party-100" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-party-100)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-party-100)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M2.8 21.2 6.2 11.6c2.6 1.05 4.75 3.2 5.8 5.8L2.8 21.2Z"/>
+    <path d="M14.9 12.9c1.85.35 3.6-.35 4.85-1.8"/>
+    <circle cx="13.9" cy="9.3" r="0.85" fill="currentColor" stroke="none"/>
+    <circle cx="18.2" cy="6.4" r="0.85" fill="currentColor" stroke="none"/>
+    <circle cx="20.5" cy="12.6" r="0.85" fill="currentColor" stroke="none"/>
+    <circle cx="16.2" cy="4.6" r="0.85" fill="currentColor" stroke="none"/>
+  </g>
+</svg></div><span>party</span></div></div>
+  </div>
+
+  <div class="band">
+    <div class="band-title">64px · лента реакций, крупная строка</div>
+    <div class="row" style="--s:64px"><div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-kometa-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-kometa-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-kometa-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-kometa-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-kometa-64)" stroke-width="4"/>
+  <circle cx="50" cy="50" r="35" fill="none" stroke="#45E698" stroke-width="0.75" opacity="0.28"/>
+  <circle cx="50" cy="50" r="46.5" fill="none" stroke="#45E698" stroke-width="1" opacity="0.16"/>
+  <g transform="translate(50 50) rotate(-42) scale(0.13) translate(-143 0)">
+  <path d="M 0 0 C 46 -12 108 -32 186 -40 L 186 -76 L 286 0 L 186 76 L 186 40 C 108 32 46 12 0 0 Z" fill="url(#fill-kometa-64)"/>
+  </g>
+</svg></div><span>kometa</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-fire-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-fire-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-fire-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-fire-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-fire-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M12 3c2.9 4.1 6.25 6.6 6.25 10.75a6.25 6.25 0 0 1-12.5 0C5.75 9.6 9.1 7.1 12 3Z"/>
+    <path d="M12 20.5c-1.9 0-3.25-1.45-3.25-3.25 0-1.5 1.3-2.75 3.25-5.25 1.95 2.5 3.25 3.75 3.25 5.25 0 1.8-1.35 3.25-3.25 3.25Z"/>
+  </g>
+</svg></div><span>fire</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-diamond-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-diamond-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-diamond-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-diamond-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-diamond-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="url(#fill-diamond-64)" stroke="none">
+    <path d="M12 20.75 3.5 9.5 6.6 4.75h10.8L20.5 9.5 12 20.75Z"/>
+  </g>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#08170F" stroke-width="1.6">
+    <path d="M3.5 9.5h17"/>
+    <path d="M8.4 9.5 12 20.75 15.6 9.5"/>
+  </g>
+</svg></div><span>diamond</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-gift-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-gift-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-gift-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-gift-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-gift-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <rect x="3.25" y="7.75" width="17.5" height="3.5" rx="1.25"/>
+    <path d="M4.75 11.25v7.25c0 .97.78 1.75 1.75 1.75h11c.97 0 1.75-.78 1.75-1.75v-7.25"/>
+    <path d="M12 7.75v12.5"/>
+    <path d="M12 7.6c-.75-2.3-2.4-3.2-3.6-2.35-1.2.85-.55 2.35 1.1 2.35H12"/>
+    <path d="M12 7.6c.75-2.3 2.4-3.2 3.6-2.35 1.2.85.55 2.35-1.1 2.35H12"/>
+  </g>
+</svg></div><span>gift</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-ticket-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-ticket-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-ticket-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-ticket-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-ticket-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <g transform="translate(12 12) scale(1.12) translate(-12 -12)">
+      <path d="M6.75 6.5h10.5c1.1 0 2 .9 2 2v1.9a1.6 1.6 0 0 0 0 3.2v1.9c0 1.1-.9 2-2 2H6.75c-1.1 0-2-.9-2-2v-1.9a1.6 1.6 0 0 0 0-3.2V8.5c0-1.1.9-2 2-2Z"/>
+      <path d="M9.5 7.25v9.5" stroke-dasharray="1.6 2.4"/>
+    </g>
+  </g>
+</svg></div><span>ticket</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-star-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-star-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-star-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-star-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-star-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="url(#fill-star-64)" stroke="none">
+    <path d="M12 2.9L14.23 9.33L21.04 9.46L15.61 13.57L17.58 20.09L12 16.2L6.42 20.09L8.39 13.57L2.96 9.46L9.77 9.33Z"/>
+  </g>
+</svg></div><span>star</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-rocket-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-rocket-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-rocket-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-rocket-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-rocket-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M12 2.75c2.6 2.05 4.1 5 4.1 8.45v4.3H7.9v-4.3c0-3.45 1.5-6.4 4.1-8.45Z"/>
+    <circle cx="12" cy="9.4" r="1.85"/>
+    <path d="M7.9 12.4 5.35 15.1c-.4.42-.6.97-.6 1.54v1.86l3.15-1.65"/>
+    <path d="M16.1 12.4l2.55 2.7c.4.42.6.97.6 1.54v1.86l-3.15-1.65"/>
+    <path d="M10.6 17.9c.45.95.95 1.9 1.4 2.85.45-.95.95-1.9 1.4-2.85"/>
+  </g>
+</svg></div><span>rocket</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-shield-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-shield-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-shield-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-shield-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-shield-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M12 2.75 19.15 5.4v6.05c0 4.3-2.88 8.2-7.15 9.55-4.27-1.35-7.15-5.25-7.15-9.55V5.4L12 2.75Z"/>
+    <circle cx="12" cy="10.4" r="1.7"/>
+    <path d="M12 12.1v3.4"/>
+  </g>
+</svg></div><span>shield</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-clock-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-clock-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-clock-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-clock-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-clock-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <circle cx="12" cy="12" r="9"/>
+    <path d="M12 6.75V12l3.5 2.15"/>
+  </g>
+</svg></div><span>clock</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-wallet-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-wallet-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-wallet-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-wallet-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-wallet-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M20.25 10.5V8.25c0-1.1-.9-2-2-2H5.75c-1.1 0-2 .9-2 2v7.5c0 1.1.9 2 2 2h12.5c1.1 0 2-.9 2-2V13.5"/>
+    <path d="M15.5 10.5h4.75v3H15.5a1.5 1.5 0 0 1 0-3Z"/>
+  </g>
+</svg></div><span>wallet</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-crown-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-crown-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-crown-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-crown-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-crown-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M3.5 8.75 8.25 12.5 12 5.75l3.75 6.75L20.5 8.75l-1.4 9.05c-.1.6-.6 1.05-1.2 1.05H6.1c-.6 0-1.1-.45-1.2-1.05L3.5 8.75Z"/>
+  </g>
+</svg></div><span>crown</span></div>
+<div class="cell" style="--s:64px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+  <defs>
+  <linearGradient id="ring-party-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-party-64" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-party-64" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-party-64)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-party-64)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M2.8 21.2 6.2 11.6c2.6 1.05 4.75 3.2 5.8 5.8L2.8 21.2Z"/>
+    <path d="M14.9 12.9c1.85.35 3.6-.35 4.85-1.8"/>
+    <circle cx="13.9" cy="9.3" r="0.85" fill="currentColor" stroke="none"/>
+    <circle cx="18.2" cy="6.4" r="0.85" fill="currentColor" stroke="none"/>
+    <circle cx="20.5" cy="12.6" r="0.85" fill="currentColor" stroke="none"/>
+    <circle cx="16.2" cy="4.6" r="0.85" fill="currentColor" stroke="none"/>
+  </g>
+</svg></div><span>party</span></div></div>
+  </div>
+
+  <div class="band">
+    <div class="band-title">32px · базовый размер кастомного эмодзи в тексте</div>
+    <div class="row" style="--s:32px"><div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-kometa-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-kometa-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-kometa-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-kometa-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-kometa-32)" stroke-width="4"/>
+  <circle cx="50" cy="50" r="35" fill="none" stroke="#45E698" stroke-width="0.75" opacity="0.28"/>
+  <circle cx="50" cy="50" r="46.5" fill="none" stroke="#45E698" stroke-width="1" opacity="0.16"/>
+  <g transform="translate(50 50) rotate(-42) scale(0.13) translate(-143 0)">
+  <path d="M 0 0 C 46 -12 108 -32 186 -40 L 186 -76 L 286 0 L 186 76 L 186 40 C 108 32 46 12 0 0 Z" fill="url(#fill-kometa-32)"/>
+  </g>
+</svg></div><span>kometa</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-fire-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-fire-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-fire-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-fire-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-fire-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M12 3c2.9 4.1 6.25 6.6 6.25 10.75a6.25 6.25 0 0 1-12.5 0C5.75 9.6 9.1 7.1 12 3Z"/>
+    <path d="M12 20.5c-1.9 0-3.25-1.45-3.25-3.25 0-1.5 1.3-2.75 3.25-5.25 1.95 2.5 3.25 3.75 3.25 5.25 0 1.8-1.35 3.25-3.25 3.25Z"/>
+  </g>
+</svg></div><span>fire</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-diamond-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-diamond-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-diamond-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-diamond-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-diamond-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="url(#fill-diamond-32)" stroke="none">
+    <path d="M12 20.75 3.5 9.5 6.6 4.75h10.8L20.5 9.5 12 20.75Z"/>
+  </g>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#08170F" stroke-width="1.6">
+    <path d="M3.5 9.5h17"/>
+    <path d="M8.4 9.5 12 20.75 15.6 9.5"/>
+  </g>
+</svg></div><span>diamond</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-gift-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-gift-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-gift-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-gift-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-gift-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <rect x="3.25" y="7.75" width="17.5" height="3.5" rx="1.25"/>
+    <path d="M4.75 11.25v7.25c0 .97.78 1.75 1.75 1.75h11c.97 0 1.75-.78 1.75-1.75v-7.25"/>
+    <path d="M12 7.75v12.5"/>
+    <path d="M12 7.6c-.75-2.3-2.4-3.2-3.6-2.35-1.2.85-.55 2.35 1.1 2.35H12"/>
+    <path d="M12 7.6c.75-2.3 2.4-3.2 3.6-2.35 1.2.85.55 2.35-1.1 2.35H12"/>
+  </g>
+</svg></div><span>gift</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-ticket-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-ticket-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-ticket-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-ticket-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-ticket-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <g transform="translate(12 12) scale(1.12) translate(-12 -12)">
+      <path d="M6.75 6.5h10.5c1.1 0 2 .9 2 2v1.9a1.6 1.6 0 0 0 0 3.2v1.9c0 1.1-.9 2-2 2H6.75c-1.1 0-2-.9-2-2v-1.9a1.6 1.6 0 0 0 0-3.2V8.5c0-1.1.9-2 2-2Z"/>
+      <path d="M9.5 7.25v9.5" stroke-dasharray="1.6 2.4"/>
+    </g>
+  </g>
+</svg></div><span>ticket</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-star-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-star-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-star-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-star-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-star-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="url(#fill-star-32)" stroke="none">
+    <path d="M12 2.9L14.23 9.33L21.04 9.46L15.61 13.57L17.58 20.09L12 16.2L6.42 20.09L8.39 13.57L2.96 9.46L9.77 9.33Z"/>
+  </g>
+</svg></div><span>star</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-rocket-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-rocket-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-rocket-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-rocket-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-rocket-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M12 2.75c2.6 2.05 4.1 5 4.1 8.45v4.3H7.9v-4.3c0-3.45 1.5-6.4 4.1-8.45Z"/>
+    <circle cx="12" cy="9.4" r="1.85"/>
+    <path d="M7.9 12.4 5.35 15.1c-.4.42-.6.97-.6 1.54v1.86l3.15-1.65"/>
+    <path d="M16.1 12.4l2.55 2.7c.4.42.6.97.6 1.54v1.86l-3.15-1.65"/>
+    <path d="M10.6 17.9c.45.95.95 1.9 1.4 2.85.45-.95.95-1.9 1.4-2.85"/>
+  </g>
+</svg></div><span>rocket</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-shield-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-shield-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-shield-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-shield-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-shield-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M12 2.75 19.15 5.4v6.05c0 4.3-2.88 8.2-7.15 9.55-4.27-1.35-7.15-5.25-7.15-9.55V5.4L12 2.75Z"/>
+    <circle cx="12" cy="10.4" r="1.7"/>
+    <path d="M12 12.1v3.4"/>
+  </g>
+</svg></div><span>shield</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-clock-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-clock-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-clock-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-clock-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-clock-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <circle cx="12" cy="12" r="9"/>
+    <path d="M12 6.75V12l3.5 2.15"/>
+  </g>
+</svg></div><span>clock</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-wallet-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-wallet-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-wallet-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-wallet-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-wallet-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M20.25 10.5V8.25c0-1.1-.9-2-2-2H5.75c-1.1 0-2 .9-2 2v7.5c0 1.1.9 2 2 2h12.5c1.1 0 2-.9 2-2V13.5"/>
+    <path d="M15.5 10.5h4.75v3H15.5a1.5 1.5 0 0 1 0-3Z"/>
+  </g>
+</svg></div><span>wallet</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-crown-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-crown-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-crown-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-crown-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-crown-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M3.5 8.75 8.25 12.5 12 5.75l3.75 6.75L20.5 8.75l-1.4 9.05c-.1.6-.6 1.05-1.2 1.05H6.1c-.6 0-1.1-.45-1.2-1.05L3.5 8.75Z"/>
+  </g>
+</svg></div><span>crown</span></div>
+<div class="cell" style="--s:32px"><div class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <defs>
+  <linearGradient id="ring-party-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-party-32" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-party-32" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-party-32)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-party-32)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M2.8 21.2 6.2 11.6c2.6 1.05 4.75 3.2 5.8 5.8L2.8 21.2Z"/>
+    <path d="M14.9 12.9c1.85.35 3.6-.35 4.85-1.8"/>
+    <circle cx="13.9" cy="9.3" r="0.85" fill="currentColor" stroke="none"/>
+    <circle cx="18.2" cy="6.4" r="0.85" fill="currentColor" stroke="none"/>
+    <circle cx="20.5" cy="12.6" r="0.85" fill="currentColor" stroke="none"/>
+    <circle cx="16.2" cy="4.6" r="0.85" fill="currentColor" stroke="none"/>
+  </g>
+</svg></div><span>party</span></div></div>
+  </div>
+
+  <div class="band">
+    <div class="band-title">Как это выглядит в сообщении бота</div>
+    <div class="chat">
+      <div class="who">Kometa · бот</div>
+      <div class="bubble">
+        <span class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="22" height="22">
+  <defs>
+  <linearGradient id="ring-inline-kometa" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-inline-kometa" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-inline-kometa" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-inline-kometa)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-inline-kometa)" stroke-width="4"/>
+  <circle cx="50" cy="50" r="35" fill="none" stroke="#45E698" stroke-width="0.75" opacity="0.28"/>
+  <circle cx="50" cy="50" r="46.5" fill="none" stroke="#45E698" stroke-width="1" opacity="0.16"/>
+  <g transform="translate(50 50) rotate(-42) scale(0.13) translate(-143 0)">
+  <path d="M 0 0 C 46 -12 108 -32 186 -40 L 186 -76 L 286 0 L 186 76 L 186 40 C 108 32 46 12 0 0 Z" fill="url(#fill-inline-kometa)"/>
+  </g>
+</svg></span>
+        Подписка активна до 12.11 · осталось 24 дня
+        <span class="em"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="22" height="22">
+  <defs>
+  <linearGradient id="ring-inline-shield" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  <radialGradient id="disc-inline-shield" cx="38%" cy="28%" r="88%">
+  <stop offset="0%" stop-color="#13301F"/><stop offset="58%" stop-color="#0E1D15"/><stop offset="100%" stop-color="#0B1410"/>
+  </radialGradient>
+  <linearGradient id="fill-inline-shield" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+  </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="44" fill="url(#disc-inline-shield)"/>
+  <circle cx="50" cy="50" r="42" fill="none" stroke="url(#ring-inline-shield)" stroke-width="4"/>
+  <g transform="translate(26 26) scale(2)" stroke-linecap="round" stroke-linejoin="round" fill="none" stroke="#F2F6F4" color="#F2F6F4" stroke-width="2">
+    <path d="M12 2.75 19.15 5.4v6.05c0 4.3-2.88 8.2-7.15 9.55-4.27-1.35-7.15-5.25-7.15-9.55V5.4L12 2.75Z"/>
+    <circle cx="12" cy="10.4" r="1.7"/>
+    <path d="M12 12.1v3.4"/>
+  </g>
+</svg></span>
+      </div>
+    </div>
+  </div>
+
+  <footer>файлы: <b>emoji/&lt;name&gt;.png</b> (100×100, RGBA) · источник геометрии: <b>tools/build-icons.mjs</b> · анимация: <b>emoji/SPEC-TGS.md</b></footer>
+</body>
+</html>

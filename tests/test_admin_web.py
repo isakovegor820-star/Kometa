@@ -195,7 +195,7 @@ async def test_referrals_page_shows_program_stats(client, session, panel):
     assert "Рефералы и промокоды" in page
     assert "inviter" in page  # топ пригласивших
     assert "friend" in page  # последнее приглашение
-    assert "+30 дн." in page  # награда начислена
+    assert f"+{get_settings().referral_bonus_days_referrer} дн." in page  # награда начислена
     assert "конверсия 100%" in page
     assert f"{order.discount_rub} ₽" in page  # сумма выданных скидок
 
@@ -376,7 +376,9 @@ async def test_nodes_page_shows_actual_ids_and_honest_probe_state(client, sessio
     assert "нет ID 3" in response.text, "карточка панели должна называть отсутствующий ID"
     assert "DE-Reality" in response.text, "фактические инбаунды панели должны быть видны"
     assert "отвечает с ошибкой" in response.text, "бейдж не должен врать про «отвечает»"
-    assert "проба не выполнена" in response.text
+    # «Проба не состоялась» (а не «не выполнена»): панель ответила, но выдавать
+    # было нечего — это диагноз настройки, и подпись называет причину.
+    assert "проба не состоялась" in response.text
     assert "порт не пускает" not in response.text
 
     # На дашборде та же нода: причина видна и там, а не только «нет ответа».
@@ -634,3 +636,327 @@ async def test_subscription_address_is_derived_from_host(session):
     node.sub_base = ""
     node.host = ""
     assert node.subscription_base == ""
+
+
+# --------------------------------------------------------------- партнёры
+async def test_partners_table_shows_real_promo_code(session, client, panel):
+    """Если код задан вручную, в таблице должен быть он, а не догадка из ссылки."""
+    from app.services import partners
+
+    await partners.create_partner(
+        session,
+        name="Свой код",
+        slug="custom-slug",
+        promo_code="LETO2026",
+        discount_percent=10,
+        reward_kind="none",
+        reward_value=0,
+    )
+    await session.commit()
+
+    await login(client)
+    html = (await client.get("/admin/partners")).text
+
+    assert "KOMETA-LETO2026" in html
+    assert "KOMETA-CUSTOM-SLUG" not in html
+
+
+async def test_partners_page_creates_link_and_code(session, client, panel):
+    """Владелец создаёт партнёра и сразу получает ссылку, промокод и условия."""
+    await login(client)
+
+    created = await client.post(
+        "/admin/partners",
+        data={
+            "name": "Иван, канал про удалёнку",
+            "slug": "ivan-yt",
+            "promo_code": "IVAN",
+            "discount_percent": "20",
+            "reward_kind": "percent",
+            "reward_value": "30",
+            "note": "договорились на 30 % с платежей",
+        },
+    )
+    assert created.status_code == 303
+
+    page = await client.get("/admin/partners")
+    html = page.text
+
+    assert page.status_code == 200
+    assert "Партнёры и рефералы" in html
+    assert "Иван, канал про удалёнку" in html
+    # Ссылка для распространения и промокод его аудитории.
+    assert "src_ivan-yt" in html
+    assert "30 % с платежей" in html
+    # Что именно отслеживается — должно быть написано на странице.
+    assert "Переходы" in html and "Выплата партнёру" in html and "CAC канала" in html
+
+
+async def test_partner_page_shows_revenue_and_debt(session, client, panel):
+    """Партнёр привёл клиента: в таблице видны выручка, долг, CAC и ROI."""
+    from app.services import partners, promo
+
+    partner = await partners.create_partner(
+        session,
+        name="Петя",
+        slug="petya",
+        discount_percent=20,
+        reward_kind="percent",
+        reward_value=30,
+    )
+    user, _ = await subscriptions.get_or_create_user(session, tg_id=9501, username="invited")
+    await partners.attach_partner(session, user, partner.slug)
+    plan = (await orders.list_plans(session))[0]
+    order = await orders.create_order(session, user, plan, provider="manual")
+    await orders.mark_paid(session, order, panel)
+    await session.commit()
+
+    await login(client)
+    html = (await client.get("/admin/partners")).text
+
+    from app.web.ui import money
+
+    discount = promo.calc_discount_rub(plan.price_rub, 20, 0)
+    statistics = await partners.partner_stats(session, partner)
+
+    assert "Петя" in html
+    assert money(statistics.revenue_rub) in html      # выручка канала
+    assert money(statistics.reward_rub) in html       # начислено партнёру
+    assert money(discount) in html                    # скидка аудитории
+    assert money(statistics.debt_rub) in html         # долг
+    assert "ROI" in html and "CAC" in html
+
+
+async def test_partner_card_lists_people(session, client, panel):
+    """Карточка партнёра: видно, кто пришёл и сколько заплатил."""
+    from app.services import partners
+
+    partner = await partners.create_partner(
+        session, name="Аня", slug="anya-tg", discount_percent=10, reward_kind="fixed", reward_value=50
+    )
+    user, _ = await subscriptions.get_or_create_user(session, tg_id=9502, username="frompartner")
+    await partners.attach_partner(session, user, partner.slug)
+    plan = (await orders.list_plans(session))[0]
+    order = await orders.create_order(session, user, plan, provider="manual")
+    await orders.mark_paid(session, order, panel)
+    await session.commit()
+
+    await login(client)
+    card = await client.get(f"/admin/partners/{partner.id}")
+
+    assert card.status_code == 200
+    assert "Аня" in card.text
+    assert "frompartner" in card.text
+    assert "CAC канала" in card.text
+
+
+async def test_partner_payout_closes_debt(session, client, panel):
+    """Кнопка «Выплачено» закрывает долг и пишет действие в журнал."""
+    from app.services import partners
+
+    partner = await partners.create_partner(
+        session, name="Гриша", slug="grisha", discount_percent=0, reward_kind="percent", reward_value=50
+    )
+    user, _ = await subscriptions.get_or_create_user(session, tg_id=9503, username="payer")
+    await partners.attach_partner(session, user, partner.slug)
+    plan = (await orders.list_plans(session))[0]
+    order = await orders.create_order(session, user, plan, provider="manual")
+    await orders.mark_paid(session, order, panel)
+    await session.commit()
+
+    debt_before = (await partners.partner_stats(session, partner)).debt_rub
+    assert debt_before > 0
+
+    await login(client)
+    paid = await client.post(f"/admin/partners/{partner.id}/payout", data={"amount": ""})
+    assert paid.status_code == 303
+
+    await session.refresh(partner)
+    stats_after = await partners.partner_stats(session, partner)
+    assert stats_after.paid_out_rub == pytest.approx(debt_before)
+    assert stats_after.debt_rub == pytest.approx(0)
+
+    html = (await client.get("/admin/partners")).text
+    assert "Выплачено" in html or "выплачено" in html
+
+
+async def test_partner_update_changes_discount(session, client, panel):
+    """Условия можно поменять: скидка и выплата пересчитываются сразу."""
+    from app.services import partners
+
+    partner = await partners.create_partner(
+        session, name="Лена", slug="lena", discount_percent=10, reward_kind="percent", reward_value=20
+    )
+    await session.commit()
+
+    await login(client)
+    saved = await client.post(
+        f"/admin/partners/{partner.id}",
+        data={
+            "name": "Лена (канал о путешествиях)",
+            "discount_percent": "35",
+            "reward_kind": "fixed",
+            "reward_value": "70",
+            "note": "пересмотрели условия",
+        },
+    )
+    assert saved.status_code == 303
+
+    await session.refresh(partner)
+    assert partner.name.startswith("Лена (канал")
+    assert partner.discount_percent == 35
+    assert partner.reward_kind == "fixed"
+    assert partner.reward_value == 70
+    # Ссылку не меняем: она уже разошлась по каналу.
+    assert partner.slug == "lena"
+
+
+async def test_partner_form_explains_bad_input(session, client):
+    """Ошибку в форме владелец должен понять без чтения кода."""
+    await login(client)
+    response = await client.post(
+        "/admin/partners",
+        data={"name": "", "slug": "x", "discount_percent": "10", "reward_kind": "percent", "reward_value": "30"},
+    )
+    assert response.status_code == 303
+
+    page = await client.get("/admin/partners")
+    assert "имя партнёра" in page.text.lower() or "Код ссылки" in page.text
+
+
+# ------------------------------------------------- персональные ссылки
+async def test_links_page_creates_personal_link(session, client):
+    """Владелец создаёт именную ссылку со своей скидкой и сразу видит код."""
+    await login(client)
+
+    created = await client.post(
+        "/admin/links",
+        data={
+            "title": "Сергей, коллега",
+            "owner_name": "Сергей",
+            "code": "serega",
+            "discount_percent": "40",
+            "discount_max_rub": "0",
+            "uses_limit": "5",
+            "days": "0",
+            "note": "просил особые условия",
+        },
+    )
+    assert created.status_code == 303
+
+    html = (await client.get("/admin/links")).text
+
+    assert "Сергей, коллега" in html
+    assert "p_serega" in html                 # ссылка
+    assert "KOMETA-SEREGA" in html            # код-двойник для ввода руками
+    assert "−40 %" in html                     # своя скидка
+    assert "5" in html                         # лимит активаций
+    # Пояснение, чем именная ссылка отличается от остальных, должно быть на странице.
+    assert "своя скидка" in html.lower()
+
+
+async def test_links_page_shows_stats_after_payment(session, client, panel):
+    """Ссылка привела оплатившего: видно конверсию, выручку и цену скидки."""
+    from app.services import orders, partners, personal_links, promo, subscriptions
+    from app.web.ui import money
+
+    link = await personal_links.create_link(
+        session, title="Пост у Ивана", code="ivan-post", discount_percent=30
+    )
+    user, _ = await subscriptions.get_or_create_user(session, tg_id=9601, username="fromlink")
+    await personal_links.attach_link(session, user, link.code)
+    plan = (await orders.list_plans(session))[0]
+    order = await orders.create_order(session, user, plan, provider="manual")
+    await orders.mark_paid(session, order, panel)
+    await session.commit()
+
+    stats = await personal_links.link_stats(session, link)
+    await login(client)
+    html = (await client.get("/admin/links")).text
+
+    assert "Пост у Ивана" in html
+    assert money(stats.revenue_rub) in html
+    assert money(stats.discount_rub) in html
+    assert "ROI" in html
+    assert "CAC" in html
+
+
+async def test_link_card_lists_people_and_twin_code(session, client, panel):
+    from app.services import orders, personal_links, subscriptions
+
+    link = await personal_links.create_link(
+        session, title="Лена, знакомая", code="lena-k", discount_percent=25
+    )
+    user, _ = await subscriptions.get_or_create_user(session, tg_id=9602, username="lenafriend")
+    await personal_links.attach_link(session, user, link.code)
+    plan = (await orders.list_plans(session))[0]
+    order = await orders.create_order(session, user, plan, provider="manual")
+    await orders.mark_paid(session, order, panel)
+    await session.commit()
+
+    await login(client)
+    card = await client.get(f"/admin/links/{link.id}")
+
+    assert card.status_code == 200
+    assert "Лена, знакомая" in card.text
+    assert "lenafriend" in card.text
+    assert "KOMETA-LENA-K" in card.text
+    assert "Обошлась в" in card.text
+
+
+async def test_link_can_be_tied_to_partner(session, client, panel):
+    """Именная ссылка под партнёра: в карточке видно, кому идёт выплата."""
+    from app.services import partners, personal_links
+
+    partner = await partners.create_partner(
+        session, name="Иван, канал", slug="ivan-yt", discount_percent=10, reward_kind="percent", reward_value=30
+    )
+    link = await personal_links.create_link(
+        session, title="Пост 12.10", code="post-1210", partner_id=partner.id, discount_percent=40
+    )
+    await session.commit()
+
+    await login(client)
+    html = (await client.get(f"/admin/links/{link.id}")).text
+
+    assert "Иван, канал" in html
+    assert partner.reward_text in html
+
+
+async def test_link_update_changes_discount(session, client):
+    from app.services import personal_links
+
+    link = await personal_links.create_link(session, title="Меняем", code="edit-me", discount_percent=10)
+    await session.commit()
+
+    await login(client)
+    saved = await client.post(
+        f"/admin/links/{link.id}",
+        data={
+            "title": "Меняем условия",
+            "discount_percent": "55",
+            "discount_max_rub": "300",
+            "uses_limit": "3",
+            "is_active": "on",
+            "note": "передумали",
+        },
+    )
+    assert saved.status_code == 303
+
+    await session.refresh(link)
+    assert link.discount_percent == 55
+    assert link.discount_max_rub == 300
+    assert link.uses_limit == 3
+    assert link.code == "edit-me"  # код не меняется
+
+
+async def test_link_form_explains_bad_input(session, client):
+    await login(client)
+    response = await client.post(
+        "/admin/links",
+        data={"title": "", "code": "", "discount_percent": "20", "discount_max_rub": "0", "uses_limit": "0", "days": "0"},
+    )
+    assert response.status_code == 303
+
+    page = await client.get("/admin/links")
+    assert "название ссылки" in page.text.lower()

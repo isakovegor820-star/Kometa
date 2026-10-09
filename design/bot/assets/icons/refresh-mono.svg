@@ -1,0 +1,7 @@
+<!-- Kometa icon set · refresh · 24×24 · stroke 1.75 · #45E698 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+ width="24" height="24"
+ fill="none" stroke="#45E698" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M20.25 12a8.25 8.25 0 1 1-8.25-8.25c2.3 0 4.5.92 6.16 2.5l2.09 2.09"/>
+  <path d="M20.25 3.75v5h-5"/>
+</svg>

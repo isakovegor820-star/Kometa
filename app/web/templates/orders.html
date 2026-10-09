@@ -13,6 +13,18 @@
     </div>
   </div>
   <div class="actions">
+    <details class="colmenu" data-colmenu data-table="orders">
+      <summary class="btn btn-ghost btn-sm">{{ icon('filter') }} Столбцы</summary>
+      <div class="colmenu-pop">
+        <div class="hint xs dim">Что показывать в очереди</div>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="plan"> Тариф</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="sum"> Сумма</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="provider"> Способ</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="status"> Статус</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="created"> Создан</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="paid"> Оплачен</label>
+      </div>
+    </details>
     {% if 'finance.export' in caps %}
     <a class="btn" href="/admin/export/orders.csv?{{ query_string(current) }}">{{ icon('download') }} CSV</a>
     {% endif %}
@@ -73,19 +85,22 @@
 {% if rows %}
 <div class="table-wrap" data-bulk-scope>
   <div class="table-scroll">
-    <table class="data">
+    <table class="data fit is-wide stick-first" data-table="orders" style="--stick-1-w:36px">
+      {# Ширина столбцов — на заголовках: «Клиент» тянется, остальные
+         фиксированы; скрытый на узком экране столбец уносит и свою ширину.
+         data-col — ключ для меню «Столбцы» (см. admin.js). #}
       <thead>
         <tr>
-          {% if 'orders.act' in caps %}<th class="check"><input type="checkbox" class="checkbox" data-check-all aria-label="Выбрать все"></th>{% endif %}
-          <th>Заказ</th>
+          {% if 'orders.act' in caps %}<th class="check c-check stick-1"><input type="checkbox" class="checkbox" data-check-all aria-label="Выбрать все"></th>{% endif %}
+          <th class="c-id {{ 'stick-2' if 'orders.act' in caps else 'stick-1' }}">Заказ</th>
           <th>Клиент</th>
-          <th>Тариф</th>
-          <th class="right">Сумма</th>
-          <th>Способ</th>
-          <th>Статус</th>
-          <th>Создан</th>
-          <th>Оплачен</th>
-          <th class="actions">Действия</th>
+          <th class="c-plan" data-col="plan">Тариф</th>
+          <th class="right c-sum" data-col="sum">Сумма</th>
+          <th class="hide-md c-provider" data-col="provider">Способ</th>
+          <th class="c-status" data-col="status">Статус</th>
+          <th class="c-date" data-col="created">Создан</th>
+          <th class="hide-md c-date" data-col="paid">Оплачен</th>
+          <th class="actions c-actions">Действия</th>
         </tr>
       </thead>
       <tbody>
@@ -93,37 +108,37 @@
         {% set order = row.order %}
         <tr data-row data-search="{{ order.id }} {{ row.user.display_name if row.user else '' }} {{ row.user.tg_id if row.user else '' }} {{ order.external_id }} {{ order.promo_code or '' }} {{ order.pay_amount_text }}">
           {% if 'orders.act' in caps %}
-          <td class="check"><input type="checkbox" class="checkbox" data-row-check value="{{ order.id }}" aria-label="Выбрать заказ {{ order.id }}"></td>
+          <td class="check stick-1"><input type="checkbox" class="checkbox" data-row-check value="{{ order.id }}" aria-label="Выбрать заказ {{ order.id }}"></td>
           {% endif %}
-          <td class="id">#{{ order.id }}<div class="xs dim">{{ kind_label(order.kind) }}</div></td>
+          <td class="id {{ 'stick-2' if 'orders.act' in caps else 'stick-1' }}">#{{ order.id }}<div class="xs dim">{{ kind_label(order.kind) }}</div></td>
           <td>
             {% if row.user %}
             <div class="who-cell">
               <span class="avatar">{{ initials(row.user.display_name) }}</span>
-              <span style="min-width:0">
-                <a class="nm" href="/admin/users/{{ row.user.id }}">{{ row.user.display_name }}</a>
+              <span>
+                <a class="nm" href="/admin/users/{{ row.user.id }}" title="{{ row.user.display_name }}">{{ row.user.display_name }}</a>
                 <span class="meta">{{ row.user.tg_id }}{% if row.user.is_blocked %} · заблокирован{% endif %}</span>
               </span>
             </div>
             {% else %}<span class="dim">—</span>{% endif %}
           </td>
-          <td>
+          <td data-col="plan">
             {{ row.plan.title if row.plan else '—' }}
             {% if order.discount_rub %}<div class="xs"><span class="tag tag-accent">−{{ order.discount_rub }} ₽</span> {{ order.promo_code }}</div>{% endif %}
           </td>
-          <td class="right">
+          <td class="right" data-col="sum">
             <b>{{ order.pay_amount_text }} ₽</b>
             {% if order.base_amount_rub and order.base_amount_rub != order.amount_rub %}
             <div class="xs dim"><s>{{ order.base_amount_rub }} ₽</s></div>
             {% endif %}
           </td>
-          <td class="small muted">{{ provider_label(order.provider) }}</td>
-          <td>
+          <td class="small muted hide-md" data-col="provider">{{ provider_label(order.provider) }}</td>
+          <td data-col="status">
             {% set badge = ORDER_STATUS.get(order.status, (order.status, 'neutral')) %}
             <span class="badge badge-{{ badge[1] if badge[1] != 'neutral' else '' }}">{{ badge[0] }}</span>
           </td>
-          <td class="small dim nowrap">{{ dt_short(order.created_at) }}</td>
-          <td class="small dim nowrap">{{ dt_short(order.paid_at) if order.paid_at else '—' }}</td>
+          <td class="small dim nowrap" data-col="created">{{ dt_short(order.created_at) }}</td>
+          <td class="small dim nowrap hide-md" data-col="paid">{{ dt_short(order.paid_at) if order.paid_at else '—' }}</td>
           <td class="actions">
             <div class="row-actions">
               {% if order.status == 'pending' and 'orders.act' in caps %}

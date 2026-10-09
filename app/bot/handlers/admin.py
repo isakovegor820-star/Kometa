@@ -55,12 +55,12 @@ async def cmd_admin(message: Message, session: AsyncSession) -> None:
     url = web_panel_url()
     text = snapshot.as_text()
     if not settings.admin_panel_password:
-        text += "\n\n🌐 Веб-панель выключена: задай <code>ADMIN_PANEL_PASSWORD</code> в .env"
+        text += "\n\n Веб-панель выключена: задай <code>ADMIN_PANEL_PASSWORD</code> в .env"
     elif url:
-        text += f"\n\n🌐 Веб-панель: {url}"
+        text += f"\n\n Веб-панель: {url}"
     else:
         text += (
-            f"\n\n🌐 Веб-панель: <code>{settings.public_base_url.rstrip('/')}/admin</code>"
+            f"\n\n Веб-панель: <code>{settings.public_base_url.rstrip('/')}/admin</code>"
             "\n(адрес локальный — с телефона не откроется, пока не будет домена)"
         )
     await message.answer(text, reply_markup=keyboards.admin_panel_kb(pending_count=snapshot.pending_orders, panel_url=url or None))
@@ -91,7 +91,7 @@ async def show_pending_orders(event: Message | CallbackQuery, session: AsyncSess
             await target.answer(
                 texts.ADMIN_NEW_ORDER.format(
                     order_id=order.id,
-                    user=user.display_name if user else "—",
+                    user=notifications.safe(user.display_name) if user else "—",
                     tg_id=user.tg_id if user else "—",
                     plan=plan.title if plan else "—",
                     amount=order.amount_rub,
@@ -119,6 +119,19 @@ async def cb_confirm_order(call: CallbackQuery, session: AsyncSession, bot: Bot)
     sub, already = await orders.mark_paid(session, order, panel, confirmed_by=call.from_user.id, bot=bot)
     await call.message.edit_text(texts.ADMIN_CONFIRMED.format(order_id=order.id))
     await call.answer("Подтверждено ✅")
+
+    # Подарочный заказ: покупателю уходит сертификат, а не доступ.
+    if not already and order.gift_token:
+        from app.services import gift as gift_service
+
+        sent = await gift_service.notify_buyer(session, order, bot, user)
+        if not sent:
+            await notifications.notify_admins(
+                bot,
+                f"⚠️ Заказ-подарок #{order.id} оплачен, но сертификат не доставлен "
+                f"(покупатель <code>{user.tg_id if user else '—'}</code>). Напиши ему вручную.",
+            )
+        return
 
     if user is not None and sub is not None and not already:
         expires = sub.expires_at.strftime("%d.%m.%Y %H:%M") if sub.expires_at else "—"
@@ -154,7 +167,7 @@ async def cb_reject_order(call: CallbackQuery, session: AsyncSession, bot: Bot) 
                 user.tg_id,
                 f"Заказ #{order.id} отклонён. Если оплата прошла — напиши в поддержку, разберёмся.",
             )
-        except Exception:  # noqa: BLE001
+        except Exception: # noqa: BLE001
             logger.warning("Не смог уведомить пользователя %s", user.tg_id)
 
 
@@ -173,7 +186,7 @@ async def cmd_user(message: Message, session: AsyncSession) -> None:
         await session.scalars(select(Order).where(Order.user_id == user.id).order_by(Order.created_at.desc()).limit(5))
     ).all()
     lines = [
-        f"👤 <b>{user.display_name}</b> (<code>{user.tg_id}</code>)",
+        f"👤 <b>{notifications.safe(user.display_name)}</b> (<code>{user.tg_id}</code>)",
         f"Создан: {user.created_at:%d.%m.%Y}",
         f"Код: <code>{user.referral_code}</code>",
         f"Подписка: {sub.status if sub else '—'}",
@@ -215,7 +228,7 @@ async def cmd_grant(message: Message, session: AsyncSession, bot: Bot) -> None:
         )
         if accrued:
             await message.answer(
-                f"✅ {user.display_name}: подписки нет, {accrued} дн. в запасе "
+                f"✅ {notifications.safe(user.display_name)}: подписки нет, {accrued} дн. в запасе "
                 f"(добавятся при подключении)"
             )
             return
@@ -228,10 +241,12 @@ async def cmd_grant(message: Message, session: AsyncSession, bot: Bot) -> None:
     if sub is None:
         await message.answer("Не удалось изменить подписку")
         return
-    await message.answer(f"✅ {user.display_name}: до {sub.expires_at:%d.%m.%Y %H:%M}")
+    await message.answer(
+        f"✅ {notifications.safe(user.display_name)}: до {sub.expires_at:%d.%m.%Y %H:%M}"
+    )
     try:
-        await bot.send_message(user.tg_id, f"Тебе начислено {days} дн. доступа. Спасибо, что с нами 💙")
-    except Exception:  # noqa: BLE001
+        await bot.send_message(user.tg_id, f"Тебе начислено {days} дн. доступа. Спасибо, что с нами ")
+    except Exception: # noqa: BLE001
         pass
 
 
@@ -248,7 +263,7 @@ async def _notify_compensation(bot: Bot, result: downtime.GrantResult) -> str:
         try:
             await bot.send_message(tg_id, texts.DOWNTIME_COMPENSATION.format(days=result.days))
             sent += 1
-        except Exception:  # noqa: BLE001 - клиент мог заблокировать бота
+        except Exception: # noqa: BLE001 - клиент мог заблокировать бота
             continue
     return f"✅ {result.as_text()}\nСообщение доставлено: {sent}"
 
@@ -366,7 +381,10 @@ async def cmd_referrals(message: Message, session: AsyncSession) -> None:
     tops = await referral.top_referrers(session)
     if tops:
         lines.append("\n<b>Топ пригласивших</b>")
-        lines.extend(f"• {user.display_name} — привёл {invited}, оплатили {paid}" for user, invited, paid in tops)
+        lines.extend(
+            f"• {notifications.safe(user.display_name)} — привёл {invited}, оплатили {paid}"
+            for user, invited, paid in tops
+        )
     await message.answer("\n".join(lines))
 
 
@@ -380,7 +398,7 @@ async def cmd_promos(message: Message, session: AsyncSession) -> None:
     for row in codes:
         left = "∞" if row.uses_left is None else row.uses_left
         status = "✅" if row.is_active else "⛔️"
-        kind = "реф." if row.kind == "referral" else "адм."
+        kind = {"referral": "реф.", "partner": "партн."}.get(row.kind, "адм.")
         lines.append(f"{status} <code>{row.code}</code> ({kind}) — {row.percent}%, осталось {left}")
     lines.append(
         "\nСоздать: <code>/promo КОД ПРОЦЕНТ [активаций] [дней]</code>"
@@ -454,7 +472,10 @@ async def cmd_block(message: Message, session: AsyncSession) -> None:
     sub = await subscriptions.get_subscription(session, user.id)
     if sub is not None:
         await subscriptions.set_enabled(sub, await subscriptions.all_user_panels(session), enabled=not block)
-    await message.answer(f"{'⛔️ Заблокирован' if block else '✅ Разблокирован'}: {user.display_name}")
+    await message.answer(
+        f"{'⛔️ Заблокирован' if block else '✅ Разблокирован'}: "
+        f"{notifications.safe(user.display_name)}"
+    )
 
 
 @router.message(Command("watch"))
@@ -500,8 +521,8 @@ async def cmd_nodes(event: Message | CallbackQuery, session: AsyncSession) -> No
             status = "✅" if ok else "⚠️"
             lines.append(f"{status} <b>{title}</b>: инбаундов {len(inbounds)}")
             for ib in inbounds:
-                lines.append(f"   • {ib.remark} ({ib.protocol}, {ib.port})")
-        except Exception as exc:  # noqa: BLE001
+                lines.append(f"  • {ib.remark} ({ib.protocol}, {ib.port})")
+        except Exception as exc: # noqa: BLE001
             lines.append(f"❌ <b>{title}</b>: ошибка — <code>{exc}</code>")
     text = "\n".join(lines)
     if isinstance(event, CallbackQuery):
@@ -533,7 +554,7 @@ async def do_broadcast(message: Message, state: FSMContext, session: AsyncSessio
         try:
             await bot.send_message(user.tg_id, message.html_text, disable_web_page_preview=True)
             sent += 1
-        except Exception:  # noqa: BLE001
+        except Exception: # noqa: BLE001
             failed += 1
     await message.answer(texts.ADMIN_BROADCAST_DONE.format(sent=sent, failed=failed))
 

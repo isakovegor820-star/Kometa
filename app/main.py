@@ -9,11 +9,13 @@ import asyncio
 import contextlib
 import logging
 import sys
+from datetime import datetime, timezone
 
 import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import ErrorEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
 
@@ -31,8 +33,16 @@ from app.db.session import SessionMaker, init_db
 from app.panels.base import PanelError
 from app.panels.registry import registry
 from app.payments.base import PaymentError, PaymentStatus
-from app.payments.registry import payments
-from app.services import notifications, orders, subscriptions, watchdog
+from app.payments.registry import payments, platega_provider
+from app.services import (
+    digest,
+    lifecycle,
+    notifications,
+    notify_bot,
+    orders,
+    subscriptions,
+    watchdog,
+)
 from app.web.sub import build_app
 
 settings = get_settings()
@@ -84,6 +94,72 @@ async def job_expire_orders() -> None:
             logger.info("Закрыто просроченных заказов: %s", len(expired))
 
 
+async def job_daily_digest(bot: Bot) -> None:
+    """Сводка за сутки: деньги, люди, инфраструктура.
+
+    Одно сообщение в конце дня вместо десяти: сколько заработали, сколько
+    пришло людей, что сломалось и что требует руки. Считается по базе, а не
+    по памяти процесса, — после перезапуска цифры те же.
+    """
+    try:
+        async with SessionMaker() as session:
+            text = await digest.build_daily(session)
+    except Exception as exc:  # noqa: BLE001 - сводка не важнее жизни бота
+        logger.exception("Сводка за сутки не собралась: %s", exc)
+        return
+    sent = await notifications.notify_admins(bot, text)
+    logger.info("Сводка за сутки отправлена: %s получателям", sent)
+
+
+async def on_update_error(event: ErrorEvent) -> None:
+    """Ошибка при обработке апдейта — сообщаем команде, а не только в лог.
+
+    Клиент в этот момент видит «что-то пошло не так» и уходит. Раньше об этом
+    узнавали из жалобы в поддержку; теперь — из сообщения с типом ошибки и
+    id клиента, по которому можно посмотреть, что именно он делал.
+    """
+    logger.error("Ошибка обработки апдейта: %s", event.exception, exc_info=event.exception)
+    user_id = None
+    for source in ("message", "callback_query", "pre_checkout_query"):
+        payload = getattr(event.update, source, None)
+        author = getattr(payload, "from_user", None)
+        if author is not None:
+            user_id = author.id
+            break
+    await notifications.notify_error(
+        notify_bot.customer_bot(),
+        where="обработка апдейта",
+        exc=event.exception,
+        user_id=user_id,
+    )
+
+
+#: Больше этого числа сообщений за один прогон не отправляем: если сценарий
+#: неожиданно захватил всю базу, лучше остановиться и разобраться, чем устроить
+#: рассылку всем подряд (Telegram ограничивает ботов за массовые сообщения).
+LIFECYCLE_MAX_PER_RUN = 150
+
+
+async def job_lifecycle(bot: Bot) -> None:
+    """Автосценарии: подсказка после триала, win-back, апселл, рефералка."""
+    if not settings.lifecycle_enabled:
+        return
+    async with SessionMaker() as session:
+        planned = await lifecycle.plan_sends(session)
+        if len(planned) > LIFECYCLE_MAX_PER_RUN:
+            logger.warning(
+                "Автосценарии: под аудиторию попало %s человек — отправляю первые %s, "
+                "остальные уйдут следующим прогоном",
+                len(planned),
+                LIFECYCLE_MAX_PER_RUN,
+            )
+            planned = planned[:LIFECYCLE_MAX_PER_RUN]
+        sent = await lifecycle.run_lifecycle(bot, session, planned=planned)
+        await session.commit()
+        if sent:
+            logger.info("Автосценарии: отправлено сообщений %s", sent)
+
+
 async def job_check_crypto(bot: Bot) -> None:
     """Автоматически подтверждает крипто-платежи, не дожидаясь кнопки."""
     provider = payments.get("crypto")
@@ -104,6 +180,93 @@ async def job_check_crypto(bot: Bot) -> None:
                 continue
             await finalize_order(session, order, bot, user)
             await session.commit()
+
+
+async def _confirm_platega_orders(bot: Bot, *, statuses: tuple[str, ...]) -> int:
+    """Спросить Platega про заказы в указанных статусах, выдать доступ оплаченным.
+
+    Возвращает число выданных доступов.
+    """
+    granted = 0
+    async with SessionMaker() as session:
+        candidates = await orders.awaiting_payment(
+            session, provider_prefix="platega", statuses=statuses
+        )
+        for order in candidates:
+            provider = platega_provider(order.provider)
+            if provider is None or not order.external_id:
+                continue
+            if order.external_id.startswith("ord-"):
+                # Счёт у Platega не создавался (заказ до подключения оплаты) —
+                # опрашивать нечего, а GET по чужому id вернёт ошибку.
+                continue
+            try:
+                check = await provider.check_payment(order.external_id)
+            except PaymentError as exc:
+                logger.warning("Проверка счёта Platega %s не удалась: %s", order.external_id, exc)
+                continue
+            if check.status is not PaymentStatus.PAID:
+                continue
+            user = await session.get(User, order.user_id)
+            if user is None:
+                continue
+            if order.status == "paid":
+                continue
+
+            logger.info("Platega: заказ #%s оплачен (подтверждено опросом)", order.id)
+            # finalize_order выдаёт доступ сам, в том числе по заказу, который
+            # успел закрыться: деньги пришли — человек не должен ждать админа.
+            await finalize_order(session, order, bot, user)
+            granted += 1
+            await session.commit()
+    return granted
+
+
+async def job_check_platega(bot: Bot) -> None:
+    """Быстрый опрос открытых счетов: клиент оплатил — доступ сразу.
+
+    Вебхук быстрее, но он есть не всегда: пока Callback URL не вписан в кабинет
+    Platega, опрос — единственный автоматический путь (``GET /transaction/{id}``).
+    Поэтому спрашиваем каждые 30 секунд: клиент не должен сидеть перед экраном
+    «оплата проходит» две минуты и тем более писать в поддержку.
+
+    Закрытые заказы (клиент оплатил позже, чем истёк счёт) здесь не трогаем —
+    ими занимается редкая задача ``job_check_platega_late``.
+    """
+    granted = await _confirm_platega_orders(bot, statuses=("pending",))
+    if granted:
+        logger.info("Platega: выдано доступов по опросу — %s", granted)
+
+
+async def job_check_platega_late(bot: Bot) -> None:
+    """Страховка: оплата по заказу, который успел закрыться.
+
+    Счёт живёт 15 минут, заказ закрывается через 30 — если клиент платил с
+    телефона и не вернулся в бот, оплата могла прийти уже по закрытому заказу.
+    Раньше такой платёж ждал админа («проверь поступление и выдай вручную»),
+    то есть человек, заплативший деньги, зависел от того, когда владелец
+    посмотрит телефон. Теперь доступ выдаётся автоматически — заказ
+    открывается заново, подписка продлевается, админам уходит обычное
+    уведомление об оплате.
+
+    Спрашиваем редко (раз в 15 минут) и только по заказам за сутки: платёжная
+    ссылка столько не живёт, а дёргать провайдера без нужды незачем.
+    """
+    granted = await _confirm_platega_orders(bot, statuses=("canceled", "expired"))
+    if granted:
+        logger.info("Platega: выдано доступов по закрытым заказам — %s", granted)
+
+
+async def startup_payment_check(bot: Bot) -> None:
+    """Проверить счета сразу после старта: платёж мог прийти во время перезапуска.
+
+    Иначе клиент, оплативший ровно в момент выката, ждал бы доступ до первого
+    тика опроса. Ошибку только пишем в лог: проверка не важнее запуска бота.
+    """
+    try:
+        await job_check_platega(bot)
+    except Exception as exc:  # noqa: BLE001 - фоновая проверка не должна ронять старт
+        logger.warning("Стартовая проверка платежей не удалась: %s", exc)
 
 
 async def job_autopay(bot: Bot) -> None:
@@ -286,8 +449,16 @@ async def main() -> None:
     logger.info("База готова: %s", settings.resolved_db_url)
 
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    # Основной бот — он же отправитель писем клиентам: команды бота уведомлений
+    # подтверждают заявку из служебного чата, а письмо клиенту должно прийти от
+    # бота, которого клиент знает.
+    notify_bot.set_customer_bot(bot)
     payments.init(bot)
     logger.info("Способы оплаты: %s", ", ".join(p.code for p in payments.available()) or "нет")
+
+    # Бот уведомлений: отдельный токен для оперативных сообщений команде.
+    await notify_bot.start()
+    notify_task = await notify_bot.start_polling()
 
     dispatcher = Dispatcher()
     # pre_checkout_query обязателен для оплаты в Stars — ему тоже нужны
@@ -302,12 +473,25 @@ async def main() -> None:
     dispatcher.pre_checkout_query.middleware(DbSessionMiddleware())
     dispatcher.pre_checkout_query.middleware(UserMiddleware())
     dispatcher.include_router(build_router())
+    dispatcher.errors.register(on_update_error)
 
     scheduler = AsyncIOScheduler(timezone="UTC")
     scheduler.add_job(job_expire_subscriptions, "interval", minutes=10, args=[bot], id="expire_subs")
     scheduler.add_job(job_reminders, "interval", hours=1, args=[bot], id="reminders")
     scheduler.add_job(job_expire_orders, "interval", minutes=5, id="expire_orders")
     scheduler.add_job(job_check_crypto, "interval", minutes=2, args=[bot], id="check_crypto")
+    # Platega: опрос — страховка от потерянного вебхука и основной путь там,
+    # где публичного адреса для вебхука нет вообще. Открытые счета спрашиваем
+    # каждые 30 секунд: клиент стоит с телефоном в руке и ждёт доступ, а не
+    # «до двух минут». Закрытые (оплата пришла позже счёта) — раз в 15 минут.
+    scheduler.add_job(job_check_platega, "interval", seconds=30, args=[bot], id="check_platega")
+    scheduler.add_job(
+        job_check_platega_late,
+        "interval",
+        minutes=15,
+        args=[bot],
+        id="check_platega_late",
+    )
     scheduler.add_job(
         job_autopay,
         "interval",
@@ -328,13 +512,47 @@ async def main() -> None:
         args=[bot],
         id="watch_clients",
     )
+    # Автосценарии в боте: подсказка после триала, возврат ушедших, апселл,
+    # напоминание про рефералку. Раз в сутки, в 10:00 МСК — не ночью.
+    scheduler.add_job(
+        job_lifecycle,
+        "cron",
+        hour=7,
+        minute=0,
+        args=[bot],
+        id="lifecycle",
+    )
+    # Сводка за сутки. Время в UTC: 18 = 21:00 МСК — день закрыт, но ещё не
+    # ночь, и если что-то сломалось, у команды есть вечер, чтобы починить.
+    # NOTIFY_DIGEST_HOUR_UTC=0 выключает сводку.
+    if settings.notify_digest_hour_utc:
+        scheduler.add_job(
+            job_daily_digest,
+            "cron",
+            hour=settings.notify_digest_hour_utc,
+            minute=0,
+            args=[bot],
+            id="daily_digest",
+        )
     scheduler.start()
 
     web_task = asyncio.create_task(run_web(bot))
+    # Счета проверяем сразу, не дожидаясь первого тика опроса.
+    asyncio.create_task(startup_payment_check(bot), name="platega-startup-check")
 
     me = await bot.get_me()
     logger.info("Бот запущен: @%s", me.username)
-    await notifications.notify_admins(bot, f"🚀 <b>Kometa запущена</b>\nБот: @{me.username}")
+    try:
+        async with SessionMaker() as session:
+            startup_text = await digest.build_startup(
+                session,
+                sales_bot=me.username or "",
+                notify_username=notify_bot.username() or "основным ботом",
+            )
+    except Exception as exc:  # noqa: BLE001 - цифры не важнее запуска бота
+        logger.warning("Не удалось собрать стартовую сводку: %s", exc)
+        startup_text = f"🚀 <b>Kometa запущена</b>\nБот: @{me.username}"
+    await notifications.notify_admins(bot, startup_text)
 
     # Самопроверка гейта подписки: «включил гейт, а бота в канал админом не
     # добавил» — самая частая ошибка настройки, и узнать о ней лучше сразу.
@@ -359,11 +577,16 @@ async def main() -> None:
         await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types())
     finally:
         scheduler.shutdown(wait=False)
+        if notify_task is not None:
+            notify_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await notify_task
         web_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await web_task
         await payments.close()
         await registry.close()
+        await notify_bot.close()
         await bot.session.close()
 
 

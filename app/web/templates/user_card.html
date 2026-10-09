@@ -275,6 +275,20 @@
           <dt>Пригласил</dt><dd>{{ invited }} <span class="muted">(оплатили {{ invited_paid }})</span></dd>
           <dt>Пришёл по ссылке</dt>
           <dd>{% if referrer %}<a href="/admin/users/{{ referrer.id }}">{{ referrer.display_name }}</a>{% else %}сам{% endif %}</dd>
+          <dt>Источник</dt>
+          <dd>
+            {{ source_title or 'не отмечен' }}
+            {% if user.source_detail %}<span class="muted">· <code>{{ user.source_detail }}</code></span>{% endif %}
+          </dd>
+          <dt>Партнёр</dt>
+          <dd>{% if partner_row %}<a href="/admin/partners/{{ partner_row.id }}">{{ partner_row.name }}</a>{% else %}<span class="muted">нет</span>{% endif %}</dd>
+          <dt>Персональная ссылка</dt>
+          <dd>
+            {% if personal_link %}
+            <a href="/admin/links/{{ personal_link.id }}">{{ personal_link.title }}</a>
+            <span class="muted">· скидка {{ personal_link.discount_percent }} %</span>
+            {% else %}<span class="muted">нет</span>{% endif %}
+          </dd>
         </dl>
       </div>
     </div>

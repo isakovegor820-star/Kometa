@@ -27,13 +27,13 @@ async def started_user(bot, dispatcher, session):  # noqa: ANN001
 
 
 async def test_full_purchase_flow(bot, dispatcher, session, started_user):  # noqa: ANN001
+    plans = await orders.list_plans(session)
+    plan = next(p for p in plans if p.code == "m1")
+
     # 1. Тарифы показываются с ценами
     await dispatcher.feed_update(bot, make_update(callback_data="plans", user_id=USER_ID))
     plans_text = bot.session.all_text()
-    assert "199" in plans_text
-
-    plans = await orders.list_plans(session)
-    plan = next(p for p in plans if p.code == "m1")
+    assert str(plan.price_rub) in plans_text
 
     # 2. Карточка тарифа — предлагает способы оплаты
     bot.session.clear()
@@ -128,4 +128,4 @@ async def test_stats_command_shows_revenue(bot, dispatcher, session, started_use
 
     stats_text = bot.session.all_text()
     assert "Статистика" in stats_text
-    assert "199" in stats_text  # выручка за сегодня
+    assert str(plan.price_rub) in stats_text  # выручка за сегодня

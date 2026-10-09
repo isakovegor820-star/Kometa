@@ -74,6 +74,34 @@ def can(role: str | None, capability: str) -> bool:
     return capability in _CAPS.get(role or "", frozenset())
 
 
+#: Разделы для командной палитры (⌘K): право, адрес, подпись, ключевые слова.
+#: Список держим рядом с правами, чтобы палитра не показывала раздел, который
+#: роль всё равно не откроет.
+CMD_SECTIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("orders.view", "/admin", "Дашборд", "обзор главная сводка"),
+    ("orders.view", "/admin/orders", "Очередь заказов", "заказы оплаты подтвердить"),
+    ("users.view", "/admin/users", "Пользователи", "клиенты люди база"),
+    ("orders.refund", "/admin/refunds", "Возвраты", "возврат деньги refund"),
+    ("downtime.manage", "/admin/downtime", "Компенсация простоя", "простой downtime авария"),
+    ("finance.view", "/admin/finance", "Финансы и отчёты", "деньги выручка прибыль"),
+    ("plans.manage", "/admin/plans", "Тарифы", "цены планы тариф"),
+    ("nodes.view", "/admin/nodes", "Ноды", "серверы панели локации"),
+    ("alerts.view", "/admin/alerts", "Алерты", "ошибки проблемы"),
+    ("growth.view", "/admin/referrals", "Рефералы и промокоды", "промо приглашения"),
+    ("growth.view", "/admin/partners", "Партнёры и рефералы", "партнёры ссылки выплаты блогеры рефералы"),
+    ("growth.view", "/admin/links", "Персональные ссылки", "персональные ссылки именные скидка под человека"),
+    ("broadcast.send", "/admin/broadcast", "Рассылки", "сообщения рассылка"),
+    ("audit.view", "/admin/audit", "Журнал действий", "аудит история кто что"),
+    ("team.manage", "/admin/team", "Команда и роли", "доступы сотрудники"),
+)
+
+
+def cmd_sections(caps: Iterable[str]) -> list[dict[str, str]]:
+    """Разделы палитры, доступные этой роли."""
+    allowed = set(caps)
+    return [{"title": title, "url": url, "keys": keys} for cap, url, title, keys in CMD_SECTIONS if cap in allowed]
+
+
 def capabilities(role: str) -> frozenset[str]:
     return _CAPS.get(role, frozenset())
 
@@ -293,6 +321,28 @@ def mask_secret(value: str | None, keep: int = 4) -> str:
     if len(text) <= keep:
         return "•" * len(text)
     return "•" * 8 + text[-keep:]
+
+
+def link_label(url: str | None, *, head: int = 12, tail: int = 4) -> str:
+    """Короткая подпись для длинной ссылки: ``sub/26e8f0a1c…f0a6``.
+
+    Зачем: в таблице ссылка-подписка занимала ~460 px и выталкивала столбец
+    действий за край экрана. Полный адрес остаётся в подсказке и в буфере
+    обмена (кнопка копирования берёт его из ``data-copy``), поэтому подпись
+    можно сокращать без потери функции.
+    """
+    text = (url or "").strip()
+    if not text:
+        return "—"
+    without_scheme = text.split("://", 1)[-1]
+    path = without_scheme.split("/", 1)[1] if "/" in without_scheme else ""
+    parts = [part for part in path.split("/") if part]
+    if not parts:
+        return text[: head + tail + 1] + ("…" if len(text) > head + tail + 1 else "")
+    label = "/".join(parts[-2:]) if len(parts) > 1 else parts[-1]
+    if len(label) <= head + tail + 1:
+        return label
+    return f"{label[:head]}…{label[-tail:]}"
 
 
 # ---------------------------------------------------------------- ссылки

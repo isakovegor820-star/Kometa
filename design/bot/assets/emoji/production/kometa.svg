@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="brand-e-kometa" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+    </linearGradient>
+    <linearGradient id="ring-e-kometa" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="46" fill="none" stroke="url(#ring-e-kometa)" stroke-width="2.6" opacity="0.62"/>
+  <g transform="translate(50 56) rotate(-38) scale(1.45) translate(-12 0)"><path d="M 0 0 C 3.83 -1 9 -2.67 15.5 -3.33 L 15.5 -6.33 L 23.83 0 L 15.5 6.33 L 15.5 3.33 C 9 2.67 3.83 1 0 0 Z" fill="url(#brand-e-kometa)" stroke="none"/></g>
+</svg>

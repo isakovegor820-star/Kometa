@@ -69,9 +69,11 @@ def headers(merchant: str = MERCHANT, secret: str = SECRET) -> dict[str, str]:
     return {"X-MerchantId": merchant, "X-Secret": secret}
 
 
-def stub_api_check(monkeypatch, provider, status: PaymentStatus):  # noqa: ANN001
+def stub_api_check(monkeypatch, provider, status: PaymentStatus, amount: int | None = None):  # noqa: ANN001
     async def fake_check(external_id: str) -> PaymentCheck:
-        return PaymentCheck(status=status, raw={"id": external_id, "status": status.value})
+        return PaymentCheck(
+            status=status, amount=amount, raw={"id": external_id, "status": status.value}
+        )
 
     monkeypatch.setattr(provider, "check_payment", fake_check)
 
@@ -79,6 +81,38 @@ def stub_api_check(monkeypatch, provider, status: PaymentStatus):  # noqa: ANN00
 async def test_both_methods_are_registered():
     codes = {provider.code for provider in payments.available()}
     assert {"platega_sbp", "platega_card"} <= codes
+
+
+async def test_empty_post_is_accepted_as_callback_url_check(client):
+    """Platega проверяет Callback URL пустым POST и требует 200 OK.
+
+    Иначе адрес не сохранить в кабинете, и автоматического подтверждения
+    платежей не будет вовсе.
+    """
+    response = await client.post("/payments/platega/webhook", content=b"")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "skipped": "empty body"}
+
+
+async def test_post_without_transaction_id_is_accepted(client):
+    """Мусор без id транзакции тоже не должен ломать проверку адреса."""
+    response = await client.post(
+        "/payments/platega/webhook", content=b'{"hello": "world"}', headers=headers()
+    )
+
+    assert response.status_code == 200
+    assert response.json()["skipped"] == "no transaction id"
+
+
+async def test_empty_post_does_not_change_orders(client, session):
+    """Проверка адреса — не оплата: заказы не трогаем."""
+    user, order = await make_order(session, 9402)
+
+    await client.post("/payments/platega/webhook", content=b"")
+
+    await session.refresh(order)
+    assert order.status == "pending"
 
 
 async def test_webhook_confirms_payment_after_api_check(client, session, panel, monkeypatch):
@@ -182,12 +216,18 @@ async def test_webhook_returns_503_when_not_configured(client, session, monkeypa
     assert response.status_code == 503
 
 
-async def test_invalid_json_is_rejected(client, session, panel):
+async def test_invalid_json_is_answered_with_200(client, session, panel):
+    """Не-JSON тело не роняем в 400: так Platega проверяет адрес при сохранении.
+
+    Ничего не выдавая, ответ 200 безопасен — платёж без разобранного тела не
+    подтверждается (см. test_empty_post_does_not_change_orders).
+    """
     response = await client.post(
         "/payments/platega/webhook", content=b"not-json", headers={**headers(), "Content-Type": "application/json"}
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 200
+    assert response.json()["skipped"] == "empty body"
 
 
 async def test_chargeback_disables_subscription(client, session, panel, monkeypatch):
@@ -212,6 +252,97 @@ async def test_chargeback_disables_subscription(client, session, panel, monkeypa
     assert response.json()["status"] == "refunded"
     await session.refresh(sub)
     assert sub.status == "blocked"
+
+
+async def test_chargeback_marks_order_refunded(client, session, panel, monkeypatch):
+    """Чарджбэк убирает деньги из выручки: заказ становится ``refunded``.
+
+    Раньше здесь только отключался доступ, а статус заказа оставался ``paid`` —
+    возвращённые банком деньги продолжали считаться выручкой и прибылью.
+    """
+    user, order = await make_order(session, 9413)
+    provider = payments.get("platega_sbp")
+    stub_api_check(monkeypatch, provider, PaymentStatus.PAID)
+
+    await client.post("/payments/platega/webhook", content=webhook_body(order.id), headers=headers())
+    response = await client.post(
+        "/payments/platega/webhook", content=webhook_body(order.id, status="CHARGEBACKED"), headers=headers()
+    )
+
+    assert response.status_code == 200
+    await session.refresh(order)
+    assert order.status == "refunded"
+    assert order.refunded_at is not None
+    assert order.refunded_by == "platega-webhook"
+
+
+async def test_webhook_refuses_underpayment(client, session, panel, monkeypatch):
+    """Оплата меньше стоимости заказа доступ не выдаёт.
+
+    Сценарий атаки при утёкшем секрете: переиграть дешёвую оплаченную
+    транзакцию с payload дорогого заказа. Сверка суммы его закрывает.
+    """
+    user, order = await make_order(session, 9414)
+    assert order.amount_rub > 1, "нужен заказ дороже рубля"
+    provider = payments.get("platega_sbp")
+    stub_api_check(monkeypatch, provider, PaymentStatus.PAID, amount=1)
+
+    response = await client.post(
+        "/payments/platega/webhook", content=webhook_body(order.id), headers=headers()
+    )
+
+    assert response.status_code == 200
+    assert response.json()["skipped"] == "amount mismatch"
+    await session.refresh(order)
+    assert order.status == "pending"
+
+
+async def test_webhook_accepts_payment_with_client_commission(client, session, panel, monkeypatch):
+    """Заплатили больше (комиссия переложена на клиента) — доступ выдаём."""
+    user, order = await make_order(session, 9415)
+    provider = payments.get("platega_sbp")
+    stub_api_check(monkeypatch, provider, PaymentStatus.PAID, amount=order.amount_rub + 10)
+
+    await client.post("/payments/platega/webhook", content=webhook_body(order.id), headers=headers())
+
+    await session.refresh(order)
+    assert order.status == "paid"
+
+
+async def test_webhook_prefers_transaction_id_over_payload(client, session, panel, monkeypatch):
+    """Заказ ищем по id транзакции: payload из тела подставить нельзя.
+
+    Иначе с утёкшим секретом дешёвая оплаченная транзакция с чужим payload
+    выдавала бы доступ по дорогому заказу.
+    """
+    user_cheap, cheap = await make_order(session, 9416)
+    user_dear, dear = await make_order(session, 9417)
+    cheap.external_id = "tx-cheap"
+    cheap.amount_rub = 1
+    dear.external_id = "tx-expensive"
+    await session.commit()
+
+    provider = payments.get("platega_sbp")
+    stub_api_check(monkeypatch, provider, PaymentStatus.PAID, amount=1)
+
+    body = json.dumps(
+        {
+            "id": "tx-cheap",
+            "amount": 1,
+            "currency": "RUB",
+            "status": "CONFIRMED",
+            "paymentMethod": 2,
+            "payload": f"order:{dear.id}",  # подделка: чужой заказ
+        }
+    ).encode()
+
+    response = await client.post("/payments/platega/webhook", content=body, headers=headers())
+
+    assert response.status_code == 200
+    await session.refresh(dear)
+    await session.refresh(cheap)
+    assert dear.status == "pending", "дорогой заказ не должен оплачиваться чужой транзакцией"
+    assert cheap.status == "paid"
 
 
 async def test_chargeback_status_maps_to_refunded():
@@ -287,3 +418,39 @@ async def test_order_created_at_is_recent(session):
     """Заказ для теста создаётся сейчас — иначе автоплатежи его не увидят."""
     _, order = await make_order(session, 9407)
     assert (datetime.now(timezone.utc) - order.created_at).total_seconds() < 60
+
+
+async def test_pay_button_saves_transaction_id_in_order(bot, dispatcher, session, monkeypatch):
+    """Заказ хранит id счёта провайдера — иначе вебхук его не найдёт.
+
+    Регрессия: в ``buy.py`` стояла проверка ``external_id == f"ord-{order.id}"``,
+    а заказ создаётся с ``ord-<hex>`` — условие не срабатывало никогда. Из этого
+    росли две поломки: опрос статуса уходил по чужому id
+    (``GET /transaction/ord-…``), а колбэк Platega без payload не мог сопоставить
+    оплату с заказом.
+    """
+    from app.payments.platega import PlategaProvider
+    from tests.fakes import make_update
+
+    async def fake_request(self, method, path, **kwargs):  # noqa: ANN001, ARG001
+        return httpx.Response(
+            200,
+            json={
+                "transactionId": "tx-from-platega",
+                "redirect": "https://pay.platega.io?sbp",
+                "paymentDetails": {"amount": 199, "currency": "RUB"},
+                "status": "PENDING",
+                "expiresIn": "00:15:00",
+            },
+        )
+
+    monkeypatch.setattr(PlategaProvider, "_request", fake_request)
+
+    await dispatcher.feed_update(bot, make_update("/start", user_id=9601))
+    plans = await orders.list_plans(session)
+    plan = next(p for p in plans if p.code == "m1")
+    await dispatcher.feed_update(bot, make_update(callback_data=f"pay:{plan.id}:platega_sbp", user_id=9601))
+
+    pending = await orders.pending_orders(session)
+    assert pending, "заказ не создан"
+    assert pending[0].external_id == "tx-from-platega"

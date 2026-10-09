@@ -28,6 +28,12 @@ TCP_NETWORKS: tuple[str, ...] = ("tcp", "raw", "ws", "xhttp", "grpc", "httpupgra
 #: нечего, и делать вывод «порт не пускает клиента» нельзя.
 MEASURED_STAGES: tuple[str, ...] = ("tcp", "tls")
 
+#: Шаг успешной пробы: и TCP-соединение, и рукопожатие пройдены. Пишем его
+#: явно, потому что интерфейсы (карточка ноды в админке) показывают состояние
+#: по шагу: пустая строка при ``last_probe_ok=true`` выглядела в шаблоне как
+#: «проба не выполнена» — зелёная нода с подписью «не проверяли».
+OK_STAGE = "ok"
+
 #: Шаг «поставить пробу нечем»: у ноды не заполнен host или нет TCP-инбаундов
 #: (например канал только на AmneziaWG). Это не авария порта.
 CONFIG_STAGE = "config"
@@ -39,6 +45,17 @@ PROBE_UNAVAILABLE = "unavailable"
 PROBE_NOT_CONFIGURED = "not_configured"
 PROBE_UNKNOWN = "unknown"
 
+#: Человеческие подписи состояний: один словарь на бота, админку и публичную
+#: страницу. Раньше каждый интерфейс писал своё («не отвечает», «нет данных»,
+#: «порт не пускает»), и одинаковые состояния выглядели как разные.
+PROBE_TITLES: dict[str, str] = {
+    PROBE_OK: "порт открыт",
+    PROBE_PORT_FAILED: "порт не пускает",
+    PROBE_UNAVAILABLE: "проба не выполнена",
+    PROBE_NOT_CONFIGURED: "проба не настроена",
+    PROBE_UNKNOWN: "пробы не было",
+}
+
 
 def probe_verdict(node: object) -> str:
     """Что известно о порте ноды по последней пробе.
@@ -46,6 +63,9 @@ def probe_verdict(node: object) -> str:
     Одно место вместо разбора текста ошибки в шаблонах и отчётах: и таймаут
     TCP, и «панель не отдала инбаунды» пишут текст, но означают разное —
     первое «порт не пускает», второе «проба не состоялась».
+
+    Успех проверяем ДО шага: ``last_probe_ok`` мог прийти из старой записи,
+    где шаг не сохранялся, а успешную пробу нельзя превращать в «не выполнена».
     """
     if getattr(node, "last_probe_at", None) is None:
         return PROBE_UNKNOWN
@@ -57,6 +77,150 @@ def probe_verdict(node: object) -> str:
     if stage == CONFIG_STAGE:
         return PROBE_NOT_CONFIGURED
     return PROBE_UNAVAILABLE
+
+
+def probes_enabled(node: object) -> bool:
+    """Идут ли пробы вообще: выключенные пробы нельзя читать как «всё хорошо».
+
+    Настройка ``NODE_PROBE_ENABLED=false`` выключает пробы целиком. В этом
+    случае «пробы не было» означает не «мы не успели», а «мы не проверяем» —
+    и честная подпись другая.
+    """
+    try:
+        from app.config import get_settings
+
+        return bool(get_settings().node_probe_enabled)
+    except Exception:  # noqa: BLE001 - настройки не должны ронять отрисовку
+        return True
+
+
+def probe_state(node: object) -> tuple[str, str]:
+    """``(состояние, человеческая подпись)`` для карточек нод.
+
+    Один источник для админки, публичной страницы и бота. Подпись объясняет,
+    что делать, а не только констатирует: «порт 8443 не пускает» лучше, чем
+    «недоступна», потому что называет предмет разговора с хостингом.
+
+    Пустая подпись означает «проба ещё не запускалась»: это не диагноз, и
+    показывать «всё работает» в этом состоянии нельзя.
+    """
+    verdict = probe_verdict(node)
+    if verdict == PROBE_OK:
+        ms = int(getattr(node, "last_probe_ms", 0) or 0)
+        return verdict, f"порт открыт{f', {ms} мс' if ms else ''}"
+    if verdict == PROBE_PORT_FAILED:
+        closed = [item["port"] for item in probe_ports(node) if not item.get("ok")]
+        opened = [item["port"] for item in probe_ports(node) if item.get("ok")]
+        if closed and opened:
+            return verdict, f"порт {', '.join(str(p) for p in closed)} не пускает (открыт {', '.join(str(p) for p in opened)})"
+        if closed:
+            return verdict, f"порт {', '.join(str(p) for p in closed)} не пускает"
+        return verdict, "порт не пускает"
+    if verdict == PROBE_NOT_CONFIGURED:
+        detail = str(getattr(node, "last_probe_error", "") or "")
+        return verdict, f"проба не настроена{': ' + detail if detail else ''}"
+    if verdict == PROBE_UNKNOWN:
+        if not probes_enabled(node):
+            return verdict, "пробы выключены настройкой"
+        return verdict, "проба ещё не запускалась"
+    detail = str(getattr(node, "last_probe_error", "") or "")
+    return verdict, f"проба не состоялась{': ' + detail if detail else ''}"
+
+
+def probe_ports(node: object) -> list[dict]:
+    """Замер по каждому порту из последней пробы (пусто — замеров нет).
+
+    Разбираем JSON молча: это диагностическая строка, и «сломанный JSON» не
+    повод не показать карточку ноды. Старые записи (до появления колонки)
+    дают пустой список — интерфейсы обязаны это переживать.
+    """
+    import json
+
+    raw = str(getattr(node, "last_probe_ports", "") or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict) and "port" in item]
+
+
+@dataclass(slots=True)
+class PortResult:
+    """Итог пробы одного порта: порт, состояние и задержка.
+
+    Нужен потому, что «первый успешный из списка» скрывал половину картины:
+    у ноды мог быть открыт 8443 и закрыт 443, клиент пробовал оба (в подписке
+    оба), а в админке горело «ок» — и вопрос «почему у меня не работает» не
+    имел ответа. Теперь проба отчитывается по каждому порту отдельно.
+    """
+
+    port: int
+    label: str
+    ok: bool
+    ms: int = 0
+    stage: str = ""
+    detail: str = ""
+
+    def as_text(self) -> str:
+        state = "открыт" if self.ok else (self.detail or "не ответил")
+        suffix = f" {self.ms} мс" if self.ok and self.ms else ""
+        return f"{self.port}: {state}{suffix}"
+
+    def as_dict(self) -> dict:
+        return {
+            "port": self.port,
+            "label": self.label,
+            "ok": self.ok,
+            "ms": self.ms,
+            "stage": self.stage,
+            "detail": self.detail,
+        }
+
+
+@dataclass(slots=True)
+class PanelProbe:
+    """Полный итог пробы панели: лучший результат и таблица по портам.
+
+    :param best: результат, по которому принимается решение (первый успешный,
+        иначе последний неудачный — как раньше).
+    :param ports: что вышло на каждом TCP-порту: доказательство для оператора.
+    :param targets: сколько целей было найдено (0 — проба не состоялась).
+    :param error: почему пробу не удалось поставить (панель/настройка).
+        Пусто — значит пробу поставить удалось, и таблица ``ports`` заполнена.
+    """
+
+    best: ProbeResult
+    ports: list[PortResult] = field(default_factory=list)
+    targets: int = 0
+    error: str = ""
+
+    @property
+    def open_ports(self) -> list[int]:
+        return [item.port for item in self.ports if item.ok]
+
+    @property
+    def closed_ports(self) -> list[int]:
+        return [item.port for item in self.ports if not item.ok]
+
+    def as_dict(self) -> dict:
+        return {
+            "ok": self.best.ok,
+            "ms": self.best.ms,
+            "stage": self.best.stage,
+            "detail": self.best.detail,
+            "targets": self.targets,
+            "error": self.error,
+            "ports": [item.as_dict() for item in self.ports],
+        }
+
+    def as_text(self) -> str:
+        if not self.ports:
+            return self.error or "пробу не удалось поставить"
+        return " · ".join(item.as_text() for item in self.ports)
 
 
 @dataclass(slots=True)
@@ -190,33 +354,77 @@ async def probe_panel(panel, host: str) -> ProbeResult:
     Если список инбаундов получить не удалось, проба вообще не состоялась:
     ``stage="panel"`` и в тексте прямо сказано, что порт не проверялся —
     иначе эту ошибку легко принять за закрытый порт.
+
+    Тонкая обёртка над :func:`probe_panel_detailed`: вызывающим, которым нужен
+    только вердикт, не нужно знать про таблицу портов. Кому нужны
+    доказательства (алерты, админка) — берут подробный вариант.
+    """
+    return (await probe_panel_detailed(panel, host)).best
+
+
+async def probe_panel_detailed(panel, host: str) -> PanelProbe:
+    """Проверить ноду и вернуть **все** замеры, а не только лучший.
+
+    Зачем подробный вариант: в подписке у клиента не один порт, а несколько
+    (TCP 443 для Reality, WS/XHTTP за CDN, 8443 для добора). Проба «первый
+    успешный» отвечала «ок», когда открыт хотя бы один, и молчала о том, что
+    второй закрыт. Диагностика «у меня не работает» начинается именно с этого
+    места, поэтому доказательства сохраняем все.
     """
     if not (host or "").strip():
-        return ProbeResult(False, stage="config", detail="у ноды не заполнен host")
+        return PanelProbe(
+            best=ProbeResult(False, stage=CONFIG_STAGE, detail="у ноды не заполнен host"),
+            error="у ноды не заполнен host",
+        )
 
     try:
         inbounds = await panel.list_inbounds()
     except Exception as exc:  # noqa: BLE001 - чужая панель отвечает чем угодно
-        return ProbeResult(False, stage="panel", detail=f"панель не отдала инбаунды, порт не проверялся: {exc}")
+        detail = f"панель не отдала инбаунды, порт не проверялся: {exc}"
+        return PanelProbe(
+            best=ProbeResult(False, stage="panel", detail=detail),
+            error=detail,
+        )
 
     targets = probe_targets(list(inbounds or []), host)
     if not targets:
-        return ProbeResult(False, stage="config", detail="нет TCP-инбаундов для пробы")
+        return PanelProbe(
+            best=ProbeResult(False, stage=CONFIG_STAGE, detail="нет TCP-инбаундов для пробы"),
+            error="нет TCP-инбаундов для пробы",
+        )
 
-    last = ProbeResult(False, stage="config", detail="нет целей для пробы")
+    best = ProbeResult(False, stage=CONFIG_STAGE, detail="нет целей для пробы")
+    ports: list[PortResult] = []
     for target in targets:
         result = await probe_endpoint(target.host, target.port)
+        ports.append(
+            PortResult(
+                port=target.port,
+                label=target.label,
+                ok=result.ok,
+                ms=result.ms,
+                stage=result.stage,
+                detail=result.detail,
+            )
+        )
         if result.ok:
-            return ProbeResult(
+            best = ProbeResult(
                 True,
                 ms=result.ms,
                 stage=result.stage,
                 detail=f"{target.label}: {result.detail}",
             )
-        last = ProbeResult(
-            False,
-            ms=result.ms,
-            stage=result.stage,
-            detail=f"{target.label}: {result.detail}",
-        )
-    return last
+            continue
+        if not best.ok:
+            best = ProbeResult(
+                False,
+                ms=result.ms,
+                stage=result.stage,
+                detail=f"{target.label}: {result.detail}",
+            )
+
+    # Успешная проба помечается шагом «ok»: интерфейсы показывают состояние по
+    # шагу, и пустое значение при ok выглядело как «пробу не выполняли».
+    if best.ok:
+        best = ProbeResult(True, ms=best.ms, stage=OK_STAGE, detail=best.detail)
+    return PanelProbe(best=best, ports=ports, targets=len(targets))

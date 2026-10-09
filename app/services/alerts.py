@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -30,6 +32,10 @@ KINDS: dict[str, tuple[str, str]] = {
     "node_down": (SEV_ERR, "Нода не отвечает"),
     "node_degraded": (SEV_WARN, "Нода отвечает с ошибкой"),
     "node_probe_failed": (SEV_ERR, "Нода не пускает клиента"),
+    #: Часть портов закрыта, но подключиться есть куда. Отдельный вид, потому
+    #: что действие оператора другое: не «спасай ноду», а «открой порт в фаерволе»,
+    #: и пугать клиента этим не нужно — у него рабочий профиль есть.
+    "node_probe_degraded": (SEV_WARN, "Часть портов ноды закрыта"),
     "payment_unmatched": (SEV_WARN, "Поступление без заказа"),
     "statement_error": (SEV_ERR, "Не читается выписка"),
     "panel_error": (SEV_WARN, "Ошибка панели"),
@@ -372,13 +378,26 @@ async def check_probes(session: AsyncSession, panels: list[tuple[Node | None, Pa
         if node is None or not node.is_active:
             continue
         label = node.title or node.code
-        result = await probe_service.probe_panel(panel, node.host)
+        detailed = await probe_service.probe_panel_detailed(panel, node.host)
+        result = detailed.best
         measured = bool(result.measured)
         node.last_probe_at = now
         # Шаг нужен интерфейсам: по нему отличают «порт не пускает» (tcp/tls)
-        # от «пробу не удалось поставить» (panel/config).
+        # от «пробу не удалось поставить» (panel/config), а «ok» — успех.
         node.last_probe_stage = str(result.stage or "")[:16]
         node.last_probe_error = "" if result.ok else (result.detail or "")[:300]
+        # Замер по каждому порту — доказательство диагноза «какой порт закрыт»,
+        # когда соседний открыт. Без него «ок» скрывало закрытый порт.
+        node.last_probe_ports = json.dumps(
+            [item.as_dict() for item in detailed.ports], ensure_ascii=False
+        )[:2000]
+
+        # Два факта вместо одного, как в реальности:
+        # * «порт открыт» (ok) — есть куда подключиться, клиент не в беде;
+        # * «часть портов закрыта» (degraded) — беды ещё нет, но добрая половина
+        #   профилей в подписке ведёт в стену, и об этом надо узнать заранее.
+        workspace_open = bool(detailed.open_ports)
+        degraded = bool(detailed.closed_ports) and workspace_open
 
         entry = {
             "code": node.code,
@@ -390,19 +409,56 @@ async def check_probes(session: AsyncSession, panels: list[tuple[Node | None, Pa
             #: Порт реально проверялся (TCP/TLS), а не «проба не дошла».
             "probed": measured,
             "verdict": probe_service.probe_verdict(node),
+            #: Таблица по портам и причина, если пробу не удалось поставить.
+            "ports": [item.as_dict() for item in detailed.ports],
+            "probe_error": detailed.error,
+            #: Часть портов не пускает, но подключиться есть куда.
+            "degraded": degraded,
+            "closed_ports": detailed.closed_ports,
+            "open_ports": detailed.open_ports,
         }
         fingerprint = f"node:{node.code}:probe"
-        if result.ok:
+        if result.ok and not degraded:
             node.last_probe_ok = True
             node.last_probe_ms = int(result.ms or 0)
             await resolve_by_fingerprint(session, fingerprint, note="порт снова пускает клиента")
+        elif result.ok and degraded:
+            # Подключиться можно, но не всеми профилями из подписки. Это не
+            # «нода упала» и не «всё хорошо»: алерт предупреждающий, с портом
+            # в заголовке — ровно то, что нужно открыть в фаерволе.
+            node.last_probe_ok = True
+            node.last_probe_ms = int(result.ms or 0)
+            closed = ", ".join(str(port) for port in detailed.closed_ports)
+            opened = ", ".join(str(port) for port in detailed.open_ports)
+            await raise_alert(
+                session,
+                "node_probe_degraded",
+                f"Нода «{label}»: часть портов закрыта ({closed})",
+                severity=SEV_WARN,
+                message=(
+                    f"подключение работает через порты {opened}; профили с портом {closed} "
+                    f"у клиентов не откроются — проверь фаервол и инбаунды"
+                ),
+                fingerprint=fingerprint,
+                node_id=node.id,
+                reopen_ack=False,
+            )
         elif measured:
             node.last_probe_ok = False
             node.last_probe_ms = 0
+            # Сообщение называет КОНКРЕТНЫЙ порт: «порт 8443 не пускает» — это
+            # действие («открой фаервол на 8443»), а «порт не пускает» — тема
+            # для размышления.
+            closed = ", ".join(str(port) for port in detailed.closed_ports)
+            title = (
+                f"Нода «{label}»: порт {closed} не пускает клиента"
+                if closed
+                else f"Нода «{label}»: порт не пускает клиента"
+            )
             await raise_alert(
                 session,
                 "node_probe_failed",
-                f"Нода «{label}»: порт не пускает клиента",
+                title,
                 severity=SEV_ERR,
                 message=result.detail or "TCP-проба не прошла",
                 fingerprint=fingerprint,

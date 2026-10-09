@@ -24,19 +24,23 @@
 
 <div class="stats mb-12">
   <div class="stat">
-    <div class="k">{{ icon('server') }} Нод в системе</div>
+    <div class="k">{{ icon('server') }} Локаций всего</div>
     <div class="v">{{ num(nodes|length) }}</div>
     <div class="d">включено: {{ nodes_active }}</div>
   </div>
   <div class="stat {{ 'is-ok' if nodes_active and nodes_alive == nodes_active else ('is-warn' if nodes_active and not nodes_alive else '') }}">
-    <div class="k">{{ icon('check') }} Отвечают</div>
+    <div class="k">{{ icon('check') }} Панели ответили</div>
     <div class="v">{{ num(nodes_alive) }}</div>
-    <div class="d">по последней проверке</div>
+    {# «Отвечают» без пояснения читалось как «локаций столько и есть»: при трёх
+       нодах и одной молчащей панели на плитке стояло 2 — владелец спрашивал,
+       почему у нас две локации. Число отвечает на вопрос «сколько проверок
+       прошло», а не «сколько у нас стран». #}
+    <div class="d">из {{ nodes_active }} включённых · по последней проверке</div>
   </div>
-  <div class="stat">
-    <div class="k">{{ icon('bolt') }} Панелей в подписке</div>
-    <div class="v">{{ num(panels|length) }}</div>
-    <div class="d">основная + активные ноды</div>
+  <div class="stat {{ 'is-ok' if nodes_active and nodes_ready == nodes_active else ('is-warn' if nodes_active and nodes_ready != nodes_active else '') }}">
+    <div class="k">{{ icon('bolt') }} Пускают клиента</div>
+    <div class="v">{{ num(nodes_ready) }}</div>
+    <div class="d">панель ответила и порт открыт</div>
   </div>
 </div>
 
@@ -113,22 +117,26 @@
             {% endif %}
           </td>
           <td class="small">
-            {% if node.channel == 'reserve' %}<span class="badge badge-warn">резерв</span>{% else %}<span class="badge">обычная</span>{% endif %}
-            {% if node.last_probe_at %}
-              {% if node.last_probe_ok %}
-            <div class="xs dim" title="{{ node.last_probe_error }}">проба: {{ node.last_probe_ms }} мс</div>
-              {% elif node.last_probe_stage in ('tcp', 'tls') %}
-              {# Порт проверялся и не пустил — это сеть/фаервол. #}
-            <div class="xs text-err" title="{{ node.last_probe_error }}">порт не пускает</div>
-              {% elif node.last_probe_stage == 'config' %}
-              {# Ставить пробу нечем: нет host или TCP-инбаундов (например один AWG). #}
-            <div class="xs dim" title="{{ node.last_probe_error }}">проба не настроена</div>
-              {% else %}
-              {# Панель не отдала инбаунды: о порте ничего не известно. #}
-            <div class="xs dim" title="{{ node.last_probe_error }}">проба не выполнена</div>
-              {% endif %}
+            {% if node.channel == 'reserve' %}<span class="badge badge-warn">резерв</span>{% elif node.channel == 'cdn' %}<span class="badge badge-warn">CDN</span>{% else %}<span class="badge">обычная</span>{% endif %}
+            {# Порт — то, что видит клиент. Панель может отвечать при закрытом
+               порте, поэтому «отвечает» сверху и «не пускает» здесь — не
+               противоречие, а две разные правды. Показываем обе. #}
+            {% set pv = node_probe(node) %}
+            {% if pv.state == 'ok' %}
+            <div class="xs" title="{{ node.last_probe_error }}">{{ pv.text }}</div>
+            {% elif pv.state == 'unknown' %}
+            <div class="xs dim">{{ pv.text }}</div>
+            {% elif pv.state == 'not_configured' %}
+            <div class="xs dim" title="{{ node.last_probe_error }}">{{ pv.text }}</div>
             {% else %}
-            <div class="xs dim">пробы не было</div>
+            <div class="xs text-err" title="{{ node.last_probe_error }}">{{ pv.text }}</div>
+            {% endif %}
+            {% if node.last_probe_at %}<div class="xs dim">{{ ago(node.last_probe_at) }}</div>{% endif %}
+            {% if pv.ports %}
+            {# Замер по каждому порту: «какой именно не пускает» — это действие. #}
+            <div class="xs dim" title="{% for item in pv.ports %}порт {{ item.port }} ({{ item.label }}): {{ 'открыт' if item.ok else item.detail }}{% if not loop.last %}&#10;{% endif %}{% endfor %}">
+              {% for item in pv.ports %}{{ item.port }}:{{ '✓' if item.ok else '✗' }}{% if not loop.last %} {% endif %}{% endfor %}
+            </div>
             {% endif %}
           </td>
           {% if can_nodes_act %}

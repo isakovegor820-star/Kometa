@@ -1,0 +1,2760 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>Пользователи — Kometa</title>
+
+<script>
+(function(){try{
+  if(localStorage.getItem("kometa-admin-theme")==="dark")document.documentElement.setAttribute("data-theme","dark");
+  var d=localStorage.getItem("kometa-admin-density");if(d)document.documentElement.setAttribute("data-density",d);
+  if(localStorage.getItem("kometa-admin-nav")==="min")document.documentElement.setAttribute("data-nav","min");
+}catch(e){}})();
+</script>
+<style>
+/* ============================================================================
+   Kometa — админ-панель. Дизайн-система.
+   ----------------------------------------------------------------------------
+   Направление: Modern minimal (Linear / Vercel). База — белая, акцент — синий.
+   Принципы:
+     * цвет несёт смысл: синий — действие, зелёный — деньги, красный — риск;
+     * плотность: строка таблицы 44 px, таблица читается на 13–14 px;
+     * цифры моноширинные (tabular-nums) — суммы и даты выравниваются по столбцу;
+     * никаких внешних шрифтов и CDN: панель живёт на localhost без интернета;
+     * тёмная тема — те же токены, переключается атрибутом data-theme на <html>.
+
+   Этот файл — единственный источник правды и для макетов (design/screens/*),
+   и для живой панели (app/web/templates/*). Меняешь здесь — меняется везде.
+   ========================================================================== */
+
+/* ------------------------------------------------------------------ токены */
+/* Токены держим в одном месте. Тёмная палитра лежит рядом со светлой
+   отдельными переменными (--dark-*), а переключение темы только переназначает
+   основные токены. Так цвета не расползаются по компонентам: любая правка
+   палитры — это одна строка здесь. */
+:root {
+  /* Поверхности и границы */
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --surface-3: #f2f4f7;
+  --border: #e4e7ec;
+  --border-strong: #d0d5dd;
+
+  /* Текст */
+  --text: #0f172a;
+  --text-2: #475467;
+  --text-3: #98a2b3;
+
+  /* Акцент — классический синий админки */
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-active: #1e40af;
+  --accent-soft: #eff4ff;
+  --accent-border: #c7d7fe;
+  --on-accent: #ffffff;
+
+  /* Смысловые цвета */
+  --ok: #067647;
+  --ok-soft: #ecfdf3;
+  --ok-border: #abefc6;
+  --warn: #b54708;
+  --warn-soft: #fffaeb;
+  --warn-border: #fedf89;
+  --err: #b42318;
+  --err-soft: #fef3f2;
+  --err-border: #fecdca;
+  --info: #175cd3;
+  --info-soft: #eff8ff;
+  --info-border: #b2ddff;
+
+  /* --- тёмная палитра --- */
+  --dark-bg: #0b0d12;
+  --dark-surface: #14171f;
+  --dark-surface-2: #191d26;
+  --dark-surface-3: #1f242f;
+  --dark-border: #262b36;
+  --dark-border-strong: #343b49;
+  --dark-text: #e8eaf0;
+  --dark-text-2: #a2abbb;
+  --dark-text-3: #6d7688;
+  --dark-accent: #4f8dfb;
+  --dark-accent-hover: #6ba0fc;
+  --dark-accent-active: #3b7ae8;
+  --dark-accent-soft: #16233c;
+  --dark-accent-border: #24406e;
+  --dark-on-accent: #08111f;
+  --dark-ok: #5ddc9a;
+  --dark-ok-soft: #10251a;
+  --dark-ok-border: #1f4a33;
+  --dark-warn: #f3b75f;
+  --dark-warn-soft: #2a1f0e;
+  --dark-warn-border: #4d3a18;
+  --dark-err: #f88f88;
+  --dark-err-soft: #2c1516;
+  --dark-err-border: #57282a;
+  --dark-info: #7cb2ff;
+  --dark-info-soft: #131f33;
+  --dark-info-border: #263d63;
+
+  /* Геометрия */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --sidebar-w: 252px;
+  --sidebar-min: 68px;
+  --topbar-h: 60px;
+  --row-h: 44px;
+  /* Отступы ячейки таблицы. Меняются переключателем плотности (шапка панели):
+     на 15″ в «компактном» режиме в экран входит на треть больше строк. */
+  --cell-y: 10px;
+  --cell-x: 14px;
+
+  /* Тени — минимальные, только чтобы отделить слой */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, .05);
+  --shadow-sm: 0 1px 3px rgba(16, 24, 40, .08), 0 1px 2px rgba(16, 24, 40, .04);
+  --shadow-md: 0 4px 10px -2px rgba(16, 24, 40, .08), 0 2px 4px -2px rgba(16, 24, 40, .04);
+  --shadow-lg: 0 12px 32px -8px rgba(16, 24, 40, .18);
+  --ring: 0 0 0 3px rgba(37, 99, 235, .18);
+
+  /* Типографика */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --fz-xs: 12px;
+  --fz-sm: 13px;
+  --fz: 14px;
+  --fz-md: 15px;
+  --fz-lg: 17px;
+  --fz-xl: 20px;
+  --fz-2xl: 28px;
+  --fz-3xl: 34px;
+
+  color-scheme: light;
+}
+
+/* Тёмная тема: тот же набор токенов, другие значения. */
+:root[data-theme="dark"] {
+  --bg: var(--dark-bg);
+  --surface: var(--dark-surface);
+  --surface-2: var(--dark-surface-2);
+  --surface-3: var(--dark-surface-3);
+  --border: var(--dark-border);
+  --border-strong: var(--dark-border-strong);
+
+  --text: var(--dark-text);
+  --text-2: var(--dark-text-2);
+  --text-3: var(--dark-text-3);
+
+  --accent: var(--dark-accent);
+  --accent-hover: var(--dark-accent-hover);
+  --accent-active: var(--dark-accent-active);
+  --accent-soft: var(--dark-accent-soft);
+  --accent-border: var(--dark-accent-border);
+  --on-accent: var(--dark-on-accent);
+
+  --ok: var(--dark-ok);
+  --ok-soft: var(--dark-ok-soft);
+  --ok-border: var(--dark-ok-border);
+  --warn: var(--dark-warn);
+  --warn-soft: var(--dark-warn-soft);
+  --warn-border: var(--dark-warn-border);
+  --err: var(--dark-err);
+  --err-soft: var(--dark-err-soft);
+  --err-border: var(--dark-err-border);
+  --info: var(--dark-info);
+  --info-soft: var(--dark-info-soft);
+  --info-border: var(--dark-info-border);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, .5);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, .55);
+  --shadow-lg: 0 16px 40px -8px rgba(0, 0, 0, .7);
+  --ring: 0 0 0 3px rgba(79, 141, 251, .25);
+
+  color-scheme: dark;
+}
+
+/* ------------------------------------------------------------------- база */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fz) / 1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 2px; }
+
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
+h1 { font-size: var(--fz-xl); }
+h2 { font-size: var(--fz-md); }
+h3 { font-size: var(--fz); }
+p { margin: 0 0 10px; }
+p:last-child { margin-bottom: 0; }
+
+hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
+
+code, kbd, .mono { font-family: var(--mono); font-size: 12.5px; }
+code {
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 1px 5px;
+  word-break: break-all;
+}
+kbd {
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-bottom-width: 2px; border-radius: var(--radius-xs); padding: 1px 5px; color: var(--text-2);
+}
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+
+/* Иконки — инлайновые SVG. Размер по умолчанию задаёт макрос `icon`,
+   но в заголовках и тексте подправляем выравнивание: иначе иконка «висит». */
+svg { flex: none; }
+h1 > svg, h2 > svg, h3 > svg, dd > svg, td > svg { vertical-align: -3px; margin-right: 4px; }
+.empty svg { margin: 0 auto 10px; }
+
+.skip-link {
+  position: absolute; left: -9999px; top: 8px; z-index: 100;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px 14px; box-shadow: var(--shadow-md);
+}
+.skip-link:focus { left: 12px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* --------------------------------------------------------------- каркас */
+.app { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+  transition: width .16s ease, flex-basis .16s ease;
+}
+
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  height: var(--topbar-h); padding: 0 16px; border-bottom: 1px solid var(--border);
+  font-weight: 650; letter-spacing: -.01em;
+}
+.brand-mark {
+  width: 26px; height: 26px; border-radius: 8px; flex: 0 0 26px;
+  background: linear-gradient(140deg, var(--accent) 0%, #7aa8ff 100%);
+  display: grid; place-items: center; color: var(--on-accent); font-size: 13px; font-weight: 700;
+}
+.brand small { display: block; font-size: 11px; font-weight: 500; color: var(--text-3); letter-spacing: 0; }
+
+.nav { padding: 12px 10px 20px; overflow-y: auto; flex: 1; }
+.nav-group + .nav-group { margin-top: 16px; }
+.nav-title {
+  padding: 0 10px 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.nav a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--radius); color: var(--text-2);
+  font-size: var(--fz); font-weight: 500;
+}
+.nav a:hover { background: var(--surface-3); color: var(--text); text-decoration: none; }
+.nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav a svg { width: 17px; height: 17px; flex: 0 0 17px; stroke-width: 1.7; }
+.nav a .count {
+  margin-left: auto; background: var(--err); color: #fff; border-radius: 999px;
+  font-size: 11px; font-weight: 700; padding: 1px 7px; min-width: 20px; text-align: center;
+}
+.nav a.active .count { background: var(--accent); color: var(--on-accent); }
+
+.sidebar-foot { border-top: 1px solid var(--border); padding: 10px; }
+
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.topbar {
+  height: var(--topbar-h); background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; padding: 0 20px;
+  position: sticky; top: 0; z-index: 20;
+}
+.topbar .crumbs { font-size: var(--fz-sm); color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+.topbar .crumbs b { color: var(--text); font-weight: 600; font-size: var(--fz-md); }
+.topbar .spacer { flex: 1; }
+
+.search {
+  position: relative; max-width: 320px; flex: 1;
+}
+.search input { width: 100%; padding-left: 32px; }
+.search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-3); }
+
+.who { display: flex; align-items: center; gap: 8px; font-size: var(--fz-sm); color: var(--text-2); }
+.avatar {
+  width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft);
+  color: var(--accent); display: grid; place-items: center; font-weight: 650; font-size: 12px;
+}
+
+/* Контент занимает всю ширину окна. Раньше стоял жёсткий предел 1360 px: на 15″
+   ноутбуке и внешнем мониторе справа пустовало 300–600 px, пока таблица в это же
+   время уезжала в горизонтальный скролл. Верхний предел оставлен только для
+   сверхшироких экранов (≥2040 px), чтобы строка не растягивалась на «три метра». */
+.content { padding: 20px clamp(16px, 1.2vw, 30px) 80px; max-width: 2040px; width: 100%; }
+
+/* ------------------------------------------------------------ заголовок */
+.page-head {
+  display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.page-head .titles { min-width: 240px; }
+.page-head h1 { display: flex; align-items: center; gap: 10px; }
+.page-head .sub { color: var(--text-2); font-size: var(--fz-sm); margin-top: 3px; }
+.page-head .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.section { margin-top: 26px; }
+.section-head {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
+}
+.section-head h2 { color: var(--text); }
+.section-head .sub { color: var(--text-3); font-size: var(--fz-sm); }
+.section-head .actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* --------------------------------------------------------------- кнопки */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 36px; padding: 0 13px; border-radius: var(--radius);
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+  font: inherit; font-size: var(--fz); font-weight: 550; cursor: pointer;
+  box-shadow: var(--shadow-xs); white-space: nowrap;
+  transition: background .12s ease, border-color .12s ease, color .12s ease, box-shadow .12s ease;
+}
+.btn:hover { background: var(--surface-3); text-decoration: none; }
+.btn:active { background: var(--surface-3); box-shadow: none; }
+.btn svg { width: 15px; height: 15px; stroke-width: 1.8; }
+
+.btn-primary {
+  background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600;
+}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--on-accent); }
+.btn-danger { color: var(--err); border-color: var(--err-border); background: var(--surface); }
+.btn-danger:hover { background: var(--err-soft); border-color: var(--err); color: var(--err); }
+.btn-ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-2); }
+.btn-ghost:hover { background: var(--surface-3); color: var(--text); }
+.btn-sm { height: 30px; padding: 0 10px; font-size: var(--fz-sm); border-radius: var(--radius-sm); }
+.btn-sm svg { width: 14px; height: 14px; }
+.btn-icon { width: 34px; height: 34px; padding: 0; }
+.btn-icon.btn-sm { width: 30px; height: 30px; }
+.btn[disabled], .btn.is-disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
+.btn-block { width: 100%; }
+
+.link-danger { color: var(--err); }
+.link-quiet { color: var(--text-2); }
+
+/* --------------------------------------------------------------- бейджи */
+.badge, .pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 999px; font-size: var(--fz-xs); font-weight: 550;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2);
+  white-space: nowrap; line-height: 18px;
+}
+.badge svg { width: 12px; height: 12px; }
+.badge-ok, .pill.ok { background: var(--ok-soft); border-color: var(--ok-border); color: var(--ok); }
+.badge-warn, .pill.warn { background: var(--warn-soft); border-color: var(--warn-border); color: var(--warn); }
+.badge-err, .pill.err { background: var(--err-soft); border-color: var(--err-border); color: var(--err); }
+.badge-info { background: var(--info-soft); border-color: var(--info-border); color: var(--info); }
+.badge-accent { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+.badge-mono { font-family: var(--mono); font-size: 11.5px; }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: 0 0 7px; }
+
+.tag {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px;
+  border-radius: var(--radius-xs); background: var(--surface-3); border: 1px solid var(--border);
+  font-size: 11.5px; color: var(--text-2);
+}
+.tag-accent { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+
+/* ---------------------------------------------------------------- карточки */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-xs);
+}
+.card + .card { margin-top: 12px; }
+.card-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 16px; border-bottom: 1px solid var(--border);
+}
+.card-head h2, .card-head h3 { font-size: var(--fz); font-weight: 600; }
+.card-head .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.card-body { padding: 16px; }
+.card-body + .card-body { border-top: 1px solid var(--border); }
+.card-foot {
+  padding: 11px 16px; border-top: 1px solid var(--border);
+  background: var(--surface-2); border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  display: flex; align-items: center; gap: 10px; font-size: var(--fz-sm); color: var(--text-2);
+}
+.card-flush { padding: 0; }
+.muted { color: var(--text-2); }
+.dim { color: var(--text-3); }
+.small { font-size: var(--fz-sm); }
+.xs { font-size: var(--fz-xs); }
+.strong { font-weight: 650; }
+.nowrap { white-space: nowrap; }
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.right { text-align: right; }
+.center { text-align: center; }
+.mt-0 { margin-top: 0; } .mt-8 { margin-top: 8px; } .mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: 16px; } .mt-20 { margin-top: 20px; } .mt-24 { margin-top: 24px; }
+.mb-0 { margin-bottom: 0; } .mb-8 { margin-bottom: 8px; } .mb-12 { margin-bottom: 12px; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+
+/* -------------------------------------------------------------- метрики */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 12px; }
+.stat {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 14px 16px; box-shadow: var(--shadow-xs);
+}
+.stat .k { font-size: var(--fz-sm); color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+.stat .k svg { width: 14px; height: 14px; color: var(--text-3); }
+.stat .v {
+  font-size: var(--fz-2xl); font-weight: 650; margin-top: 6px; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.stat .v small { font-size: var(--fz-md); font-weight: 550; color: var(--text-2); }
+.stat .d { font-size: var(--fz-xs); color: var(--text-3); margin-top: 3px; }
+.stat.is-accent { border-color: var(--accent-border); background: linear-gradient(180deg, var(--accent-soft), var(--surface) 70%); }
+.stat.is-ok .v { color: var(--ok); }
+.stat.is-warn .v { color: var(--warn); }
+.stat.is-err .v { color: var(--err); }
+.stat.is-link:hover { border-color: var(--accent-border); box-shadow: var(--shadow-sm); }
+
+/* --------------------------------------------------------------- таблицы */
+.table-wrap {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  overflow: hidden; box-shadow: var(--shadow-xs);
+}
+.table-scroll { overflow-x: auto; }
+table.data { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fz-sm); }
+table.data th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--surface-2); color: var(--text-2); font-weight: 600; font-size: var(--fz-xs);
+  text-transform: uppercase; letter-spacing: .07em;
+  text-align: left; padding: 9px var(--cell-x); border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+table.data td {
+  padding: var(--cell-y) var(--cell-x); border-bottom: 1px solid var(--border); vertical-align: middle;
+}
+table.data tbody tr:hover td { background: var(--surface-2); }
+table.data tbody tr:last-child td { border-bottom: 0; }
+table.data tr.is-selected td { background: var(--accent-soft); }
+table.data .num, table.data .right { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.data .id { color: var(--text-3); font-family: var(--mono); font-size: 12px; }
+table.data .actions { white-space: nowrap; text-align: right; }
+table.data th.check, table.data td.check { width: 36px; padding-right: 0; }
+table.data tr.row-danger td { background: var(--err-soft); }
+table.data tfoot td { background: var(--surface-2); font-weight: 600; border-top: 1px solid var(--border); }
+
+.who-cell { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.who-cell .avatar { width: 30px; height: 30px; font-size: 12px; flex: 0 0 30px; }
+.who-cell .nm { font-weight: 550; color: var(--text); display: block; }
+.who-cell .meta { color: var(--text-3); font-size: var(--fz-xs); font-family: var(--mono); }
+
+.trunc { display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.trunc-sm { max-width: 160px; }
+
+.checkbox { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
+
+/* ------------------------------------------------------- панель фильтров */
+.toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 10px 12px; box-shadow: var(--shadow-xs); margin-bottom: 12px;
+}
+.toolbar .grow { flex: 1 1 240px; min-width: 200px; }
+/* Поля в панели фильтров не растягиваются на всю строку: иначе они встают
+   друг под друга и «одна строка фильтров» превращается в семь. */
+.toolbar > *:not(.grow) { flex: 0 0 auto; width: auto; }
+.toolbar .sep { width: 1px; height: 22px; background: var(--border); }
+
+.segmented { display: inline-flex; background: var(--surface-3); border-radius: var(--radius); padding: 2px; gap: 2px; }
+.segmented a, .segmented button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: var(--radius-sm);
+  font-size: var(--fz-sm); font-weight: 550; color: var(--text-2); background: transparent; border: 0; cursor: pointer;
+}
+.segmented a:hover, .segmented button:hover { color: var(--text); text-decoration: none; }
+.segmented a.active, .segmented button.active {
+  background: var(--surface); color: var(--text); box-shadow: var(--shadow-xs);
+}
+.segmented .count { color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.tabs a {
+  padding: 9px 12px; font-size: var(--fz); font-weight: 550; color: var(--text-2);
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tabs a:hover { color: var(--text); text-decoration: none; }
+.tabs a.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* --------------------------------------------------------------- формы */
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field > label, .label { font-size: var(--fz-sm); font-weight: 550; color: var(--text-2); }
+.hint { font-size: var(--fz-xs); color: var(--text-3); }
+
+input[type=text], input[type=password], input[type=number], input[type=search],
+input[type=date], input[type=email], select, textarea, .input {
+  height: 36px; padding: 0 10px; border-radius: var(--radius); border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text); font: inherit; font-size: var(--fz); width: 100%;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+textarea { height: auto; min-height: 92px; padding: 9px 10px; resize: vertical; line-height: 1.5; }
+select { appearance: none; padding-right: 30px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2398a2b3' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 9px center;
+}
+input:hover, select:hover, textarea:hover { border-color: var(--text-3); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+input::placeholder, textarea::placeholder { color: var(--text-3); }
+input[type=number] { width: 92px; }
+input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
+input[type=file] { font-size: var(--fz-sm); }
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.form-grid .span-2 { grid-column: span 2; }
+@media (max-width: 700px) { .form-grid .span-2 { grid-column: span 1; } }
+
+.check-row { display: flex; align-items: center; gap: 8px; font-size: var(--fz-sm); color: var(--text-2); }
+.check-row label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+
+.inline-form { display: inline-flex; gap: 6px; align-items: center; }
+.row-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+/* -------------------------------------------------------------- плашки */
+.flash {
+  display: flex; align-items: flex-start; gap: 9px; padding: 10px 14px; border-radius: var(--radius);
+  font-size: var(--fz); border: 1px solid var(--border); background: var(--surface); margin-bottom: 12px;
+  box-shadow: var(--shadow-xs);
+}
+.flash svg { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 1px; }
+.flash.ok, .flash-ok { background: var(--ok-soft); border-color: var(--ok-border); color: var(--ok); }
+.flash.err, .flash-err { background: var(--err-soft); border-color: var(--err-border); color: var(--err); }
+.flash.warn { background: var(--warn-soft); border-color: var(--warn-border); color: var(--warn); }
+.flash.info { background: var(--info-soft); border-color: var(--info-border); color: var(--info); }
+.flash a { color: inherit; text-decoration: underline; }
+
+.empty {
+  text-align: center; padding: 40px 20px; color: var(--text-2);
+}
+.empty svg { width: 34px; height: 34px; color: var(--text-3); margin-bottom: 10px; }
+.empty .t { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+
+.note {
+  background: var(--warn-soft); border: 1px solid var(--warn-border); color: var(--warn);
+  border-radius: var(--radius); padding: 10px 13px; font-size: var(--fz-sm);
+}
+
+/* ------------------------------------------------------- массовые действия */
+.bulkbar {
+  position: sticky; bottom: 14px; z-index: 15; margin: 12px auto 0; max-width: 720px;
+  display: none; align-items: center; gap: 10px; padding: 9px 12px;
+  background: var(--text); color: var(--surface); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); font-size: var(--fz-sm);
+}
+.bulkbar.on { display: flex; }
+.bulkbar .count { font-weight: 650; }
+.bulkbar .spacer { flex: 1; }
+.bulkbar .btn { box-shadow: none; }
+body[data-theme] .bulkbar .btn { border-color: transparent; }
+.bulkbar .btn-light { background: rgba(255,255,255,.14); color: #fff; border-color: rgba(255,255,255,.2); }
+.bulkbar .btn-light:hover { background: rgba(255,255,255,.24); color: #fff; }
+
+/* ------------------------------------------------------------- пагинация */
+.pagination { display: flex; align-items: center; gap: 8px; padding: 11px 14px; font-size: var(--fz-sm); color: var(--text-2); }
+.pagination .pages { margin-left: auto; display: flex; gap: 3px; align-items: center; }
+.pagination .pages a, .pagination .pages span {
+  min-width: 30px; height: 30px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); border: 1px solid transparent; color: var(--text-2);
+}
+.pagination .pages a:hover { background: var(--surface-3); color: var(--text); text-decoration: none; }
+.pagination .pages .current { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.pagination .pages .gap { color: var(--text-3); }
+
+/* ---------------------------------------------------------------- таймлайн */
+.timeline { position: relative; margin: 0; padding: 4px 0 4px 22px; list-style: none; }
+.timeline::before { content: ""; position: absolute; left: 5px; top: 8px; bottom: 8px; width: 1px; background: var(--border); }
+.timeline li { position: relative; padding: 7px 0; font-size: var(--fz-sm); }
+.timeline li::before {
+  content: ""; position: absolute; left: -21px; top: 13px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--border-strong);
+}
+.timeline li.ok::before { border-color: var(--ok); background: var(--ok); }
+.timeline li.warn::before { border-color: var(--warn); background: var(--warn); }
+.timeline li.err::before { border-color: var(--err); background: var(--err); }
+.timeline li.accent::before { border-color: var(--accent); background: var(--accent); }
+.timeline .when { color: var(--text-3); font-family: var(--mono); font-size: 11.5px; }
+
+/* --------------------------------------------------------------- алерты */
+.alert-row { display: flex; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
+.alert-row:last-child { border-bottom: 0; }
+.alert-row .ico {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: 0 0 30px;
+  background: var(--surface-3); color: var(--text-2);
+}
+.alert-row .ico svg { width: 15px; height: 15px; }
+.alert-row.sev-err .ico { background: var(--err-soft); color: var(--err); }
+.alert-row.sev-warn .ico { background: var(--warn-soft); color: var(--warn); }
+.alert-row.sev-info .ico { background: var(--info-soft); color: var(--info); }
+.alert-row.sev-ok .ico { background: var(--ok-soft); color: var(--ok); }
+.alert-row .t { font-weight: 600; }
+.alert-row .m { color: var(--text-2); font-size: var(--fz-sm); margin-top: 2px; }
+.alert-row .when { color: var(--text-3); font-size: var(--fz-xs); white-space: nowrap; font-family: var(--mono); }
+.alert-row.is-resolved { opacity: .6; }
+
+/* ---------------------------------------------------------------- график */
+.chart { width: 100%; height: 168px; display: block; overflow: visible; }
+.chart .bar { fill: var(--accent); }
+.chart .bar-soft { fill: var(--accent-soft); }
+.chart .grid-line { stroke: var(--border); stroke-width: 1; }
+.chart .axis { fill: var(--text-3); font-size: 10px; font-family: var(--mono); }
+.legend { display: flex; gap: 14px; font-size: var(--fz-xs); color: var(--text-2); }
+.legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 5px; }
+
+/* ------------------------------------------------------------------ вход */
+.login-wrap {
+  min-height: 100vh; display: grid; place-items: center; padding: 24px;
+  background:
+    radial-gradient(1000px 420px at 50% -10%, var(--accent-soft), transparent 70%),
+    var(--bg);
+}
+.login-card { width: 100%; max-width: 392px; }
+.login-card .brand { border: 0; height: auto; padding: 0 0 18px; justify-content: center; font-size: var(--fz-lg); }
+.login-card .card-body { padding: 22px; }
+
+/* -------------------------------------------------------------- модалка */
+dialog.modal {
+  border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface);
+  color: var(--text); padding: 0; box-shadow: var(--shadow-lg); max-width: 460px; width: calc(100% - 32px);
+}
+dialog.modal::backdrop { background: rgba(15, 23, 42, .45); backdrop-filter: blur(1px); }
+dialog.modal .card-head { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+dialog.modal .modal-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--border); }
+
+/* ----------------------------------------------------------- детали/ключ */
+.kv { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 9px 14px; font-size: var(--fz-sm); }
+/* Узкая карточка (мастер-деталь): колонка подписей уже, иначе значению
+   не остаётся места и ссылка-подписка превращается в «sub/b…». */
+.kv-tight { grid-template-columns: 104px minmax(0, 1fr); gap: 7px 10px; }
+.kv dt { color: var(--text-2); }
+.kv dd { margin: 0; font-weight: 550; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .kv { grid-template-columns: 1fr; gap: 3px 0; } .kv dd { margin-bottom: 8px; } }
+
+.copy-chip {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 4px 6px 4px 9px; font-family: var(--mono); font-size: 12px; color: var(--text-2);
+}
+.copy-chip .v { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.copy-chip button {
+  border: 0; background: transparent; color: var(--text-3); cursor: pointer; padding: 2px; border-radius: 4px;
+  display: grid; place-items: center;
+}
+.copy-chip button:hover { color: var(--accent); background: var(--accent-soft); }
+.copy-chip svg { width: 14px; height: 14px; }
+
+.meter { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.meter > i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.meter.is-ok > i { background: var(--ok); }
+.meter.is-warn > i { background: var(--warn); }
+.meter.is-err > i { background: var(--err); }
+
+/* --------------------------------------------- широкий экран и плотность */
+/* Идея: на большом экране панель должна показывать больше данных, а не больше
+   воздуха. Ширина используется целиком, столбцы получают фиксированный бюджет,
+   а длинные значения (ссылки, имена) сокращаются с многоточием и живут
+   в подсказке — так таблица не уезжает в горизонтальный скролл. */
+
+/* Тройной режим плотности. Переключается кнопкой в шапке, выбор запоминается
+   в localStorage и применяется до первой отрисовки (см. base.html). */
+:root[data-density="compact"] { --cell-y: 6px; --cell-x: 12px; }
+:root[data-density="compact"] .who-cell .avatar { width: 26px; height: 26px; flex-basis: 26px; font-size: 11px; }
+:root[data-density="roomy"] { --cell-y: 14px; --cell-x: 18px; }
+
+/* Таблица с бюджетом столбцов. `col` здесь — не жёсткий закон, а приоритет:
+   на широком экране столбцы получают свои 268/266 px, а на узком сжимаются
+   до многоточия. Именно поэтому НЕ ставим table-layout: fixed — иначе на
+   1366 px фиксированные столбцы выдавливают «Клиента» в ноль. */
+table.data.fit th, table.data.fit td { overflow: hidden; }
+table.data.fit td .who-cell, table.data.fit td .copy-chip { max-width: 100%; }
+/* Ниже этого минимума сжимать нечего — честнее горизонтальный скролл.
+   Ограничение только для полноэкранных списков: у мини-таблиц внутри карточек
+   (дашборд) своя, гораздо меньшая ширина, и 880 px там ломали бы вёрстку. */
+.table-wrap table.data.fit { min-width: 880px; }
+.table-wrap table.data.fit.is-wide { min-width: 1020px; }
+
+/* Липкие первые столбцы: при горизонтальной прокрутке видно, о ком строка.
+   `stick-1` — самый левый (ID или чекбокс), `stick-2` — следующий за ним
+   (Клиент/Заказ); смещение второго — ширина первого. */
+table.data.stick-first th.stick-1, table.data.stick-first td.stick-1 {
+  position: sticky; left: 0; z-index: 1; background: var(--surface);
+}
+table.data.stick-first th.stick-2, table.data.stick-first td.stick-2 {
+  position: sticky; left: var(--stick-1-w, 54px); z-index: 1; background: var(--surface);
+}
+table.data.stick-first th.stick-1, table.data.stick-first th.stick-2 {
+  z-index: 3; background: var(--surface-2);
+}
+table.data.stick-first tbody tr:hover td.stick-1,
+table.data.stick-first tbody tr:hover td.stick-2 { background: var(--surface-2); }
+table.data.stick-first tr.is-selected td.stick-1,
+table.data.stick-first tr.is-selected td.stick-2 { background: var(--accent-soft); }
+
+/* Настраиваемые столбцы: список скрытых ключей лежит в data-cols-hidden,
+   выбор хранит localStorage (кнопка «Столбцы» в шапке страницы). */
+table.data[data-cols-hidden~="tags"] [data-col="tags"],
+table.data[data-cols-hidden~="status"] [data-col="status"],
+table.data[data-cols-hidden~="expires"] [data-col="expires"],
+table.data[data-cols-hidden~="days"] [data-col="days"],
+table.data[data-cols-hidden~="orders"] [data-col="orders"],
+table.data[data-cols-hidden~="link"] [data-col="link"],
+table.data[data-cols-hidden~="plan"] [data-col="plan"],
+table.data[data-cols-hidden~="sum"] [data-col="sum"],
+table.data[data-cols-hidden~="provider"] [data-col="provider"],
+table.data[data-cols-hidden~="created"] [data-col="created"],
+table.data[data-cols-hidden~="paid"] [data-col="paid"] { display: none !important; }
+
+/* ------------------------------------------- мастер-деталь (список + карточка) */
+/* Клиент открывается сбоку, список остаётся на месте: не нужно возвращаться
+   «назад» после каждого просмотра. ВАЖНО: колонку под карточку резервируем
+   только когда карточка действительно есть (`has-card`), иначе grid держит
+   392 px пустыми и список выглядит обрезанным. */
+.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+.split.has-card { grid-template-columns: minmax(0, 1fr) 392px; }
+.split-main { min-width: 0; }
+.side-card { position: sticky; top: calc(var(--topbar-h) + 12px); max-height: calc(100vh - var(--topbar-h) - 30px); overflow-y: auto; }
+.side-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 2px; }
+.side-title {
+  margin: 16px 0 6px; font-size: var(--fz-xs); font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.side-notes { display: flex; flex-direction: column; gap: 8px; }
+.side-note { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; }
+.side-note-form { margin-top: 8px; }
+.side-note-form input { flex: 1 1 auto; min-width: 0; }
+.side-list { display: flex; flex-direction: column; }
+.side-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid var(--border); font-size: var(--fz-sm);
+}
+.side-row:last-child { border-bottom: 0; }
+.side-row .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* На ноутбуке 13–15″ карточка сбоку отнимала бы у таблицы слишком много:
+   ниже 1820 px она встаёт сверху во всю ширину, список остаётся целым. */
+@media (max-width: 1820px) {
+  .split.has-card { grid-template-columns: minmax(0, 1fr); }
+  .side-card { position: static; max-height: none; order: -1; }
+}
+
+/* Карточка открыта — списку достаётся меньше ширины. Форму «+ дни» из строки
+   убираем: те же кнопки есть в карточке, а столбец «Действия» перестаёт
+   выдавливать таблицу в скролл. Ссылку ужимаем: полный адрес в подсказке. */
+.split .quick-grant { display: none; }
+.split th.c-link { width: 216px; }
+@media (max-width: 1620px) { .split th.c-link { width: 150px; } }
+
+/* ------------------------------------------------------------- тосты */
+/* Результат действия без перезагрузки: плашка в углу, список обновляется
+   на месте (см. admin.js). Ошибки живут дольше успехов. */
+.toasts {
+  position: fixed; right: 18px; bottom: 18px; z-index: 80;
+  display: flex; flex-direction: column; gap: 8px;
+  max-width: min(430px, calc(100% - 36px));
+}
+.toast {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 10px 12px;
+  font-size: var(--fz-sm); color: var(--text); animation: toast-in .18s ease;
+}
+.toast.ok { border-left-color: var(--ok); }
+.toast.err { border-left-color: var(--err); }
+.toast svg { flex: 0 0 auto; margin-top: 1px; }
+.toast.ok svg { color: var(--ok); }
+.toast.err svg { color: var(--err); }
+.toast .grow { min-width: 0; }
+.toast button { margin-left: auto; color: var(--text-3); font-size: 16px; line-height: 1; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
+/* ------------------------------------------------ командная палитра ⌘K */
+/* Одно поле вместо хождения по меню: разделы, клиенты и заказы в одном списке.
+   Разметка живёт в base.html, данные ищет /admin/search. */
+.cmdk { position: fixed; inset: 0; z-index: 70; display: none; }
+.cmdk.open { display: block; }
+.cmdk-back { position: absolute; inset: 0; background: rgba(15, 23, 42, .45); }
+.cmdk-panel {
+  position: relative; margin: 10vh auto 0; width: min(580px, calc(100% - 32px));
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.cmdk-panel input {
+  width: 100%; border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+  padding: 15px 18px; font-size: var(--fz-md); background: transparent; color: var(--text);
+}
+.cmdk-panel input:focus { outline: none; }
+.cmdk-list { max-height: 54vh; overflow-y: auto; padding: 6px; }
+.cmdk-group {
+  padding: 8px 10px 4px; font-size: var(--fz-xs); font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.cmdk-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+  border-radius: var(--radius); cursor: pointer; color: var(--text);
+}
+.cmdk-item:hover, .cmdk-item.active { background: var(--accent-soft); color: var(--accent); }
+.cmdk-item .grow { min-width: 0; flex: 1 1 auto; }
+.cmdk-item .t { display: block; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item .s { display: block; font-size: var(--fz-xs); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item.active .s { color: var(--accent); opacity: .8; }
+.cmdk-item svg { color: var(--text-3); }
+.cmdk-item.active svg, .cmdk-item:hover svg { color: var(--accent); }
+.cmdk-empty { padding: 18px 14px; color: var(--text-3); font-size: var(--fz-sm); }
+.cmdk-foot {
+  display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border);
+  font-size: var(--fz-xs); color: var(--text-3);
+}
+.cmdk-foot kbd { padding: 0 5px; }
+.topbar .cmdk-hint { font-size: var(--fz-xs); color: var(--text-3); }
+@media (max-width: 1240px) { .topbar .cmdk-hint { display: none; } }
+
+/* Меню столбцов в шапке страницы */
+.colmenu { position: relative; }.colmenu > summary {
+  list-style: none; cursor: pointer; user-select: none;
+}
+.colmenu > summary::-webkit-details-marker { display: none; }
+.colmenu[open] > summary { border-color: var(--accent-border); color: var(--accent); }
+.colmenu-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 208px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg); padding: 8px;
+}
+.colmenu-pop label {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border-radius: var(--radius-sm); font-size: var(--fz-sm); color: var(--text-2); cursor: pointer;
+}
+.colmenu-pop label:hover { background: var(--surface-3); color: var(--text); }
+.colmenu-pop .hint { padding: 2px 8px 6px; }
+
+/* Бюджет столбцов. Ровно один столбец без ширины (Клиент) забирает остаток —
+   он и должен тянуться, потому что там имя и Telegram-ник. */
+th.c-id { width: 54px; }
+th.c-check { width: 36px; }
+th.c-tags { width: 148px; }
+th.c-status { width: 120px; }
+th.c-date { width: 132px; }
+th.c-days { width: 104px; }
+th.c-num { width: 84px; }
+th.c-link { width: 268px; min-width: 120px; }
+th.c-actions { width: 266px; }
+th.c-plan { width: 148px; }
+th.c-sum { width: 118px; }
+th.c-provider { width: 168px; }
+
+/* Бюджет столбцов на ноутбуках: на 15″ (и тем более 13″) те же столбцы
+   должны ужиматься, а не уезжать за край. Ключевое — «Клиент» иначе не
+   помещается, поэтому первыми сжимаются ссылка, метки и действия. */
+@media (max-width: 1620px) {
+  th.c-link { width: 208px; }
+  th.c-actions { width: 244px; }
+  th.c-tags { width: 124px; }
+  th.c-provider { width: 140px; }
+  th.c-plan { width: 132px; }
+}
+@media (max-width: 1500px) {
+  th.c-link { width: 148px; min-width: 88px; }
+  th.c-actions { width: 228px; }
+  th.c-tags { width: 104px; }
+  th.c-date { width: 118px; }
+  th.c-days { width: 88px; }
+  th.c-num { width: 68px; }
+  th.c-status { width: 106px; }
+  th.c-provider { width: 124px; }
+  th.c-plan { width: 132px; }
+  /* Быстрая выдача дней из списка — удобство широкого экрана. На 13–14″
+     её место занимает «Клиент»: та же операция есть в карточке клиента. */
+  table.data.fit .quick-grant { display: none; }
+  /* Второстепенные столбцы заказов уходят, чтобы очередь не уезжала в скролл. */
+  .hide-md { display: none !important; }
+}
+
+/* 13–14″: последнее, что уходит, — метки клиента. Они есть в карточке и в
+   фильтре «Все метки», а «Клиент» и «Действия» нужны в каждой строке. */
+@media (max-width: 1400px) {
+  .hide-sm { display: none !important; }
+}
+
+/* Имя и ник в одну строку с многоточием: раньше «Мария Зайцева» ломалась
+   на три строки и строка таблицы вырастала вдвое. */
+.who-cell .nm, .who-cell .meta {
+  display: block; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.who-cell > span:last-child { min-width: 0; flex: 1 1 auto; }
+
+/* Ссылка-подписка: короткая подпись + открыть + скопировать. Копирование
+   по-прежнему кладёт в буфер полный адрес — он же в подсказке. */
+.copy-chip.is-flex { display: flex; width: 100%; }
+.copy-chip .icon-btn, .copy-chip button { flex: 0 0 auto; }
+.icon-btn {
+  display: grid; place-items: center; padding: 2px; border-radius: var(--radius-xs);
+  color: var(--text-3); background: transparent; border: 0; cursor: pointer;
+}
+.icon-btn:hover { color: var(--accent); background: var(--accent-soft); }
+.icon-btn svg { width: 14px; height: 14px; }
+
+.input-days { width: 56px; }
+
+/* В ячейках с выравниванием вправо (`right`) запрещён перенос строк. Для
+   подписи-пояснения под суммой это лишнее: она распирала столбец. */
+.wrap, .right .wrap { white-space: normal; }
+
+/* Container query для карточки «Заявки на оплату»: её ширина зависит от сетки
+   дашборда, а не от окна, поэтому обычные media queries тут не работают.
+   Узкая карточка убирает «Тариф» — он есть в очереди заказов. */
+.card.mini-pending { container-type: inline-size; }
+@container (max-width: 620px) {
+  .mini-pending .hide-narrow { display: none !important; }
+}
+
+/* Заблокированный клиент помечен и строкой: на 13″ колонка меток (где стоит
+   бейдж) скрыта, а состояние должно читаться всегда. */
+table.data tr.row-blocked > td:first-child { box-shadow: inset 3px 0 0 var(--err); }
+
+/* В таблице с фиксированными столбцами действия обязаны укладываться в одну
+   строку: перенос кнопок удваивал высоту строки (93 px вместо 54). */
+table.data.fit .row-actions { flex-wrap: nowrap; }
+table.data.fit .row-actions .btn { white-space: nowrap; }
+
+/* Свёрнутый сайдбар: освобождает ~180 px под данные. Иконки остаются,
+   подписи уходят в подсказки (title), состояние помнит localStorage и
+   применяется атрибутом на <html> до первой отрисовки — без мигания. */
+:root[data-nav="min"] .sidebar { width: var(--sidebar-min); flex-basis: var(--sidebar-min); }
+:root[data-nav="min"] .brand { justify-content: center; padding: 0; }
+:root[data-nav="min"] .brand > span:not(.brand-mark) { display: none; }
+:root[data-nav="min"] .nav { padding: 12px 8px 20px; }
+:root[data-nav="min"] .nav-title { display: none; }
+:root[data-nav="min"] .nav-group + .nav-group { margin-top: 10px; }
+:root[data-nav="min"] .nav a { justify-content: center; padding: 10px 0; position: relative; }
+:root[data-nav="min"] .nav a > span:not(.count) { display: none; }
+:root[data-nav="min"] .nav a .count {
+  position: absolute; top: 1px; right: 7px; margin: 0; padding: 0 4px;
+  min-width: 16px; font-size: 10px; line-height: 16px;
+}
+:root[data-nav="min"] .sidebar-foot { padding: 10px 8px; }
+:root[data-nav="min"] .sidebar-foot .who { flex-direction: column; gap: 6px; }
+:root[data-nav="min"] .sidebar-foot .who > span:not(.avatar) { display: none; }
+:root[data-nav="min"] .sidebar-foot .btn { margin-left: 0 !important; }
+
+/* Кнопки-переключатели в шапке */
+.topbar .tools { display: flex; align-items: center; gap: 4px; }
+.density-toggle span { font-size: var(--fz-xs); font-weight: 550; }
+@media (max-width: 1240px) { .density-toggle span { display: none; } }
+
+/* На широком экране сетки не должны рассыпаться в десяток узких колонок:
+   панели дашборда — 2–3 в ряд, плитки метрик — 6 в ряд. */
+@media (min-width: 1500px) {
+  .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stats { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+/* ------------------------------------------------------------- адаптив */
+.sidebar-toggle { display: none; }
+@media (max-width: 1080px) {
+  .sidebar {
+    position: fixed; z-index: 40; left: 0; top: 0; height: 100%;
+    transform: translateX(-100%); transition: transform .18s ease; box-shadow: var(--shadow-lg);
+  }
+  body.nav-open .sidebar { transform: none; }
+  body.nav-open::after {
+    content: ""; position: fixed; inset: 0; background: rgba(15, 23, 42, .4); z-index: 30;
+  }
+  .sidebar-toggle { display: inline-flex; }
+  .content { padding: 16px 14px 64px; }
+  .topbar { padding: 0 14px; gap: 8px; }
+  .search { max-width: none; }
+  .kv { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat .v { font-size: var(--fz-xl); }
+  .page-head .actions { margin-left: 0; width: 100%; }
+  .topbar .crumbs .sub { display: none; }
+  .who .nm { display: none; }
+}
+
+@media print {
+  .sidebar, .topbar, .bulkbar, .toolbar, .page-head .actions { display: none !important; }
+  .content { padding: 0; max-width: none; }
+  .card, .table-wrap { box-shadow: none; }
+}
+
+/* ---------------------------------------------------- совместимость старых */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 12px; }
+.card .k { font-size: var(--fz-sm); color: var(--text-2); }
+.card .v { font-size: var(--fz-2xl); font-weight: 650; margin-top: 6px; font-variant-numeric: tabular-nums; }
+form.inline { display: inline-flex; gap: 6px; align-items: center; }
+.login { max-width: 392px; margin: 10vh auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+
+</style>
+<style>
+/* только для статичного снимка */
+.sidebar{position:static!important;height:auto!important}
+.topbar{position:static!important}
+table.data th{position:static!important}
+.bulkbar{position:static!important}
+</style>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232563eb'/><path d='M9 21l7-12 7 12' stroke='white' stroke-width='2.4' fill='none' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+
+<a class="skip-link" href="#main">К содержимому</a>
+<div class="app">
+
+  
+  
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-mark">K</span>
+      <span>Kometa<small>админ-панель</small></span>
+    </div>
+
+    <nav class="nav" aria-label="Разделы">
+      
+
+      <div class="nav-group">
+        <a href="/admin" class="" title="Дашборд"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>Дашборд</span>
+        
+      </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Операции</div>
+        
+        <a href="/admin/orders" class="" title="Очередь заказов"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M3 12h4l2 3h6l2-3h4"/><path d="M5 5h14l2 7v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/></svg><span>Очередь заказов</span>
+        <span class="count">4</span>
+      </a>
+        
+        <a href="/admin/users" class="active" title="Пользователи"
+         aria-current=page>
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1"/><circle cx="9.5" cy="7" r="3.2"/><path d="M21 19v-1a4 4 0 0 0-3-3.87"/><path d="M16.5 4.2a3.2 3.2 0 0 1 0 6"/></svg><span>Пользователи</span>
+        
+      </a>
+        <a href="/admin/downtime" class="" title="Компенсация простоя"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg><span>Компенсация простоя</span>
+        
+      </a>
+        <a href="/admin/refunds" class="" title="Возвраты"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v8"/><path d="M9.5 10.5h5"/><path d="M9.5 13.5h5"/></svg><span>Возвраты</span>
+        
+      </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Деньги</div>
+        <a href="/admin/finance" class="" title="Финансы и отчёты"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M4 20V4"/><path d="M4 20h16"/><rect x="7" y="12" width="3" height="5" rx="1"/><rect x="12" y="8" width="3" height="9" rx="1"/><rect x="17" y="5" width="3" height="12" rx="1"/></svg><span>Финансы и отчёты</span>
+        
+      </a>
+        <a href="/admin/plans" class="" title="Тарифы"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 12V4a1 1 0 0 1 1-1h8a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.6z"/><circle cx="7.5" cy="7.5" r="1.4"/></svg><span>Тарифы</span>
+        
+      </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Инфраструктура</div>
+        <a href="/admin/nodes" class="" title="Ноды"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01"/></svg><span>Ноды</span>
+        
+      </a>
+        
+        <a href="/admin/alerts" class="" title="Алерты"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><span>Алерты</span>
+        <span class="count">3</span>
+      </a>
+        
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Рост</div>
+        <a href="/admin/referrals" class="" title="Рефералы и промокоды"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M3 12h18"/><path d="M12 8v13"/><path d="M12 8S10.5 3 8 3a2.5 2.5 0 0 0 0 5z"/><path d="M12 8s1.5-5 4-5a2.5 2.5 0 0 1 0 5z"/></svg><span>Рефералы и промокоды</span>
+        
+      </a>
+        <a href="/admin/broadcast" class="" title="Рассылки"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M4 10v4a1 1 0 0 0 1 1h2l7 4V5L7 9H5a1 1 0 0 0-1 1z"/><path d="M17 9a4 4 0 0 1 0 6"/><path d="M19.5 6.5a7.5 7.5 0 0 1 0 11"/></svg><span>Рассылки</span>
+        
+      </a>
+      </div>
+      
+      <div class="nav-group">
+        <div class="nav-title">Система</div>
+        <a href="/admin/audit" class="" title="Журнал действий"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v5h5"/><path d="M12 8v4.5l3 1.8"/></svg><span>Журнал действий</span>
+        
+      </a>
+        <a href="/admin/team" class="" title="Команда и роли"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M12 3l7.5 3v6c0 4.4-3 8.2-7.5 9.5C7.5 20.2 4.5 16.4 4.5 12V6z"/><path d="M9.5 12.2l1.8 1.8 3.4-3.6"/></svg><span>Команда и роли</span>
+        
+      </a>
+      </div>
+      
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="who">
+        <span class="avatar">В</span>
+        <span style="min-width:0">
+          <span class="nm strong" style="display:block;overflow:hidden;text-overflow:ellipsis">владелец</span>
+          <span class="xs dim">Владелец</span>
+        </span>
+        <a class="btn btn-ghost btn-icon btn-sm" href="/admin/logout" style="margin-left:auto"
+           title="Выйти" aria-label="Выйти"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 12H3"/><path d="M7 8l-4 4 4 4"/></svg></a>
+      </div>
+    </div>
+  </aside>
+  
+
+  <div class="main">
+    
+    <header class="topbar">
+      <button class="btn btn-ghost btn-icon sidebar-toggle" data-nav-toggle type="button" aria-label="Меню"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div class="crumbs">
+        <span class="dim">Kometa</span>
+        <span class="dim">/</span>
+        <b>Пользователи</b>
+      </div>
+      <div class="spacer"></div>
+      
+      <div class="tools">
+        <button class="btn btn-ghost btn-sm" data-cmdk-open type="button"
+                title="Быстрый переход: клиент, заказ или раздел (⌘K)" aria-label="Быстрый переход">
+          <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg><span class="cmdk-hint">⌘K</span>
+        </button>
+        <button class="btn btn-ghost btn-sm density-toggle" data-density-toggle type="button"
+                title="Плотность таблиц: обычная / компактная" aria-label="Плотность таблиц">
+          <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M4 6h16M4 12h16M4 18h16"/><path d="M4 6v12"/></svg><span data-density-label>Обычно</span>
+        </button>
+        <button class="btn btn-ghost btn-icon" data-nav-min type="button"
+                title="Свернуть меню" aria-label="Свернуть меню"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+        <button class="btn btn-ghost btn-icon" data-theme-toggle type="button" aria-label="Тема">
+          <span data-theme-icon>☾</span>
+        </button>
+      </div>
+    </header>
+    
+
+    <main class="content" id="main">
+      
+      
+      
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Пользователи</h1>
+    <div class="sub">
+      Клиентов всего: 8 · платных: 8
+      · на пробном: 0
+    </div>
+  </div>
+  <div class="actions">
+    <details class="colmenu" data-colmenu data-table="users">
+      <summary class="btn btn-ghost btn-sm"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg> Столбцы</summary>
+      <div class="colmenu-pop">
+        <div class="hint xs dim">Что показывать в списке</div>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="tags"> Метки</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="status"> Статус</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="expires"> Действует до</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="days"> Осталось дней</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="orders"> Оплат</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="link"> Ссылка-подписка</label>
+      </div>
+    </details>
+    
+    <a class="btn btn-ghost" href="/admin/export/users.csv?"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M12 3v12"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 20h16"/></svg> CSV</a>
+    
+  </div>
+</div>
+
+<div class="segmented mb-12">
+  
+  <a href="/admin/users?status=all&amp;page=1"
+     class="active">
+    Все<span class="count">8</span>
+  </a>
+  
+  <a href="/admin/users?status=trial&amp;page=1"
+     class="">
+    Пробные
+  </a>
+  
+  <a href="/admin/users?status=active&amp;page=1"
+     class="">
+    Активные
+  </a>
+  
+  <a href="/admin/users?status=expired&amp;page=1"
+     class="">
+    Истёкшие
+  </a>
+  
+  <a href="/admin/users?status=blocked&amp;page=1"
+     class="">
+    Заблокированные<span class="count">0</span>
+  </a>
+  
+  <a href="/admin/users?status=none&amp;page=1"
+     class="">
+    Без подписки
+  </a>
+  
+</div>
+
+<form class="toolbar" method="get" action="/admin/users">
+  <input type="hidden" name="status" value="all">
+  <div class="grow">
+    <label class="visually-hidden" for="q">Поиск клиента</label>
+    <input type="search" id="q" name="q" value=""
+           placeholder="Поиск: имя, @username, tg_id или номер клиента">
+  </div>
+  <select name="tag" aria-label="Метка">
+    <option value="">Все метки</option>
+    
+    <option value="vip" >vip</option>
+    
+    <option value="конфликт" >конфликт</option>
+    
+    <option value="шеринг" >шеринг</option>
+    
+  </select>
+  <select name="sort" aria-label="Сортировка">
+    <option value="new" selected>Новые сверху</option>
+    <option value="old" >Старые сверху</option>
+    <option value="expires" >Скоро истекают</option>
+  </select>
+  <select name="per_page" aria-label="Строк на странице">
+    
+    <option value="25" >25 строк</option>
+    
+    <option value="50" selected>50 строк</option>
+    
+    <option value="100" >100 строк</option>
+    
+    <option value="200" >200 строк</option>
+    
+  </select>
+  <button class="btn btn-primary" type="submit"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg> Найти</button>
+  
+</form>
+
+
+
+<div class="split has-card">
+<div class="split-main">
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="data fit stick-first" data-table="users">
+      
+      <thead>
+        <tr>
+          <th class="c-id stick-1">ID</th><th class="stick-2">Клиент</th><th class="c-tags hide-sm" data-col="tags">Метки</th>
+          <th class="c-status" data-col="status">Статус</th><th class="c-date" data-col="expires">Действует до</th>
+          <th class="right c-days" data-col="days">Осталось</th><th class="right c-num" data-col="orders">Оплат</th>
+          <th class="c-link" data-col="link">Ссылка-подписка</th><th class="actions c-actions">Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=8"
+            data-search="8 Мария Зайцева mzaytseva 333222111 vip">
+          <td class="id stick-1">8</td>
+          <td class="stick-2">
+            <div class="who-cell">
+              <span class="avatar">МЗ</span>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=8" title="Мария Зайцева · открыть карточку сбоку">Мария Зайцева</a>
+                <span class="meta">333222111 · @mzaytseva</span>
+              </span>
+            </div>
+          </td>
+          <td class="hide-sm" data-col="tags">
+            <span class="tag">vip</span> 
+            
+            
+          </td>
+          <td data-col="status">
+            
+              
+              <span class="badge badge-ok">Активна</span>
+            
+          </td>
+          <td class="small dim nowrap" data-col="expires">08.10.2031 14:14</td>
+          <td class="right" data-col="days">
+            
+              <b class="">1826</b>
+              <div class="xs dim">1826 дней</div>
+            
+          </td>
+          <td class="right" data-col="orders">5</td>
+          <td data-col="link">
+            
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/4SV3jiDU4ims1JbWkYMgeByNE4BIFsBH">
+              <span class="v">sub/4SV3jiDU…FsBH</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/4SV3jiDU4ims1JbWkYMgeByNE4BIFsBH" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/4SV3jiDU4ims1JbWkYMgeByNE4BIFsBH" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
+            </span>
+            
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <a class="btn btn-sm" href="/admin/users/8">Карточка</a>
+              
+              <form method="post" action="/admin/users/8/grant" class="inline-form quick-grant"
+                    title="Начислить дни без оплаты">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
+                <button class="btn btn-sm" type="submit">+ дни</button>
+              </form>
+              
+            </div>
+          </td>
+        </tr>
+        
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=7"
+            data-search="7 Пётр Лебедев petr 661029384 ">
+          <td class="id stick-1">7</td>
+          <td class="stick-2">
+            <div class="who-cell">
+              <span class="avatar">ПЛ</span>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=7" title="Пётр Лебедев · открыть карточку сбоку">Пётр Лебедев</a>
+                <span class="meta">661029384 · @petr</span>
+              </span>
+            </div>
+          </td>
+          <td class="hide-sm" data-col="tags">
+            
+            
+            
+          </td>
+          <td data-col="status">
+            
+              
+              <span class="badge badge-ok">Активна</span>
+            
+          </td>
+          <td class="small dim nowrap" data-col="expires">30.09.2028 14:14</td>
+          <td class="right" data-col="days">
+            
+              <b class="">723</b>
+              <div class="xs dim">723 дня</div>
+            
+          </td>
+          <td class="right" data-col="orders">4</td>
+          <td data-col="link">
+            
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/B3dqCgQoguXMC1WUB7XFfLnz30fvrXPg">
+              <span class="v">sub/B3dqCgQo…rXPg</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/B3dqCgQoguXMC1WUB7XFfLnz30fvrXPg" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/B3dqCgQoguXMC1WUB7XFfLnz30fvrXPg" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
+            </span>
+            
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <a class="btn btn-sm" href="/admin/users/7">Карточка</a>
+              
+              <form method="post" action="/admin/users/7/grant" class="inline-form quick-grant"
+                    title="Начислить дни без оплаты">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
+                <button class="btn btn-sm" type="submit">+ дни</button>
+              </form>
+              
+            </div>
+          </td>
+        </tr>
+        
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=6"
+            data-search="6 Сергей Волков svolkov 745213098 ">
+          <td class="id stick-1">6</td>
+          <td class="stick-2">
+            <div class="who-cell">
+              <span class="avatar">СВ</span>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=6" title="Сергей Волков · открыть карточку сбоку">Сергей Волков</a>
+                <span class="meta">745213098 · @svolkov</span>
+              </span>
+            </div>
+          </td>
+          <td class="hide-sm" data-col="tags">
+            
+            
+            
+          </td>
+          <td data-col="status">
+            
+              
+              <span class="badge badge-ok">Активна</span>
+            
+          </td>
+          <td class="small dim nowrap" data-col="expires">02.04.2028 14:14</td>
+          <td class="right" data-col="days">
+            
+              <b class="">542</b>
+              <div class="xs dim">542 дня</div>
+            
+          </td>
+          <td class="right" data-col="orders">6</td>
+          <td data-col="link">
+            
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/w1FU24mTOA2C43cmcuI3EWXZxF2f-bUz">
+              <span class="v">sub/w1FU24mT…-bUz</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/w1FU24mTOA2C43cmcuI3EWXZxF2f-bUz" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/w1FU24mTOA2C43cmcuI3EWXZxF2f-bUz" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
+            </span>
+            
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <a class="btn btn-sm" href="/admin/users/6">Карточка</a>
+              
+              <form method="post" action="/admin/users/6/grant" class="inline-form quick-grant"
+                    title="Начислить дни без оплаты">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
+                <button class="btn btn-sm" type="submit">+ дни</button>
+              </form>
+              
+            </div>
+          </td>
+        </tr>
+        
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=5"
+            data-search="5 Ольга Смирнова olga_s 128374651 конфликт">
+          <td class="id stick-1">5</td>
+          <td class="stick-2">
+            <div class="who-cell">
+              <span class="avatar">ОС</span>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=5" title="Ольга Смирнова · открыть карточку сбоку">Ольга Смирнова</a>
+                <span class="meta">128374651 · @olga_s</span>
+              </span>
+            </div>
+          </td>
+          <td class="hide-sm" data-col="tags">
+            <span class="tag">конфликт</span> 
+            
+            
+          </td>
+          <td data-col="status">
+            
+              
+              <span class="badge badge-ok">Активна</span>
+            
+          </td>
+          <td class="small dim nowrap" data-col="expires">04.10.2027 14:14</td>
+          <td class="right" data-col="days">
+            
+              <b class="">361</b>
+              <div class="xs dim">361 день</div>
+            
+          </td>
+          <td class="right" data-col="orders">6</td>
+          <td data-col="link">
+            
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/fjfgDGYkWBu9kpOVC8wHcwRj0BZNoeBd">
+              <span class="v">sub/fjfgDGYk…oeBd</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/fjfgDGYkWBu9kpOVC8wHcwRj0BZNoeBd" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/fjfgDGYkWBu9kpOVC8wHcwRj0BZNoeBd" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
+            </span>
+            
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <a class="btn btn-sm" href="/admin/users/5">Карточка</a>
+              
+              <form method="post" action="/admin/users/5/grant" class="inline-form quick-grant"
+                    title="Начислить дни без оплаты">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
+                <button class="btn btn-sm" type="submit">+ дни</button>
+              </form>
+              
+            </div>
+          </td>
+        </tr>
+        
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=4"
+            data-search="4 Максим Орлов  900112233 шеринг">
+          <td class="id stick-1">4</td>
+          <td class="stick-2">
+            <div class="who-cell">
+              <span class="avatar">МО</span>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=4" title="Максим Орлов · открыть карточку сбоку">Максим Орлов</a>
+                <span class="meta">900112233</span>
+              </span>
+            </div>
+          </td>
+          <td class="hide-sm" data-col="tags">
+            <span class="tag">шеринг</span> 
+            
+            
+          </td>
+          <td data-col="status">
+            
+              
+              <span class="badge badge-ok">Активна</span>
+            
+          </td>
+          <td class="small dim nowrap" data-col="expires">06.10.2032 14:14</td>
+          <td class="right" data-col="days">
+            
+              <b class="">2190</b>
+              <div class="xs dim">2190 дней</div>
+            
+          </td>
+          <td class="right" data-col="orders">6</td>
+          <td data-col="link">
+            
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/FWCK8erafRr8U67nltnuJXPG9WyBewLL">
+              <span class="v">sub/FWCK8era…ewLL</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/FWCK8erafRr8U67nltnuJXPG9WyBewLL" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/FWCK8erafRr8U67nltnuJXPG9WyBewLL" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
+            </span>
+            
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <a class="btn btn-sm" href="/admin/users/4">Карточка</a>
+              
+              <form method="post" action="/admin/users/4/grant" class="inline-form quick-grant"
+                    title="Начислить дни без оплаты">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
+                <button class="btn btn-sm" type="submit">+ дни</button>
+              </form>
+              
+            </div>
+          </td>
+        </tr>
+        
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=3"
+            data-search="3 Ирина Петрова irina.p 552341987 ">
+          <td class="id stick-1">3</td>
+          <td class="stick-2">
+            <div class="who-cell">
+              <span class="avatar">ИП</span>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=3" title="Ирина Петрова · открыть карточку сбоку">Ирина Петрова</a>
+                <span class="meta">552341987 · @irina.p</span>
+              </span>
+            </div>
+          </td>
+          <td class="hide-sm" data-col="tags">
+            
+            
+            
+          </td>
+          <td data-col="status">
+            
+              
+              <span class="badge badge-ok">Активна</span>
+            
+          </td>
+          <td class="small dim nowrap" data-col="expires">24.09.2029 14:14</td>
+          <td class="right" data-col="days">
+            
+              <b class="">1082</b>
+              <div class="xs dim">1082 дня</div>
+            
+          </td>
+          <td class="right" data-col="orders">6</td>
+          <td data-col="link">
+            
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/6B6jr5RozQfmuRH9vidQ5GZiL2_1XNig">
+              <span class="v">sub/6B6jr5Ro…XNig</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/6B6jr5RozQfmuRH9vidQ5GZiL2_1XNig" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/6B6jr5RozQfmuRH9vidQ5GZiL2_1XNig" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
+            </span>
+            
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <a class="btn btn-sm" href="/admin/users/3">Карточка</a>
+              
+              <form method="post" action="/admin/users/3/grant" class="inline-form quick-grant"
+                    title="Начислить дни без оплаты">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
+                <button class="btn btn-sm" type="submit">+ дни</button>
+              </form>
+              
+            </div>
+          </td>
+        </tr>
+        
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=2"
+            data-search="2 Дмитрий Соколов dsokolov 811223344 ">
+          <td class="id stick-1">2</td>
+          <td class="stick-2">
+            <div class="who-cell">
+              <span class="avatar">ДС</span>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=2" title="Дмитрий Соколов · открыть карточку сбоку">Дмитрий Соколов</a>
+                <span class="meta">811223344 · @dsokolov</span>
+              </span>
+            </div>
+          </td>
+          <td class="hide-sm" data-col="tags">
+            
+            
+            
+          </td>
+          <td data-col="status">
+            
+              
+              <span class="badge badge-ok">Активна</span>
+            
+          </td>
+          <td class="small dim nowrap" data-col="expires">05.01.2028 14:14</td>
+          <td class="right" data-col="days">
+            
+              <b class="">454</b>
+              <div class="xs dim">454 дня</div>
+            
+          </td>
+          <td class="right" data-col="orders">5</td>
+          <td data-col="link">
+            
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/OQL89b9y6qO_r6myWnubuKFGh39VhIst">
+              <span class="v">sub/OQL89b9y…hIst</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/OQL89b9y6qO_r6myWnubuKFGh39VhIst" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/OQL89b9y6qO_r6myWnubuKFGh39VhIst" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
+            </span>
+            
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <a class="btn btn-sm" href="/admin/users/2">Карточка</a>
+              
+              <form method="post" action="/admin/users/2/grant" class="inline-form quick-grant"
+                    title="Начислить дни без оплаты">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
+                <button class="btn btn-sm" type="submit">+ дни</button>
+              </form>
+              
+            </div>
+          </td>
+        </tr>
+        
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=1"
+            data-search="1 Анна Ковалёва anna_k 473829104 vip">
+          <td class="id stick-1">1</td>
+          <td class="stick-2">
+            <div class="who-cell">
+              <span class="avatar">АК</span>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=1" title="Анна Ковалёва · открыть карточку сбоку">Анна Ковалёва</a>
+                <span class="meta">473829104 · @anna_k</span>
+              </span>
+            </div>
+          </td>
+          <td class="hide-sm" data-col="tags">
+            <span class="tag">vip</span> 
+            
+            
+          </td>
+          <td data-col="status">
+            
+              
+              <span class="badge badge-ok">Активна</span>
+            
+          </td>
+          <td class="small dim nowrap" data-col="expires">06.04.2027 14:14</td>
+          <td class="right" data-col="days">
+            
+              <b class="">180</b>
+              <div class="xs dim">180 дней</div>
+            
+          </td>
+          <td class="right" data-col="orders">6</td>
+          <td data-col="link">
+            
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/hP_BG4KMlMurwTmgCMob7iNZ6kOTkaQA">
+              <span class="v">sub/hP_BG4KM…kaQA</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/hP_BG4KMlMurwTmgCMob7iNZ6kOTkaQA" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/hP_BG4KMlMurwTmgCMob7iNZ6kOTkaQA" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
+            </span>
+            
+          </td>
+          <td class="actions">
+            <div class="row-actions">
+              <a class="btn btn-sm" href="/admin/users/1">Карточка</a>
+              
+              <form method="post" action="/admin/users/1/grant" class="inline-form quick-grant"
+                    title="Начислить дни без оплаты">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
+                <button class="btn btn-sm" type="submit">+ дни</button>
+              </form>
+              
+            </div>
+          </td>
+        </tr>
+        
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+<div class="pagination">
+  <span>Строки 1–8 из 8</span>
+  
+</div>
+
+</div>
+
+
+
+
+
+<aside class="card side-card" id="user-card" aria-label="Карточка клиента">
+  <div class="card-head">
+    <h2>
+      <span class="avatar" style="width:26px;height:26px;font-size:11px">АК</span>
+      Анна Ковалёва
+    </h2>
+    <div class="actions">
+      <a class="btn btn-sm" href="/admin/users/1">Открыть</a>
+      <a class="icon-btn" href="/admin/users?status=all&amp;page=1"
+         data-drawer-close title="Закрыть карточку" aria-label="Закрыть карточку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M6 6l12 12M18 6 6 18"/></svg></a>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="small dim mb-12">
+      <code>473829104</code> · @anna_k · #1
+      
+      <span class="tag tag-accent">vip</span>
+    </div>
+
+    <dl class="kv kv-tight">
+      <dt>Подписка</dt>
+      <dd>
+        
+          <span class="badge badge-ok">Активна</span>
+          · 1 месяц
+        
+      </dd>
+      <dt>Действует до</dt>
+      <dd>06.04.2027 14:14 <span class="dim">(180 дней)</span></dd>
+      <dt>Оплачено</dt>
+      <dd>720 ₽</dd>
+      
+      <dt>Ссылка</dt>
+      <dd>
+        <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/hP_BG4KMlMurwTmgCMob7iNZ6kOTkaQA">
+          <span class="v">sub/hP_BG4KM…kaQA</span>
+          <a class="icon-btn" href="http://127.0.0.1:8080/sub/hP_BG4KMlMurwTmgCMob7iNZ6kOTkaQA" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+          <button type="button" data-copy="http://127.0.0.1:8080/sub/hP_BG4KMlMurwTmgCMob7iNZ6kOTkaQA" title="Скопировать" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
+        </span>
+      </dd>
+      
+    </dl>
+
+    
+    <div class="side-actions">
+      <form method="post" action="/admin/users/1/grant" class="inline-form" title="Начислить дни">
+        <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
+        <button class="btn btn-sm" type="submit"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M12 5v14M5 12h14"/></svg> дни</button>
+      </form>
+      <form method="post" action="/admin/users/1/write-off" class="inline-form"
+            data-confirm="Списать дни? Доступ сократится и в панели, и в ссылке-подписке.">
+        <input class="input-days" type="number" name="days" value="1" min="1" max="3650" aria-label="Дней к списанию">
+        <button class="btn btn-sm" type="submit">− дни</button>
+      </form>
+      
+        
+        <form method="post" action="/admin/users/1/block" class="inline-form"
+              data-confirm="Заблокировать аккаунт? Клиент потеряет доступ и не сможет писать боту.">
+          <input type="hidden" name="block" value="1">
+          <button class="btn btn-sm btn-danger" type="submit">Заблокировать</button>
+        </form>
+        
+        <form method="post" action="/admin/users/1/revoke" class="inline-form"
+              data-confirm="Отозвать доступ? Аккаунт в боте останется активным.">
+          <button class="btn btn-sm btn-danger" type="submit"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M6 6l12 12M18 6 6 18"/></svg> доступ</button>
+        </form>
+      
+    </div>
+    
+
+    
+    <div class="side-title">Заметки</div>
+    <div class="side-notes">
+      
+      <div class="side-note">
+        <div class="xs dim">владелец · 05.10 14:14</div>
+        <div class="small">Просил счёт для бухгалтерии — отправили выписку по заказам.</div>
+      </div>
+      
+      <div class="side-note">
+        <div class="xs dim">модератор · 08.10 09:14</div>
+        <div class="small">Писал в поддержку: не подключался Владивосток 2 дня. Начислили 3 дня компенсации.</div>
+      </div>
+      
+    </div>
+    
+
+    
+    <form method="post" action="/admin/users/1/notes" class="inline-form side-note-form">
+      <input type="text" name="text" placeholder="Заметка для команды" aria-label="Текст заметки" maxlength="4000">
+      <button class="btn btn-sm" type="submit"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M5 3.5h9L19 8v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z"/><path d="M14 3.5V8h5"/><path d="M8 12h7M8 16h5"/></svg></button>
+    </form>
+    
+
+    
+    <div class="side-title">Последние заказы</div>
+    <div class="side-list">
+      
+      
+      <div class="side-row">
+        <span class="mono dim">#45</span>
+        <span class="grow">1 месяц</span>
+        <span class="badge badge-warn">Ждёт оплаты</span>
+        <span class="nowrap"><b>120 ₽</b></span>
+      </div>
+      
+      
+      <div class="side-row">
+        <span class="mono dim">#39</span>
+        <span class="grow">1 месяц</span>
+        <span class="badge badge-ok">Оплачен</span>
+        <span class="nowrap"><b>120 ₽</b></span>
+      </div>
+      
+      
+      <div class="side-row">
+        <span class="mono dim">#31</span>
+        <span class="grow">1 месяц</span>
+        <span class="badge badge-ok">Оплачен</span>
+        <span class="nowrap"><b>120 ₽</b></span>
+      </div>
+      
+      
+      <div class="side-row">
+        <span class="mono dim">#23</span>
+        <span class="grow">1 месяц</span>
+        <span class="badge badge-ok">Оплачен</span>
+        <span class="nowrap"><b>120 ₽</b></span>
+      </div>
+      
+      
+      <div class="side-row">
+        <span class="mono dim">#15</span>
+        <span class="grow">1 месяц</span>
+        <span class="badge badge-ok">Оплачен</span>
+        <span class="nowrap"><b>120 ₽</b></span>
+      </div>
+      
+      
+      <div class="side-row">
+        <span class="mono dim">#7</span>
+        <span class="grow">1 месяц</span>
+        <span class="badge badge-ok">Оплачен</span>
+        <span class="nowrap"><b>120 ₽</b></span>
+      </div>
+      
+    </div>
+    
+
+    
+    <div class="side-title">События</div>
+    <div class="side-list">
+      
+      <div class="side-row">
+        <span class="dim xs nowrap">08.10 14:14</span>
+        <span class="grow xs">Заказ оплачен</span>
+      </div>
+      
+      <div class="side-row">
+        <span class="dim xs nowrap">08.10 14:14</span>
+        <span class="grow xs">Пришёл по приглашению</span>
+      </div>
+      
+      <div class="side-row">
+        <span class="dim xs nowrap">08.10 14:14</span>
+        <span class="grow xs">Создан заказ</span>
+      </div>
+      
+      <div class="side-row">
+        <span class="dim xs nowrap">08.10 14:14</span>
+        <span class="grow xs">Заказ оплачен</span>
+      </div>
+      
+      <div class="side-row">
+        <span class="dim xs nowrap">08.10 14:14</span>
+        <span class="grow xs">Создан заказ</span>
+      </div>
+      
+      <div class="side-row">
+        <span class="dim xs nowrap">08.10 14:14</span>
+        <span class="grow xs">Заказ оплачен</span>
+      </div>
+      
+      <div class="side-row">
+        <span class="dim xs nowrap">08.10 14:14</span>
+        <span class="grow xs">Создан заказ</span>
+      </div>
+      
+      <div class="side-row">
+        <span class="dim xs nowrap">08.10 14:14</span>
+        <span class="grow xs">Заказ оплачен</span>
+      </div>
+      
+    </div>
+    
+  </div>
+</aside>
+
+
+</div>
+
+
+
+    </main>
+  </div>
+</div>
+<script>
+window.addEventListener("DOMContentLoaded", function() {
+/* Kometa — админ-панель: минимальный ванильный JS.
+   Никаких зависимостей и CDN: панель работает на localhost без интернета.
+   Всё, что здесь есть, — прогрессивное улучшение: формы работают и без JS. */
+(function () {
+  "use strict";
+
+  var THEME_KEY = "kometa-admin-theme";
+  var NAV_KEY = "kometa-admin-nav";
+  var DENSITY_KEY = "kometa-admin-density";
+
+  function store(key, value) {
+    try {
+      if (value) localStorage.setItem(key, value);
+      else localStorage.removeItem(key);
+    } catch (e) { /* приватный режим — просто не запоминаем */ }
+  }
+
+  /* ------------------------------------------------------------- тема */
+  function applyTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light");
+    var btn = document.querySelector("[data-theme-toggle]");
+    if (btn) {
+      btn.setAttribute("aria-label", theme === "dark" ? "Включить светлую тему" : "Включить тёмную тему");
+      var icon = btn.querySelector("[data-theme-icon]");
+      if (icon) icon.textContent = theme === "dark" ? "☀" : "☾";
+    }
+  }
+
+  function currentTheme() {
+    try {
+      return localStorage.getItem(THEME_KEY) || "light";
+    } catch (e) {
+      return "light";
+    }
+  }
+
+  applyTheme(currentTheme());
+
+  document.addEventListener("click", function (event) {
+    var toggle = event.target.closest("[data-theme-toggle]");
+    if (!toggle) return;
+    var next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch (e) { /* приватный режим — просто не запоминаем */ }
+    applyTheme(next);
+  });
+
+  /* ------------------------------------- плотность таблиц и меню-рейка */
+  // Задача: на 15″ в экран должно входить больше данных. Плотность меняет
+  // отступы ячеек, «рейка» — ширину меню (252 px → 68 px). Оба выбора
+  // запоминаются; восстановление делает инлайн-скрипт в base.html.
+  var DENSITIES = [
+    { id: "", label: "Обычно", hint: "обычная плотность" },
+    { id: "compact", label: "Плотно", hint: "компактные строки" },
+    { id: "roomy", label: "Просторно", hint: "просторные строки" }
+  ];
+
+  function densityIndex() {
+    var current = document.documentElement.getAttribute("data-density") || "";
+    for (var i = 0; i < DENSITIES.length; i++) {
+      if (DENSITIES[i].id === current) return i;
+    }
+    return 0;
+  }
+
+  function applyDensity(index) {
+    var item = DENSITIES[index];
+    if (item.id) document.documentElement.setAttribute("data-density", item.id);
+    else document.documentElement.removeAttribute("data-density");
+    store(DENSITY_KEY, item.id);
+    var btn = document.querySelector("[data-density-toggle]");
+    if (!btn) return;
+    var label = btn.querySelector("[data-density-label]");
+    if (label) label.textContent = item.label;
+    btn.setAttribute("title", "Плотность таблиц: " + item.hint + " (нажми, чтобы сменить)");
+  }
+
+  applyDensity(densityIndex());
+
+  document.addEventListener("click", function (event) {
+    if (!event.target.closest("[data-density-toggle]")) return;
+    applyDensity((densityIndex() + 1) % DENSITIES.length);
+  });
+
+  function applyNav(mode) {
+    if (mode === "min") document.documentElement.setAttribute("data-nav", "min");
+    else document.documentElement.removeAttribute("data-nav");
+    var btn = document.querySelector("[data-nav-min]");
+    if (!btn) return;
+    var min = mode === "min";
+    btn.setAttribute("title", min ? "Развернуть меню" : "Свернуть меню");
+    btn.setAttribute("aria-label", min ? "Развернуть меню" : "Свернуть меню");
+    btn.setAttribute("aria-pressed", min ? "true" : "false");
+  }
+
+  applyNav(document.documentElement.getAttribute("data-nav") === "min" ? "min" : "");
+
+  document.addEventListener("click", function (event) {
+    if (!event.target.closest("[data-nav-min]")) return;
+    var next = document.documentElement.getAttribute("data-nav") === "min" ? "" : "min";
+    store(NAV_KEY, next);
+    applyNav(next);
+  });
+
+  /* -------------------------------------------- горячие клавиши списков */
+  // «/» — поиск, Esc — выйти из поиска. Мелочь, но в работе экономит клик.
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
+      var active = document.activeElement;
+      if (active && active.tagName === "INPUT") active.blur();
+      return;
+    }
+    if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+    var tag = (event.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    var search = document.querySelector("input[name=q], .search input, input[type=search]");
+    if (!search) return;
+    event.preventDefault();
+    search.focus();
+    search.select();
+  });
+
+  /* ------------------------------------------------ столбцы таблиц */
+  // Кнопка «Столбцы» в шапке страницы: какие столбцы показывать, решает
+  // пользователь. Набор хранится в localStorage по имени таблицы, поэтому
+  // у модератора и владельца списки могут выглядеть по-разному.
+  var COLS_KEY = "kometa-admin-cols";
+
+  function colsStore() {
+    try {
+      return JSON.parse(localStorage.getItem(COLS_KEY) || "{}") || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function applyCols(table) {
+    var id = table.getAttribute("data-table");
+    if (!id) return;
+    var cfg = colsStore()[id] || {};
+    var hidden = Object.keys(cfg).filter(function (key) { return cfg[key] === false; });
+    if (hidden.length) table.setAttribute("data-cols-hidden", hidden.join(" "));
+    else table.removeAttribute("data-cols-hidden");
+    var menu = document.querySelector('[data-colmenu][data-table="' + id + '"]');
+    if (menu) {
+      Array.prototype.forEach.call(menu.querySelectorAll("[data-col-toggle]"), function (box) {
+        box.checked = cfg[box.getAttribute("data-col-toggle")] !== false;
+      });
+    }
+  }
+
+  function applyAllCols() {
+    Array.prototype.forEach.call(document.querySelectorAll("table.data[data-table]"), applyCols);
+  }
+
+  applyAllCols();
+
+  document.addEventListener("change", function (event) {
+    var box = event.target.closest("[data-col-toggle]");
+    if (!box) return;
+    var menu = box.closest("[data-colmenu]");
+    if (!menu) return;
+    var id = menu.getAttribute("data-table");
+    var table = document.querySelector('table.data[data-table="' + id + '"]');
+    if (!table) return;
+    var store = colsStore();
+    store[id] = store[id] || {};
+    store[id][box.getAttribute("data-col-toggle")] = box.checked;
+    try {
+      localStorage.setItem(COLS_KEY, JSON.stringify(store));
+    } catch (e) { /* приватный режим — просто не запоминаем */ }
+    applyCols(table);
+  });
+
+  document.addEventListener("click", function (event) {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-colmenu][open]"), function (menu) {
+      if (!menu.contains(event.target)) menu.removeAttribute("open");
+    });
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-colmenu][open]"), function (menu) {
+      menu.removeAttribute("open");
+    });
+  });
+
+  /* ------------------------------------------------ командная палитра ⌘K */
+  // Один ввод вместо хождения по меню: разделы (из прав роли), клиенты и
+  // заказы (из /admin/search). Разметка — в base.html.
+  var cmdk = document.getElementById("cmdk");
+  var cmdkInput = document.getElementById("cmdk-input");
+  var cmdkList = document.getElementById("cmdk-list");
+  var cmdkSections = [];
+  try {
+    var raw = document.getElementById("cmdk-sections");
+    cmdkSections = raw ? JSON.parse(raw.textContent || "[]") : [];
+  } catch (e) {
+    cmdkSections = [];
+  }
+  var cmdkRows = [];
+  var cmdkIndex = 0;
+  var cmdkSeq = 0;
+  var cmdkTimer = null;
+  var cmdkKind = { user: "Клиент", order: "Заказ" };
+
+  function cmdkEscape(text) {
+    return String(text == null ? "" : text).replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
+  function cmdkRender(query, found, loading) {
+    if (!cmdkList) return;
+    var needle = query.trim().toLowerCase();
+    var sections = cmdkSections.filter(function (item) {
+      if (!needle) return true;
+      return (item.title + " " + (item.keys || "")).toLowerCase().indexOf(needle) !== -1;
+    }).slice(0, needle ? 4 : 8);
+
+    var rows = sections.map(function (item) {
+      return { kind: "Раздел", title: item.title, sub: "", url: item.url };
+    });
+    (found || []).forEach(function (item) {
+      rows.push({ kind: cmdkKind[item.kind] || "", title: item.title, sub: item.sub || "", url: item.url });
+    });
+
+    if (!rows.length) {
+      cmdkRows = [];
+      cmdkIndex = 0;
+      cmdkList.innerHTML = '<div class="cmdk-empty">' + (loading ? "Ищу…" : "Ничего не нашлось") + "</div>";
+      return;
+    }
+    cmdkRows = rows;
+    if (cmdkIndex >= rows.length) cmdkIndex = rows.length - 1;
+    if (cmdkIndex < 0) cmdkIndex = 0;
+    cmdkList.innerHTML = rows.map(function (row, index) {
+      return '<div class="cmdk-item' + (index === cmdkIndex ? " active" : "") + '" role="option" ' +
+        'data-url="' + cmdkEscape(row.url) + '">' +
+        '<span class="grow"><span class="t">' + cmdkEscape(row.title) + "</span>" +
+        (row.sub ? '<span class="s">' + cmdkEscape(row.sub) + "</span>" : "") + "</span>" +
+        (row.kind ? '<span class="badge">' + cmdkEscape(row.kind) + "</span>" : "") +
+        "</div>";
+    }).join("");
+  }
+
+  function cmdkFetch(query) {
+    var seq = ++cmdkSeq;
+    if (query.trim().length < 2) {
+      cmdkRender(query, [], false);
+      return;
+    }
+    fetch("/admin/search?q=" + encodeURIComponent(query), { headers: { "X-Panel-Ajax": "1" } })
+      .then(function (response) { return response.ok ? response.json() : { items: [] }; })
+      .then(function (data) {
+        if (seq === cmdkSeq) cmdkRender(query, data.items || [], false);
+      })
+      .catch(function () {
+        if (seq === cmdkSeq) cmdkRender(query, [], false);
+      });
+  }
+
+  function cmdkIsOpen() {
+    return !!cmdk && cmdk.classList.contains("open");
+  }
+
+  function cmdkOpen() {
+    if (!cmdk) return;
+    cmdk.classList.add("open");
+    cmdkIndex = 0;
+    if (cmdkInput) {
+      cmdkInput.value = "";
+      cmdkInput.focus();
+    }
+    cmdkRender("", [], false);
+  }
+
+  function cmdkClose() {
+    if (cmdk) cmdk.classList.remove("open");
+  }
+
+  function cmdkGo() {
+    var row = cmdkRows[cmdkIndex];
+    if (row) window.location.href = row.url;
+  }
+
+  function cmdkMove(step) {
+    if (!cmdkRows.length) return;
+    cmdkIndex = (cmdkIndex + step + cmdkRows.length) % cmdkRows.length;
+    Array.prototype.forEach.call(cmdkList.querySelectorAll(".cmdk-item"), function (node, index) {
+      node.classList.toggle("active", index === cmdkIndex);
+    });
+    var active = cmdkList.querySelector(".cmdk-item.active");
+    if (active && active.scrollIntoView) active.scrollIntoView({ block: "nearest" });
+  }
+
+  document.addEventListener("click", function (event) {
+    if (event.target.closest("[data-cmdk-open]")) {
+      event.preventDefault();
+      cmdkOpen();
+      return;
+    }
+    if (event.target.closest("[data-cmdk-close]")) {
+      cmdkClose();
+      return;
+    }
+    var item = event.target.closest(".cmdk-item");
+    if (item) window.location.href = item.getAttribute("data-url");
+  });
+
+  if (cmdkInput) {
+    cmdkInput.addEventListener("input", function () {
+      window.clearTimeout(cmdkTimer);
+      var value = cmdkInput.value;
+      cmdkTimer = window.setTimeout(function () { cmdkFetch(value); }, 160);
+    });
+    cmdkInput.addEventListener("keydown", function (event) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        cmdkMove(1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        cmdkMove(-1);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        cmdkGo();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        cmdkClose();
+      }
+    });
+  }
+
+  document.addEventListener("keydown", function (event) {
+    var key = (event.key || "").toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && key === "k") {
+      event.preventDefault();
+      if (cmdkIsOpen()) cmdkClose();
+      else cmdkOpen();
+      return;
+    }
+    if (key === "escape" && cmdkIsOpen()) cmdkClose();
+  });
+
+  /* ------------------------------------ действия без перезагрузки страницы */
+  // Любая POST-форма панели уходит через fetch: сервер (flash_redirect)
+  // отвечает JSON-ом, мы показываем тост и обновляем содержимое на месте.
+  // Если JS выключен или сервер ответил не JSON — обычная отправка формы.
+  var toasts = document.getElementById("toasts");
+
+  function toast(kind, text) {
+    if (!toasts || !text) return;
+    var el = document.createElement("div");
+    el.className = "toast " + (kind === "err" ? "err" : "ok");
+    el.setAttribute("role", kind === "err" ? "alert" : "status");
+    var path = kind === "err"
+      ? '<path d="M12 4 2.8 19.2h18.4z"/><path d="M12 10v4.5M12 17.4h.01"/>'
+      : '<path d="M4.5 12.5l5 5 10-11"/>';
+    el.innerHTML =
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + "</svg>" +
+      '<span class="grow"></span>' +
+      '<button class="icon-btn" type="button" aria-label="Закрыть">×</button>';
+    el.querySelector(".grow").textContent = String(text);
+    el.querySelector("button").addEventListener("click", function () { el.remove(); });
+    toasts.appendChild(el);
+    window.setTimeout(function () { el.remove(); }, kind === "err" ? 9000 : 4200);
+  }
+
+  function syncNavCounts(doc) {
+    var fresh = {};
+    Array.prototype.forEach.call(doc.querySelectorAll(".nav a"), function (link) {
+      var badge = link.querySelector(".count");
+      fresh[link.getAttribute("href")] = badge ? badge.textContent.trim() : "";
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".nav a"), function (link) {
+      var badge = link.querySelector(".count");
+      var value = fresh[link.getAttribute("href")];
+      if (badge && value !== undefined) badge.textContent = value;
+    });
+  }
+
+  function loadContent(url, push) {
+    return fetch(url, { headers: { "X-Panel-Ajax": "1" } })
+      .then(function (response) { return response.ok ? response.text() : ""; })
+      .then(function (html) {
+        if (!html) return;
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var fresh = doc.querySelector(".content");
+        var current = document.querySelector(".content");
+        if (!fresh || !current) return;
+        var scroll = window.scrollY;
+        current.replaceWith(fresh);
+        syncNavCounts(doc);
+        applyAllCols();
+        window.scrollTo(0, scroll);
+        if (push) window.history.pushState({ panel: true }, "", url);
+      })
+      .catch(function () { /* не смогли обновить — данные уже сохранены на сервере */ });
+  }
+
+  function refreshContent() {
+    return loadContent(window.location.href, false);
+  }
+
+  // Мастер-деталь: клик по строке открывает карточку сбоку, не уводя со списка.
+  document.addEventListener("click", function (event) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button) return;
+    var closer = event.target.closest("[data-drawer-close]");
+    if (closer) {
+      event.preventDefault();
+      loadContent(closer.getAttribute("href"), true);
+      return;
+    }
+    var row = event.target.closest("tr[data-card-url]");
+    if (!row) return;
+    if (event.target.closest("button, input, select, form, label, .copy-chip")) return;
+    var link = event.target.closest("a");
+    // Ссылки «Карточка» и прочие ведут на отдельные страницы — их не трогаем.
+    if (link && !link.classList.contains("nm")) return;
+    event.preventDefault();
+    loadContent(row.getAttribute("data-card-url"), true);
+  });
+
+  window.addEventListener("popstate", function () {
+    loadContent(window.location.href, false);
+  });
+
+  function submitAjax(form, action) {
+    var button = form.querySelector('button[type="submit"]') || form.querySelector("button");
+    if (button) button.disabled = true;
+    return fetch(action, {
+      method: "POST",
+      body: new FormData(form),
+      headers: { "X-Panel-Ajax": "1" },
+      redirect: "follow",
+    })
+      .then(function (response) {
+        if (response.redirected && response.url.indexOf("/admin/login") !== -1) {
+          window.location.href = response.url;
+          return null;
+        }
+        var type = response.headers.get("content-type") || "";
+        if (type.indexOf("application/json") === -1) {
+          // Сервер ответил страницей (например, отказ по правам) — отдаём
+          // решение ему и отправляем форму обычным способом.
+          if (button) button.disabled = false;
+          form.submit();
+          return null;
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        toast(data.ok ? "ok" : "err", data.ok ? (data.message || "Готово") : (data.error || "Не получилось"));
+        if (data.ok) return refreshContent();
+        return null;
+      })
+      .catch(function (error) {
+        toast("err", "Сеть недоступна: " + error.message);
+      })
+      .then(function () {
+        if (button) button.disabled = false;
+      });
+  }
+
+  document.addEventListener("submit", function (event) {
+    var form = event.target;
+    if (!form || form.tagName !== "FORM") return;
+    if (event.defaultPrevented) return; // пользователь отменил подтверждение
+    if (form.hasAttribute("data-no-ajax")) return;
+    if ((form.getAttribute("method") || "get").toLowerCase() !== "post") return;
+    var action = form.getAttribute("action") || window.location.href;
+    if (/\/admin\/(login|logout)\b/.test(action)) return; // вход и выход — навигацией
+    event.preventDefault();
+    // Отправляем после того, как отработают остальные обработчики submit:
+    // массовые действия дописывают в форму выбранные id (см. «массовые
+    // действия» выше), и FormData должна собираться уже с ними.
+    window.setTimeout(function () { submitAjax(form, action); }, 0);
+  });
+
+  /* ---------------------------------------------------- мобильное меню */
+  document.addEventListener("click", function (event) {
+    if (event.target.closest("[data-nav-toggle]")) {
+      document.body.classList.toggle("nav-open");
+      return;
+    }
+    if (document.body.classList.contains("nav-open") && !event.target.closest(".sidebar")) {
+      document.body.classList.remove("nav-open");
+    }
+  });
+
+  /* --------------------------------------------------- копирование */
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    var area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(area);
+    return ok ? Promise.resolve() : Promise.reject(new Error("copy failed"));
+  }
+
+  function flashButton(btn, label) {
+    var old = btn.getAttribute("data-label") || btn.innerHTML;
+    btn.setAttribute("data-label", old);
+    btn.innerHTML = label;
+    window.setTimeout(function () { btn.innerHTML = btn.getAttribute("data-label"); }, 1400);
+  }
+
+  document.addEventListener("click", function (event) {
+    var trigger = event.target.closest("[data-copy]");
+    if (!trigger) return;
+    event.preventDefault();
+    var value = trigger.getAttribute("data-copy");
+    copyText(value).then(function () {
+      flashButton(trigger, "✓");
+    }).catch(function () {
+      window.prompt("Скопируй вручную:", value);
+    });
+  });
+
+  /* ------------------------------------------------ подтверждения */
+  document.addEventListener("submit", function (event) {
+    var form = event.target;
+    var message = form.getAttribute("data-confirm");
+    if (message && !window.confirm(message)) {
+      event.preventDefault();
+    }
+  });
+
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest("a[data-confirm]");
+    if (!link) return;
+    if (!window.confirm(link.getAttribute("data-confirm"))) event.preventDefault();
+  });
+
+  /* ------------------------------------------- массовые действия */
+  function selectedBoxes(scope) {
+    return Array.prototype.slice.call(scope.querySelectorAll("[data-row-check]:checked"));
+  }
+
+  function syncBulk(scope) {
+    var bar = document.querySelector("[data-bulkbar]");
+    var boxes = selectedBoxes(scope);
+    var all = scope.querySelectorAll("[data-row-check]");
+    var master = scope.querySelector("[data-check-all]");
+    if (master) {
+      master.checked = all.length > 0 && boxes.length === all.length;
+      master.indeterminate = boxes.length > 0 && boxes.length < all.length;
+    }
+    if (!bar) return;
+    bar.classList.toggle("on", boxes.length > 0);
+    var counter = bar.querySelector("[data-bulk-count]");
+    if (counter) counter.textContent = String(boxes.length);
+    Array.prototype.forEach.call(scope.querySelectorAll("tr[data-row]"), function (row) {
+      var box = row.querySelector("[data-row-check]");
+      row.classList.toggle("is-selected", !!(box && box.checked));
+    });
+  }
+
+  document.addEventListener("change", function (event) {
+    var target = event.target;
+    var scope = target.closest("[data-bulk-scope]") || document;
+    if (target.matches("[data-row-check]")) {
+      syncBulk(scope);
+    } else if (target.matches("[data-check-all]")) {
+      Array.prototype.forEach.call(scope.querySelectorAll("[data-row-check]"), function (box) {
+        box.checked = target.checked;
+      });
+      syncBulk(scope);
+    }
+  });
+
+  document.addEventListener("submit", function (event) {
+    var form = event.target.closest("[data-bulk-form]");
+    if (!form) return;
+    var scope = document.querySelector("[data-bulk-scope]") || document;
+    var boxes = selectedBoxes(scope);
+    if (!boxes.length) {
+      event.preventDefault();
+      return;
+    }
+    // Собираем выбранные id в скрытые поля: работает и без JS-фреймворков.
+    Array.prototype.forEach.call(form.querySelectorAll("input[data-generated]"), function (node) {
+      node.remove();
+    });
+    boxes.forEach(function (box) {
+      var hidden = document.createElement("input");
+      hidden.type = "hidden";
+      hidden.name = "ids";
+      hidden.value = box.value;
+      hidden.setAttribute("data-generated", "1");
+      form.appendChild(hidden);
+    });
+  });
+
+  /* ------------------------------------------------ автоподтверждение */
+  // Кнопка «Подтвердить всё» собирает все видимые pending-заказы.
+  document.addEventListener("click", function (event) {
+    var btn = event.target.closest("[data-select-all-rows]");
+    if (!btn) return;
+    event.preventDefault();
+    var scope = document.querySelector("[data-bulk-scope]") || document;
+    Array.prototype.forEach.call(scope.querySelectorAll("[data-row-check]"), function (box) {
+      if (!btn.hasAttribute("data-only-visible") || box.closest("tr").style.display !== "none") box.checked = true;
+    });
+    syncBulk(scope);
+  });
+
+  /* --------------------------------------------------- живые фильтры */
+  var search = document.querySelector("[data-live-search]");
+  if (search) {
+    search.addEventListener("input", function () {
+      var scope = document.querySelector("[data-bulk-scope]") || document;
+      var needle = search.value.trim().toLowerCase();
+      Array.prototype.forEach.call(scope.querySelectorAll("tr[data-row]"), function (row) {
+        var hay = (row.getAttribute("data-search") || "").toLowerCase();
+        row.style.display = !needle || hay.indexOf(needle) !== -1 ? "" : "none";
+      });
+    });
+  }
+
+  /* ------------------------------------------------ закрытие модалок */
+  document.addEventListener("click", function (event) {
+    var closer = event.target.closest("[data-close-dialog]");
+    if (closer) {
+      var dialog = closer.closest("dialog");
+      if (dialog) dialog.close();
+      return;
+    }
+    // клик по фону закрывает модальное окно
+    if (event.target.tagName === "DIALOG" && event.target.hasAttribute("data-backdrop-close")) {
+      event.target.close();
+    }
+  });
+
+  /* --------------------------------------------------- подсказки времени */
+  Array.prototype.forEach.call(document.querySelectorAll("[data-ts]"), function (node) {
+    var raw = node.getAttribute("data-ts");
+    if (!raw || node.title) return;
+    node.title = new Date(raw).toLocaleString("ru-RU");
+  });
+})();
+
+});
+</script>
+
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="true"></div>
+
+
+<div class="cmdk" id="cmdk" role="dialog" aria-modal="true" aria-label="Быстрый переход">
+  <div class="cmdk-back" data-cmdk-close></div>
+  <div class="cmdk-panel">
+    <input type="text" id="cmdk-input" placeholder="Клиент, заказ или раздел…" autocomplete="off" spellcheck="false"
+           aria-label="Поиск по панели" aria-controls="cmdk-list">
+    <div class="cmdk-list" id="cmdk-list" role="listbox"></div>
+    <div class="cmdk-foot">
+      <span><kbd>↑</kbd> <kbd>↓</kbd> выбор</span>
+      <span><kbd>↵</kbd> открыть</span>
+      <span><kbd>esc</kbd> закрыть</span>
+    </div>
+  </div>
+</div>
+<script type="application/json" id="cmdk-sections">[{"keys": "\u043e\u0431\u0437\u043e\u0440 \u0433\u043b\u0430\u0432\u043d\u0430\u044f \u0441\u0432\u043e\u0434\u043a\u0430", "title": "\u0414\u0430\u0448\u0431\u043e\u0440\u0434", "url": "/admin"}, {"keys": "\u0437\u0430\u043a\u0430\u0437\u044b \u043e\u043f\u043b\u0430\u0442\u044b \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c", "title": "\u041e\u0447\u0435\u0440\u0435\u0434\u044c \u0437\u0430\u043a\u0430\u0437\u043e\u0432", "url": "/admin/orders"}, {"keys": "\u043a\u043b\u0438\u0435\u043d\u0442\u044b \u043b\u044e\u0434\u0438 \u0431\u0430\u0437\u0430", "title": "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438", "url": "/admin/users"}, {"keys": "\u0432\u043e\u0437\u0432\u0440\u0430\u0442 \u0434\u0435\u043d\u044c\u0433\u0438 refund", "title": "\u0412\u043e\u0437\u0432\u0440\u0430\u0442\u044b", "url": "/admin/refunds"}, {"keys": "\u043f\u0440\u043e\u0441\u0442\u043e\u0439 downtime \u0430\u0432\u0430\u0440\u0438\u044f", "title": "\u041a\u043e\u043c\u043f\u0435\u043d\u0441\u0430\u0446\u0438\u044f \u043f\u0440\u043e\u0441\u0442\u043e\u044f", "url": "/admin/downtime"}, {"keys": "\u0434\u0435\u043d\u044c\u0433\u0438 \u0432\u044b\u0440\u0443\u0447\u043a\u0430 \u043f\u0440\u0438\u0431\u044b\u043b\u044c", "title": "\u0424\u0438\u043d\u0430\u043d\u0441\u044b \u0438 \u043e\u0442\u0447\u0451\u0442\u044b", "url": "/admin/finance"}, {"keys": "\u0446\u0435\u043d\u044b \u043f\u043b\u0430\u043d\u044b \u0442\u0430\u0440\u0438\u0444", "title": "\u0422\u0430\u0440\u0438\u0444\u044b", "url": "/admin/plans"}, {"keys": "\u0441\u0435\u0440\u0432\u0435\u0440\u044b \u043f\u0430\u043d\u0435\u043b\u0438 \u043b\u043e\u043a\u0430\u0446\u0438\u0438", "title": "\u041d\u043e\u0434\u044b", "url": "/admin/nodes"}, {"keys": "\u043e\u0448\u0438\u0431\u043a\u0438 \u043f\u0440\u043e\u0431\u043b\u0435\u043c\u044b", "title": "\u0410\u043b\u0435\u0440\u0442\u044b", "url": "/admin/alerts"}, {"keys": "\u043f\u0440\u043e\u043c\u043e \u043f\u0440\u0438\u0433\u043b\u0430\u0448\u0435\u043d\u0438\u044f", "title": "\u0420\u0435\u0444\u0435\u0440\u0430\u043b\u044b \u0438 \u043f\u0440\u043e\u043c\u043e\u043a\u043e\u0434\u044b", "url": "/admin/referrals"}, {"keys": "\u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f \u0440\u0430\u0441\u0441\u044b\u043b\u043a\u0430", "title": "\u0420\u0430\u0441\u0441\u044b\u043b\u043a\u0438", "url": "/admin/broadcast"}, {"keys": "\u0430\u0443\u0434\u0438\u0442 \u0438\u0441\u0442\u043e\u0440\u0438\u044f \u043a\u0442\u043e \u0447\u0442\u043e", "title": "\u0416\u0443\u0440\u043d\u0430\u043b \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439", "url": "/admin/audit"}, {"keys": "\u0434\u043e\u0441\u0442\u0443\u043f\u044b \u0441\u043e\u0442\u0440\u0443\u0434\u043d\u0438\u043a\u0438", "title": "\u041a\u043e\u043c\u0430\u043d\u0434\u0430 \u0438 \u0440\u043e\u043b\u0438", "url": "/admin/team"}]</script>
+
+
+</body>
+</html>

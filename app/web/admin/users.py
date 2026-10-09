@@ -13,9 +13,19 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import String, cast, func, or_, select
 
-from app.db.models import Event, Order, Plan, Referral, Subscription, User, UserNote
+from app.db.models import (
+    Event,
+    Order,
+    Partner,
+    PersonalLink,
+    Plan,
+    Referral,
+    Subscription,
+    User,
+    UserNote,
+)
 from app.db.session import SessionMaker
-from app.services import audit, stats as stats_service, subscriptions
+from app.services import attribution, audit, stats as stats_service, subscriptions
 from app.web import ui
 from app.web.admin.common import filters, flash_redirect, make_page, notify, page, parse_page, require
 
@@ -23,6 +33,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 FILTER_KEYS = ("q", "status", "tag", "sort")
+
 STATUS_TABS: tuple[tuple[str, str], ...] = (
     ("all", "Все"),
     ("trial", "Пробные"),
@@ -53,6 +64,12 @@ async def users_page(request: Request):
     if status not in {code for code, _ in STATUS_TABS}:
         status = "all"
     page_no, per_page = parse_page(request, default_per_page=50)
+    # Боковая карточка клиента: ?card=<id> открывает её рядом со списком,
+    # не уводя со страницы (мастер-деталь). Без JS это просто ссылка.
+    try:
+        card_id = int(request.query_params.get("card") or 0)
+    except ValueError:
+        card_id = 0
 
     async with SessionMaker() as db:
         stmt = select(User, Subscription).outerjoin(Subscription, Subscription.user_id == User.id)
@@ -122,7 +139,15 @@ async def users_page(request: Request):
                 for tag in ui.split_tags(raw)
             }
         )
+        card_data = None
+        if card_id:
+            card_user = await db.get(User, card_id)
+            if card_user is not None:
+                card_data = await _card_context(
+                    db, card_user, orders_limit=6, events_limit=8, notes_limit=4
+                )
 
+    # Ссылку на карточку собирает шаблон: ему доступен query_string с фильтрами.
     return await page(
         request,
         "users.html",
@@ -136,6 +161,8 @@ async def users_page(request: Request):
         counts=counts,
         tags=tags,
         stats=snapshot,
+        card=card_data,
+        card_id=card_id,
         page_data=make_page(items, total, page_no, per_page),
     )
 
@@ -150,56 +177,7 @@ async def user_card(user_id: int, request: Request):
         user = await db.get(User, user_id)
         if user is None:
             return flash_redirect("/admin/users", error="Пользователь не найден")
-
-        sub = await subscriptions.get_subscription(db, user.id)
-        plan = await db.get(Plan, sub.plan_id) if sub and sub.plan_id else None
-        order_rows = list(
-            (await db.scalars(select(Order).where(Order.user_id == user.id).order_by(Order.id.desc()).limit(25))).all()
-        )
-        plans = {
-            p.id: p
-            for p in await db.scalars(
-                select(Plan).where(Plan.id.in_({o.plan_id for o in order_rows if o.plan_id}))
-            )
-        } if order_rows else {}
-        orders = [{"order": order, "plan": plans.get(order.plan_id)} for order in order_rows]
-
-        user_events = list(
-            (await db.scalars(select(Event).where(Event.user_id == user.id).order_by(Event.id.desc()).limit(30))).all()
-        )
-        notes = list(
-            (await db.scalars(select(UserNote).where(UserNote.user_id == user.id).order_by(UserNote.id.desc()))).all()
-        )
-        invited = int(
-            await db.scalar(select(func.count(Referral.id)).where(Referral.referrer_id == user.id)) or 0
-        )
-        invited_paid = int(
-            await db.scalar(
-                select(func.count(Referral.id)).where(
-                    Referral.referrer_id == user.id, Referral.paid_order_id.is_not(None)
-                )
-            )
-            or 0
-        )
-        referrer_row = await db.scalar(select(Referral).where(Referral.invited_id == user.id))
-        referrer = await db.get(User, referrer_row.referrer_id) if referrer_row else None
-        paid_total = int(
-            await db.scalar(
-                select(func.coalesce(func.sum(Order.amount_rub), 0)).where(
-                    Order.user_id == user.id, Order.status == "paid"
-                )
-            )
-            or 0
-        )
-        refunded_total = int(
-            await db.scalar(
-                select(func.coalesce(func.sum(Order.amount_rub), 0)).where(
-                    Order.user_id == user.id, Order.status == "refunded"
-                )
-            )
-            or 0
-        )
-        plans = await active_plans(db)
+        context = await _card_context(db, user)
 
     return await page(
         request,
@@ -207,22 +185,122 @@ async def user_card(user_id: int, request: Request):
         auth,
         title=user.display_name,
         page="users",
-        user=user,
-        sub=sub,
-        plan=plan,
-        link=subscriptions.subscription_link(sub.subscription_token) if sub else "",
-        orders=orders,
-        events=user_events,
-        notes=notes,
-        tags=ui.split_tags(user.tags),
-        invited=invited,
-        invited_paid=invited_paid,
-        referrer=referrer,
-        paid_total=paid_total,
-        refunded_total=refunded_total,
-        plans=plans,
-        status_label=ui.status_pair(sub.status if sub else None),
+        **context,
     )
+
+
+async def _card_context(
+    db,  # noqa: ANN001 - AsyncSession
+    user: User,
+    *,
+    orders_limit: int = 25,
+    events_limit: int = 30,
+    notes_limit: int = 0,
+) -> dict:
+    """Данные карточки клиента: подписка, заказы, события, рефералка, суммы.
+
+    Одним помощником пользуются и полная страница клиента, и боковая карточка
+    в списке: иначе два экрана рано или поздно начнут показывать разное.
+    Лимиты — потому что боковой панели не нужны все 30 событий клиента.
+    """
+    sub = await subscriptions.get_subscription(db, user.id)
+    plan = await db.get(Plan, sub.plan_id) if sub and sub.plan_id else None
+    order_rows = list(
+        (
+            await db.scalars(
+                select(Order).where(Order.user_id == user.id).order_by(Order.id.desc()).limit(orders_limit)
+            )
+        ).all()
+    )
+    plans_by_id = (
+        {
+            p.id: p
+            for p in await db.scalars(
+                select(Plan).where(Plan.id.in_({o.plan_id for o in order_rows if o.plan_id}))
+            )
+        }
+        if order_rows
+        else {}
+    )
+    orders = [{"order": order, "plan": plans_by_id.get(order.plan_id)} for order in order_rows]
+
+    user_events = list(
+        (
+            await db.scalars(
+                select(Event).where(Event.user_id == user.id).order_by(Event.id.desc()).limit(events_limit)
+            )
+        ).all()
+    )
+    notes = (
+        list(
+            (
+                await db.scalars(
+                    select(UserNote)
+                    .where(UserNote.user_id == user.id)
+                    .order_by(UserNote.id.desc())
+                    .limit(notes_limit)
+                )
+            ).all()
+        )
+        if notes_limit
+        else []
+    )
+    invited = int(await db.scalar(select(func.count(Referral.id)).where(Referral.referrer_id == user.id)) or 0)
+    invited_paid = int(
+        await db.scalar(
+            select(func.count(Referral.id)).where(
+                Referral.referrer_id == user.id, Referral.paid_order_id.is_not(None)
+            )
+        )
+        or 0
+    )
+    referrer_row = await db.scalar(select(Referral).where(Referral.invited_id == user.id))
+    referrer = await db.get(User, referrer_row.referrer_id) if referrer_row else None
+
+    # Откуда человек пришёл: источник привлечения и, если есть, конкретная ссылка.
+    # Без этого в карточке не видно, по чьей рекомендации клиент появился.
+    partner_row = await db.get(Partner, user.partner_id) if user.partner_id else None
+    personal_link = (
+        await db.get(PersonalLink, user.personal_link_id) if user.personal_link_id else None
+    )
+    source_title = attribution.SOURCE_TITLES.get(user.source or "", "") if user.source else ""
+    paid_total = int(
+        await db.scalar(
+            select(func.coalesce(func.sum(Order.amount_rub), 0)).where(
+                Order.user_id == user.id, Order.status == "paid"
+            )
+        )
+        or 0
+    )
+    refunded_total = int(
+        await db.scalar(
+            select(func.coalesce(func.sum(Order.amount_rub), 0)).where(
+                Order.user_id == user.id, Order.status == "refunded"
+            )
+        )
+        or 0
+    )
+
+    return {
+        "user": user,
+        "sub": sub,
+        "plan": plan,
+        "link": subscriptions.subscription_link(sub.subscription_token) if sub else "",
+        "orders": orders,
+        "events": user_events,
+        "notes": notes,
+        "tags": ui.split_tags(user.tags),
+        "invited": invited,
+        "invited_paid": invited_paid,
+        "referrer": referrer,
+        "partner_row": partner_row,
+        "personal_link": personal_link,
+        "source_title": source_title,
+        "paid_total": paid_total,
+        "refunded_total": refunded_total,
+        "plans": await active_plans(db),
+        "status_label": ui.status_pair(sub.status if sub else None),
+    }
 
 
 # ------------------------------------------------------------------ действия

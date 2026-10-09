@@ -1,0 +1,79 @@
+<main class="canvas">
+  <aside class="side">
+    <div class="eyebrow">Экран 09 · локация недоступна</div>
+    <h1 class="title">Деградация без паники</h1>
+    <p class="lead">Нода может отвалиться — это нормальная жизнь сервиса. Важно, чтобы
+    клиент узнал об этом от нас, а не от собственного «ничего не работает».
+    Говорим, что случилось, что делать и что доступ не потерян.</p>
+    <ul class="notes">
+      <li><b>Причина названа.</b> «Замер с сервера не проходит» — то же состояние,
+      которое бот показывает в списке локаций: <code>🔴 не отвечает</code>.</li>
+      <li><b>Что делать — прямо в тексте.</b> Выбрать другую локацию: подписка та же,
+      доплачивать ничего не нужно (<code>RESERVE_HELP</code>).</li>
+      <li><b>Один главный призыв.</b> «Выбрать другую локацию» — primary.
+      «Обновить» и «Написать в поддержку» слабее.</li>
+      <li><b>Без красного экрана и «попробуйте позже».</b> Спокойный тон, понятный
+      следующий шаг, альтернативы тут же в списке.</li>
+    </ul>
+  </aside>
+
+  <section class="stage">
+    <!--PHONE-->
+    <div class="tg">
+      {{STATUS}}
+      {{HEAD}}
+      <div class="tg-body">
+        <div class="msg">
+          ⚠️ <b>Локация «🇳🇱 Нидерланды» сейчас не отвечает</b><br><br>
+          Замер с сервера не проходит: три проверки подряд без ответа. Мы уже
+          разбираемся.<br><br>
+          Доступ и ссылка-подписка не изменились. Можно выбрать другую локацию —
+          доплачивать ничего не нужно.
+          <div class="locs">
+            <div class="loc"><span>🇩🇪 Германия</span><span class="ping ok"><span class="dot"></span>42 мс</span></div>
+            <div class="loc"><span>🇫🇮 Финляндия</span><span class="ping ok"><span class="dot"></span>58 мс</span></div>
+            <div class="loc"><span>🇳🇱 Нидерланды</span><span class="ping err"><span class="dot"></span>не отвечает</span></div>
+          </div>
+          <div class="chip-row"><span class="chip">🛟 есть резервный профиль</span></div>
+        </div>
+        <div class="kb">
+          <div class="kbrow one"><div class="btn primary">Выбрать другую локацию</div></div>
+          <div class="kbrow one"><div class="btn">Обновить</div></div>
+          <div class="kbrow one"><div class="btn">Написать в поддержку</div></div>
+          <div class="kbrow one"><div class="btn ghost">← В меню</div></div>
+        </div>
+      </div>
+      <div class="tg-input">
+        <div class="field">Сообщение</div>
+        <svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="8" y="2.5" width="6" height="11" rx="3"/><path d="M4.5 10.5a6.5 6.5 0 0 0 13 0"/><path d="M11 17v3"/></svg>
+      </div>
+    </div>
+    <!--/PHONE-->
+    <div class="stage-cap">Мокап клиента Telegram · 420 px · состояние локации — пример</div>
+  </section>
+
+  <aside class="side right">
+    <h2>Тексты — из бота</h2>
+    <ul class="src">
+      <li><code>app/web/sub.py</code> — состояния локации: <code>🔴 не отвечает</code>,
+      <code>⚪ нет замера</code>, <code>⚪ нет данных пробы</code>, «замер с сервера,
+      не с телефона»</li>
+      <li><code>texts.RESERVE_HELP</code> — «выбери профиль с пометкой «резерв»»,
+      «это не отдельный тариф: подписка та же, доплачивать не нужно», «скорость ниже
+      обычной — он для переписки, карт и работы»</li>
+      <li><code>keyboards.subscription_kb()</code> — «Обновить»</li>
+      <li><code>keyboards.support_kb()</code> — «Написать в поддержку»</li>
+      <li><code>keyboards.BTN_RESERVE</code> — «Если не открывается»</li>
+      <li><code>services/probe.py</code> — вердикты пробы <code>PROBE_OK</code>,
+      <code>PROBE_PORT_FAILED</code>, <code>PROBE_UNKNOWN</code>,
+      <code>PROBE_NOT_CONFIGURED</code></li>
+    </ul>
+    <div class="callout warn"><b>Этого текста в боте пока нет.</b> В
+    <code>texts.py</code> есть только админское <code>NODE_DOWN</code> —
+    «⚠️ Нода недоступна: {error}», клиенту оно не уходит. Текст в макете —
+    предложение, его нужно положить в <code>texts.py</code> отдельной константой.</div>
+    <div class="callout warn"><b>И кнопки такой нет.</b> Колбэк
+    <code>sub:locations</code> в боте есть, но ни одна клавиатура на него не ведёт.
+    «Выбрать другую локацию» — предложение: подписать колбэк на эту кнопку.</div>
+  </aside>
+</main>

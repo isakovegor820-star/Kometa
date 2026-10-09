@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'referrals' %}
+{% block title %}Персональные ссылки — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>Персональные ссылки</h1>
+    <div class="sub">
+      Именная ссылка под конкретного человека: своя скидка, свой срок, свой лимит · время UTC
+    </div>
+  </div>
+  <div class="actions">
+    {% if can_act %}<a class="btn btn-primary" href="#new-link">{{ icon('link') }} Ссылка</a>{% endif %}
+    <a class="btn" href="/admin/partners">{{ icon('users') }} Партнёры</a>
+    <a class="btn" href="/admin/referrals">{{ icon('gift') }} Рефералка клиентов</a>
+  </div>
+</div>
+
+{# --- сводка ----------------------------------------------------------- #}
+<div class="stats">
+  <div class="stat">
+    <div class="k">{{ icon('link') }} Ссылок</div>
+    <div class="v">{{ num(summary.links) }}</div>
+    <div class="d">создано всего</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('users') }} Пришли</div>
+    <div class="v">{{ num(summary.joined) }}</div>
+    <div class="d">активировали ссылку</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('check') }} Платящих</div>
+    <div class="v">{{ num(summary.payers) }}</div>
+    <div class="d">выручка {{ money(summary.revenue_rub) }}</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('tag') }} Отдано скидками</div>
+    <div class="v">{{ money(summary.discount_rub) }}</div>
+    <div class="d">цена всех ссылок</div>
+  </div>
+</div>
+
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>{{ icon('info') }} Чем персональная ссылка отличается от остальных</h2>
+  </div>
+  <div class="card-body">
+    <dl class="kv">
+      <dt>Ссылка клиента (рефералка)</dt>
+      <dd>одна на аккаунт, скидка общая для всех клиентов — сейчас {{ referral_percent }} %, задаётся в <code>.env</code>;
+        клиент получает дни за друзей</dd>
+      <dt>Ссылка партнёра</dt>
+      <dd>одна на канал: все, кто по ней пришёл, получают условия партнёра, ему платим за каждого</dd>
+      <dt><b>Персональная ссылка</b></dt>
+      <dd>под одного человека: <b>своя скидка</b> (можно 40 %, можно 0 %), свой срок действия
+        и свой лимит активаций. Скидка применяется автоматически, вводить код не нужно.
+        У ссылки может быть партнёр — тогда ему ещё и начислится выплата.</dd>
+    </dl>
+    <div class="hint mt-8">
+      У каждой ссылки отдельная статистика: сколько человек пришло, сколько оплатило, сколько денег
+      принесли и во сколько обошлась скидка. Это позволяет видеть, какой именно пост или адресат
+      сработал, а не «канал в целом».
+    </div>
+  </div>
+</div>
+
+{# --- таблица ссылок --------------------------------------------------- #}
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>{{ icon('link') }} Все ссылки</h2>
+    <div class="actions"><span class="xs dim">клик по названию — карточка с людьми</span></div>
+  </div>
+  {% if stats %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Название</th>
+        <th>Ссылка</th>
+        <th class="num">Скидка</th>
+        <th class="num">Активации</th>
+        <th>Работает до</th>
+        <th class="num">Платящих</th>
+        <th class="num">Выручка</th>
+        <th class="num">Стоило</th>
+        <th class="num">CAC</th>
+        <th class="actions"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in stats %}
+      <tr>
+        <td>
+          <a class="nm" href="/admin/links/{{ row.link.id }}">{{ row.link.title }}</a>
+          <div class="xs dim">
+            {% if row.link.owner_name %}для {{ row.link.owner_name }} · {% endif %}
+            <code>p_{{ row.link.code }}</code>
+            {% if not row.link.is_active %} · <span class="badge">выключена</span>{% endif %}
+            {% if row.link.is_expired %} · <span class="badge">срок вышел</span>{% endif %}
+          </div>
+        </td>
+        <td>
+          {% if bot_username %}
+          <code class="xs">t.me/{{ bot_username }}?start=p_{{ row.link.code }}</code>
+          {% else %}
+          <span class="xs dim">BOT_USERNAME не задан в .env</span>
+          {% endif %}
+          <div class="xs dim">код для ввода: <code>KOMETA-{{ row.link.code|upper }}</code></div>
+        </td>
+        <td class="num">
+          −{{ row.link.discount_percent }} %
+          {% if row.link.discount_max_rub %}<div class="xs dim">≤ {{ money(row.link.discount_max_rub) }}</div>{% endif %}
+        </td>
+        <td class="num">
+          {{ num(row.link.uses_count) }}{% if row.link.uses_limit %} / {{ num(row.link.uses_limit) }}{% else %}
+          <div class="xs dim">без лимита</div>{% endif %}
+        </td>
+        <td>
+          {% if row.link.expires_at %}{{ row.link.expires_at.strftime('%d.%m.%Y') }}{% else %}
+          <span class="dim">бессрочно</span>{% endif %}
+        </td>
+        <td class="num">
+          {{ num(row.payers) }}
+          <div class="xs dim">из {{ num(row.joined) }} · {{ (row.conversion * 100)|round(0)|int }} %</div>
+        </td>
+        <td class="num">{{ money(row.revenue_rub) }}</td>
+        <td class="num">{{ money(row.discount_rub) }}</td>
+        <td class="num">
+          {% if row.payers %}
+          {{ money(row.cac_rub) }}
+          <div class="xs dim">ROI {{ row.roi|round(1) }}×</div>
+          {% else %}<span class="dim">—</span>{% endif %}
+        </td>
+        <td class="actions">
+          <a class="btn btn-sm" href="/admin/links/{{ row.link.id }}">Карточка</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="card-body">
+    <p class="dim">Персональных ссылок пока нет. Создай первую — она понадобится, когда кому-то
+      нужно дать особые условия: «вот тебе 40 % на первый месяц».</p>
+  </div>
+  {% endif %}
+</div>
+
+{% if can_act %}
+{# --- создание --------------------------------------------------------- #}
+<div class="card mt-16" id="new-link">
+  <div class="card-head">
+    <h2>{{ icon('plus') }} Новая персональная ссылка</h2>
+    <div class="actions"><span class="xs dim">код можно не придумывать — сгенерируем</span></div>
+  </div>
+  <form method="post" action="/admin/links">
+    <div class="card-body form-grid">
+      <div class="field">
+        <label for="l-title">Название</label>
+        <input id="l-title" type="text" name="title" placeholder="Сергей, коллега" required maxlength="64">
+        <span class="hint">Для тебя: под кого ссылка и зачем. Клиент этого не видит.</span>
+      </div>
+      <div class="field">
+        <label for="l-owner">Кому выдали</label>
+        <input id="l-owner" type="text" name="owner_name" placeholder="Сергей" maxlength="64">
+        <span class="hint">Для памяти: имя или @username. Можно оставить пустым.</span>
+      </div>
+      <div class="field">
+        <label for="l-code">Код ссылки</label>
+        <input id="l-code" type="text" name="code" placeholder="оставь пустым — сгенерируем" maxlength="32" autocomplete="off">
+        <span class="hint">Латиница, цифры, дефис. Ссылка: <code>?start=p_код</code>. Потом не меняется.</span>
+      </div>
+      <div class="field">
+        <label for="l-discount">Скидка, %</label>
+        <input id="l-discount" type="number" name="discount_percent" value="20" min="0" max="100">
+        <span class="hint">Своя именно для этой ссылки: 40 % одному, 10 % другому — общие правила не меняются.</span>
+      </div>
+      <div class="field">
+        <label for="l-max">Потолок скидки, ₽</label>
+        <input id="l-max" type="number" name="discount_max_rub" value="0" min="0">
+        <span class="hint">0 — без потолка. Потолок не даёт отдать годовой тариф за полцены.</span>
+      </div>
+      <div class="field">
+        <label for="l-uses">Лимит активаций</label>
+        <input id="l-uses" type="number" name="uses_limit" value="0" min="0">
+        <span class="hint">0 — без ограничения. «Только для первых 20» — впиши 20.</span>
+      </div>
+      <div class="field">
+        <label for="l-days">Работает, дней</label>
+        <input id="l-days" type="number" name="days" value="0" min="0">
+        <span class="hint">0 — бессрочно. Акция на выходные — впиши 3.</span>
+      </div>
+      <div class="field">
+        <label for="l-partner">Партнёр</label>
+        <select id="l-partner" name="partner_id">
+          <option value="">— без партнёра (частное лицо) —</option>
+          {% for partner in partners_rows %}
+          <option value="{{ partner.id }}" {% if preset_partner == partner.id %}selected{% endif %}>{{ partner.name }}</option>
+          {% endfor %}
+        </select>
+        <span class="hint">Если ссылка под партнёра, ему начислится выплата за приведённых людей.</span>
+      </div>
+      <div class="field">
+        <label for="l-note">Заметка</label>
+        <input id="l-note" type="text" name="note" maxlength="200" placeholder="просил особые условия, обещал пост">
+      </div>
+    </div>
+    <div class="card-foot">
+      <button class="btn btn-primary" type="submit">{{ icon('link') }} Создать ссылку</button>
+      <span class="hint">Скидка применится сама, когда человек откроет ссылку — код вводить не нужно.</span>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'referrals' %}
+{% block title %}Ссылка {{ link.code }} — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>{{ link.title }}</h1>
+    <div class="sub">
+      {% if bot_username %}<code>t.me/{{ bot_username }}?start=p_{{ link.code }}</code>{% else %}<code>?start=p_{{ link.code }}</code>{% endif %}
+      · скидка {{ link.discount_percent }} %
+      {% if link.owner_name %} · для {{ link.owner_name }}{% endif %}
+      · время UTC
+    </div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="/admin/links">{{ icon('link') }} Все ссылки</a>
+    {% if partner %}<a class="btn" href="/admin/partners/{{ partner.id }}">{{ icon('users') }} {{ partner.name }}</a>{% endif %}
+  </div>
+</div>
+
+{# --- что принесла ссылка --------------------------------------------- #}
+<div class="stats">
+  <div class="stat">
+    <div class="k">{{ icon('users') }} Пришли по ссылке</div>
+    <div class="v">{{ num(stats.joined) }}</div>
+    <div class="d">активаций {{ num(link.uses_count) }}{% if link.uses_limit %} из {{ num(link.uses_limit) }}{% endif %}</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('check') }} Платящих</div>
+    <div class="v">{{ num(stats.payers) }}</div>
+    <div class="d">конверсия {{ (stats.conversion * 100)|round(0)|int }} %</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('card') }} Выручка</div>
+    <div class="v">{{ money(stats.revenue_rub) }}</div>
+    <div class="d">{{ num(stats.orders) }} оплат</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('tag') }} Обошлась в</div>
+    <div class="v">{{ money(stats.discount_rub) }}</div>
+    <div class="d">{% if stats.payers %}CAC {{ money(stats.cac_rub) }} · ROI {{ stats.roi|round(1) }}×{% else %}скидка ещё не применялась{% endif %}</div>
+  </div>
+</div>
+
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>{{ icon('info') }} Условия ссылки</h2>
+    <div class="actions">
+      {% if link.is_expired %}<span class="badge">срок вышел</span>
+      {% elif not link.is_active %}<span class="badge">выключена</span>
+      {% elif link.uses_left is not none and link.uses_left == 0 %}<span class="badge">лимит исчерпан</span>
+      {% else %}<span class="badge badge-accent">работает</span>{% endif %}
+    </div>
+  </div>
+  <div class="card-body">
+    <dl class="kv">
+      <dt>Скидка</dt>
+      <dd>
+        −{{ link.discount_percent }} % на первую оплату
+        {% if link.discount_max_rub %} (не больше {{ money(link.discount_max_rub) }}){% endif %}
+      </dd>
+      <dt>Код для ввода руками</dt>
+      <dd>{% if promo_row %}<code>{{ promo_row.code }}</code> — на случай, если ссылку неудобно открыть{% else %}<span class="dim">нет</span>{% endif %}</dd>
+      <dt>Лимит активаций</dt>
+      <dd>{% if link.uses_limit %}{{ num(link.uses_count) }} из {{ num(link.uses_limit) }}{% else %}без ограничения{% endif %}</dd>
+      <dt>Действует до</dt>
+      <dd>{% if link.expires_at %}{{ link.expires_at.strftime('%d.%m.%Y %H:%M') }}{% else %}бессрочно{% endif %}</dd>
+      <dt>Партнёр</dt>
+      <dd>
+        {% if partner %}<a href="/admin/partners/{{ partner.id }}">{{ partner.name }}</a> — ему начисляется {{ partner.reward_text }}
+        {% else %}<span class="dim">не привязана: ссылка под частное лицо</span>{% endif %}
+      </dd>
+      {% if link.note %}<dt>Заметка</dt><dd>{{ link.note }}</dd>{% endif %}
+    </dl>
+  </div>
+</div>
+
+{% if can_act %}
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>{{ icon('edit') }} Изменить условия</h2>
+    <div class="actions"><span class="xs dim">код <code>p_{{ link.code }}</code> не меняется</span></div>
+  </div>
+  <form method="post" action="/admin/links/{{ link.id }}">
+    <div class="card-body form-grid">
+      <div class="field">
+        <label for="k-title">Название</label>
+        <input id="k-title" type="text" name="title" value="{{ link.title }}" maxlength="64" required>
+      </div>
+      <div class="field">
+        <label for="k-discount">Скидка, %</label>
+        <input id="k-discount" type="number" name="discount_percent" value="{{ link.discount_percent }}" min="0" max="100">
+        <span class="hint">Меняется только для будущих оплат: уже оплаченные заказы не пересчитываются.</span>
+      </div>
+      <div class="field">
+        <label for="k-max">Потолок скидки, ₽</label>
+        <input id="k-max" type="number" name="discount_max_rub" value="{{ link.discount_max_rub }}" min="0">
+      </div>
+      <div class="field">
+        <label for="k-uses">Лимит активаций</label>
+        <input id="k-uses" type="number" name="uses_limit" value="{{ link.uses_limit }}" min="0">
+        <span class="hint">Уже активировано {{ num(link.uses_count) }} — меньше этого числа ставить бессмысленно.</span>
+      </div>
+      <div class="field">
+        <label for="k-note">Заметка</label>
+        <input id="k-note" type="text" name="note" value="{{ link.note or '' }}" maxlength="200">
+      </div>
+      <div class="field">
+        <span class="label">Состояние</span>
+        <div class="check-row">
+          <input type="hidden" name="is_active" value="off">
+          <label><input type="checkbox" class="checkbox" name="is_active" value="on" {% if link.is_active %}checked{% endif %}> ссылка и код работают</label>
+        </div>
+        <span class="hint">Снятая галочка выключает и ссылку, и код-двойник.</span>
+      </div>
+    </div>
+    <div class="card-foot">
+      <button class="btn btn-primary" type="submit">{{ icon('check') }} Сохранить</button>
+      <span class="hint">Уже пришедшие люди остаются за ссылкой: их статистика и скидки не теряются.</span>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+{# --- кто пришёл ------------------------------------------------------ #}
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>{{ icon('users') }} Кто пришёл по ссылке</h2>
+    <div class="actions"><span class="xs dim">отсортировано по выручке</span></div>
+  </div>
+  {% if people %}
+  <table class="data">
+    <thead>
+      <tr><th>Клиент</th><th class="num">Оплат</th><th class="num">Выручка</th><th class="actions"></th></tr>
+    </thead>
+    <tbody>
+      {% for row in people %}
+      <tr>
+        <td>
+          <div class="who-cell">
+            <span class="avatar">{{ initials(row.user.display_name) }}</span>
+            <span style="min-width:0">
+              <a class="nm" href="/admin/users/{{ row.user.id }}">{{ row.user.display_name }}</a>
+              <span class="meta">{{ row.user.tg_id }}{% if row.user.is_blocked %} · заблокирован{% endif %}</span>
+            </span>
+          </div>
+        </td>
+        <td class="num">{{ num(row.orders) }}</td>
+        <td class="num">{{ money(row.revenue_rub) }}</td>
+        <td class="actions"><a class="btn btn-sm" href="/admin/users/{{ row.user.id }}">Карточка</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="card-body">
+    <p class="dim">По этой ссылке пока никто не приходил. Отправь человеку ссылку целиком, вместе
+      с <code>?start=p_{{ link.code }}</code> — без этой части скидка не применится.</p>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -59,13 +59,15 @@ class PaymentRegistry:
             from app.payments.platega import PlategaProvider
 
             # Каждый метод оплаты — отдельный провайдер, чтобы клиент выбирал
-            # «Карта МИР» или «СБП» в меню бота.
+            # «Карта» или «СБП» в меню бота. Номера методов приходят уже
+            # нормализованными (10 → 11), а чужие отсеиваются в настройках.
             for method in settings.platega_method_list:
                 provider = PlategaProvider(
                     merchant_id=settings.platega_merchant_id,
                     secret=settings.platega_secret,
                     payment_method=method,
                     amount_unit=settings.platega_amount_unit,
+                    send_metadata=settings.platega_send_metadata,
                     return_url=settings.platega_return_url,
                     failed_url=settings.platega_failed_url,
                 )
@@ -96,3 +98,18 @@ class PaymentRegistry:
 
 
 payments = PaymentRegistry()
+
+
+def platega_provider(code: str) -> PaymentProvider | None:
+    """Провайдер Platega для кода заказа — или любой настроенный, если код убрали.
+
+    Учётные данные у всех методов Platega одни, а статус транзакции не зависит
+    от номера метода. Поэтому заказ, оформленный по методу, который потом
+    убрали из настроек (например, карты временно отключили), всё равно можно
+    довести до оплаты: и фоновая проверка, и кнопка «Проверить оплату» должны
+    его видеть, иначе оплата зависнет без доступа.
+    """
+    provider = payments.get(code)
+    if provider is not None and getattr(provider, "merchant_id", None):
+        return provider
+    return next((p for p in payments.available() if getattr(p, "merchant_id", None)), None)

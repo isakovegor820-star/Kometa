@@ -38,7 +38,9 @@ async def test_plans_screen_shows_stars_price(bot, dispatcher, session):
 
     await dispatcher.feed_update(bot, make_update(callback_data="plans", user_id=USER_ID))
 
-    assert "180 ⭐" in bot.session.all_text()
+    plans = await orders.list_plans(session)
+    monthly = next(p for p in plans if p.code == "m1")
+    assert f"{monthly.price_stars} ⭐" in bot.session.all_text()
 
 
 async def test_stars_invoice_created_for_order(bot, dispatcher, session, stars_order):
@@ -185,7 +187,7 @@ async def test_small_stars_payment_does_not_alert_admin(bot, dispatcher, session
 
 
 async def test_reseller_button_appears_when_configured(bot, dispatcher, session, monkeypatch):
-    """Если задан бот-посредник, клиент видит кнопку «Купить N ⭐» прямо в счёте."""
+    """Если задан бот-посредник, клиент видит кнопку «Купить N звёзд» прямо в счёте."""
     from app.config import get_settings
 
     settings = get_settings()
@@ -200,7 +202,7 @@ async def test_reseller_button_appears_when_configured(bot, dispatcher, session,
     await dispatcher.feed_update(bot, make_update(callback_data=f"pay:{monthly.id}:stars", user_id=user_id))
 
     buttons = bot.session.buttons()
-    assert any("Купить" in button and "⭐" in button for button in buttons)
+    assert any("Купить" in button and "звёзд" in button for button in buttons)
     assert "Не хватает звёзд" in bot.session.all_text()
     assert "https://t.me/kupits_zvezdyy_bot" in bot.session.button_urls()
 

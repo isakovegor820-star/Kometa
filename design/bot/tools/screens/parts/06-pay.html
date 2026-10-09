@@ -1,0 +1,98 @@
+<main class="canvas">
+  <aside class="side">
+    <div class="eyebrow">Экран 06 · оплата заказа</div>
+    <h1 class="title">Сумма, скидка строкой<br>и один главный призыв</h1>
+    <p class="lead">Два шага одного экрана: выбор способа оплаты кнопкой и созданный счёт.
+    Скидка не спрятана в цене — она отдельной строкой, вместе с итогом.</p>
+    <ul class="notes">
+      <li><b>Способ оплаты — кнопкой.</b> В Telegram нельзя нарисовать радиокнопки,
+      поэтому выбор способа и есть клавиатура: СБП, карта, звёзды, крипта.</li>
+      <li><b>Скидка честно.</b> 120 ₽ → 84 ₽: строка «Скидка 30 %» и итог, который
+      совпадает с суммой заказа.</li>
+      <li><b>Один главный призыв.</b> «Оплатить» — primary. «Проверить оплату» слабее,
+      отмена — единственная danger-кнопка на экране.</li>
+      <li><b>Обещания — из кода:</b> доступ включается автоматически, счёт живёт
+      15 минут, страница оплаты защищённая.</li>
+    </ul>
+  </aside>
+
+  <section class="stage">
+    <!--PHONE-->
+    <div class="tg">
+      {{STATUS}}
+      {{HEAD}}
+      <div class="tg-body">
+        <div class="msg">
+          <b>1 месяц</b><br><br>
+          Цена: <s>120 ₽</s> → <b>84 ₽</b> (84 ₽ в месяц) 🎉<br>
+          Скидка 30 % — за приглашение от друга<br><br>
+          Срок: 30 дней<br>
+          Устройств: до 3<br>
+          Трафик: без ограничений<br><br>
+          Как удобнее оплатить?
+        </div>
+        <div class="kb">
+          <div class="kbrow one"><div class="btn">Карта, СБП или T-Pay</div></div>
+          <div class="kbrow one"><div class="btn">Перевод по СБП / на карту</div></div>
+          <div class="kbrow"><div class="btn">Telegram Stars</div><div class="btn">Крипта (USDT/TON)</div></div>
+          <div class="kbrow one"><div class="btn ghost">← К тарифам</div></div>
+        </div>
+        <div class="msg">
+          <b>Заказ #1042 на 84 ₽</b><br><br>
+          Способ: Карта, СБП или T-Pay. Нажми «Оплатить» — откроется защищённая
+          страница оплаты: карта (МИР, Visa, Mastercard), СБП, T-Pay или SberPay.<br><br>
+          Доступ включится <b>автоматически</b> сразу после оплаты.
+          <div class="sum">
+            <div class="line"><span>Тариф «1 месяц»</span><span>120 ₽</span></div>
+            <div class="line discount"><span>Скидка 30 %</span><span>−36 ₽</span></div>
+            <div class="total"><span>Итого</span><span>84 ₽</span></div>
+          </div>
+          <div class="fine" style="margin-top:10px">🎉 Скидка 36 ₽ по промокоду
+          <b>KOMETA-AB12CD34</b> уже учтена. Счёт действует 15 минут.</div>
+          <div class="fine" style="margin-top:6px">🔒 Оплата на защищённой странице
+          платёжного партнёра.</div>
+        </div>
+        <div class="kb">
+          <div class="kbrow one"><div class="btn success">Оплатить</div></div>
+          <div class="kbrow one"><div class="btn">Проверить оплату</div></div>
+          <div class="kbrow one"><div class="btn danger">← Отменить заказ</div></div>
+        </div>
+      </div>
+      <div class="tg-input">
+        <div class="field">Сообщение</div>
+        <svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="8" y="2.5" width="6" height="11" rx="3"/><path d="M4.5 10.5a6.5 6.5 0 0 0 13 0"/><path d="M11 17v3"/></svg>
+      </div>
+    </div>
+    <!--/PHONE-->
+    <div class="stage-cap">Мокап клиента Telegram · 420 px · заказ и сумма — пример</div>
+  </section>
+
+  <aside class="side right">
+    <h2>Тексты — из бота</h2>
+    <ul class="src">
+      <li><code>texts.ORDER_CREATED_WATA</code> — «💳 Заказ #{order_id} на {amount} ₽»,
+      «откроется защищённая страница оплаты», «Доступ включится автоматически»</li>
+      <li><code>texts.ORDER_CREATED_PLATEGA</code> — «Счёт действует 15 минут»</li>
+      <li><code>texts.PRICE_LINE_DISCOUNT</code> — «Цена: {base} ₽ → {price} ₽
+      ({per_month} ₽ в месяц) 🎉», «Скидка {percent}% — за приглашение от друга»</li>
+      <li><code>texts.DISCOUNT_NOTE</code> — «🎉 Скидка {discount} ₽ по промокоду
+      <code>{code}</code> уже учтена»</li>
+      <li><code>buy.PROVIDER_TITLES</code> — новые подписи без эмодзи:
+      «Перевод по СБП / на карту», «Карта, СБП или T-Pay», «Telegram Stars»,
+      «Крипта (USDT/TON)», «СБП или QR-код» (<code>START-COPY.md</code>, раздел 4)</li>
+      <li><code>keyboards.manual_order_kb()</code> / <code>crypto_order_kb()</code> —
+      «Проверить оплату», «← Отменить заказ» (danger), «Оплатил, но доступа нет»</li>
+      <li><code>settings.referral_discount_percent = 30</code>,
+      <code>referral_discount_max_rub = 240</code> — оттуда 84 ₽ в примере</li>
+    </ul>
+    <div class="callout"><b>Почему способ оплаты — кнопки:</b> в Telegram-сообщении нет
+    радиокнопок и форм. Выбор способа в боте уже сделан клавиатурой
+    (<code>providers_kb</code>) — макет это повторяет, а не изобретает.</div>
+    <div class="callout"><b>Строка про защиту оплаты</b> — из
+    <code>ORDER_CREATED_WATA</code>: «откроется защищённая страница оплаты».
+    Ничего сверх этого в макете не обещано.</div>
+    <div class="callout warn"><b>Скидка одна.</b> В боте цена на кнопке уже со скидкой
+    (<code>PLANS_HEADER_DISCOUNT</code>), второй раз она не применяется
+    (<code>PROMO_FAIL.already_used / not_first</code>). В макете — одна скидка 30 %.</div>
+  </aside>
+</main>

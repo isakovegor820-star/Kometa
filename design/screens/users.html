@@ -8,7 +8,11 @@
 <title>Пользователи — Kometa</title>
 
 <script>
-(function(){try{var t=localStorage.getItem("kometa-admin-theme");if(t==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}})();
+(function(){try{
+  if(localStorage.getItem("kometa-admin-theme")==="dark")document.documentElement.setAttribute("data-theme","dark");
+  var d=localStorage.getItem("kometa-admin-density");if(d)document.documentElement.setAttribute("data-density",d);
+  if(localStorage.getItem("kometa-admin-nav")==="min")document.documentElement.setAttribute("data-nav","min");
+}catch(e){}})();
 </script>
 <style>
 /* ============================================================================
@@ -103,8 +107,13 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --sidebar-w: 252px;
+  --sidebar-min: 68px;
   --topbar-h: 60px;
   --row-h: 44px;
+  /* Отступы ячейки таблицы. Меняются переключателем плотности (шапка панели):
+     на 15″ в «компактном» режиме в экран входит на треть больше строк. */
+  --cell-y: 10px;
+  --cell-x: 14px;
 
   /* Тени — минимальные, только чтобы отделить слой */
   --shadow-xs: 0 1px 2px rgba(16, 24, 40, .05);
@@ -240,6 +249,7 @@ h1 > svg, h2 > svg, h3 > svg, dd > svg, td > svg { vertical-align: -3px; margin-
   width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
   background: var(--surface); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+  transition: width .16s ease, flex-basis .16s ease;
 }
 
 .brand {
@@ -301,7 +311,11 @@ h1 > svg, h2 > svg, h3 > svg, dd > svg, td > svg { vertical-align: -3px; margin-
   color: var(--accent); display: grid; place-items: center; font-weight: 650; font-size: 12px;
 }
 
-.content { padding: 22px 24px 72px; max-width: 1360px; width: 100%; }
+/* Контент занимает всю ширину окна. Раньше стоял жёсткий предел 1360 px: на 15″
+   ноутбуке и внешнем мониторе справа пустовало 300–600 px, пока таблица в это же
+   время уезжала в горизонтальный скролл. Верхний предел оставлен только для
+   сверхшироких экранов (≥2040 px), чтобы строка не растягивалась на «три метра». */
+.content { padding: 20px clamp(16px, 1.2vw, 30px) 80px; max-width: 2040px; width: 100%; }
 
 /* ------------------------------------------------------------ заголовок */
 .page-head {
@@ -442,10 +456,10 @@ table.data th {
   position: sticky; top: 0; z-index: 2;
   background: var(--surface-2); color: var(--text-2); font-weight: 600; font-size: var(--fz-xs);
   text-transform: uppercase; letter-spacing: .07em;
-  text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  text-align: left; padding: 9px var(--cell-x); border-bottom: 1px solid var(--border); white-space: nowrap;
 }
 table.data td {
-  padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: middle;
+  padding: var(--cell-y) var(--cell-x); border-bottom: 1px solid var(--border); vertical-align: middle;
 }
 table.data tbody tr:hover td { background: var(--surface-2); }
 table.data tbody tr:last-child td { border-bottom: 0; }
@@ -643,6 +657,9 @@ dialog.modal .modal-foot { display: flex; gap: 8px; justify-content: flex-end; p
 
 /* ----------------------------------------------------------- детали/ключ */
 .kv { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 9px 14px; font-size: var(--fz-sm); }
+/* Узкая карточка (мастер-деталь): колонка подписей уже, иначе значению
+   не остаётся места и ссылка-подписка превращается в «sub/b…». */
+.kv-tight { grid-template-columns: 104px minmax(0, 1fr); gap: 7px 10px; }
 .kv dt { color: var(--text-2); }
 .kv dd { margin: 0; font-weight: 550; min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .kv { grid-template-columns: 1fr; gap: 3px 0; } .kv dd { margin-bottom: 8px; } }
@@ -665,6 +682,306 @@ dialog.modal .modal-foot { display: flex; gap: 8px; justify-content: flex-end; p
 .meter.is-ok > i { background: var(--ok); }
 .meter.is-warn > i { background: var(--warn); }
 .meter.is-err > i { background: var(--err); }
+
+/* --------------------------------------------- широкий экран и плотность */
+/* Идея: на большом экране панель должна показывать больше данных, а не больше
+   воздуха. Ширина используется целиком, столбцы получают фиксированный бюджет,
+   а длинные значения (ссылки, имена) сокращаются с многоточием и живут
+   в подсказке — так таблица не уезжает в горизонтальный скролл. */
+
+/* Тройной режим плотности. Переключается кнопкой в шапке, выбор запоминается
+   в localStorage и применяется до первой отрисовки (см. base.html). */
+:root[data-density="compact"] { --cell-y: 6px; --cell-x: 12px; }
+:root[data-density="compact"] .who-cell .avatar { width: 26px; height: 26px; flex-basis: 26px; font-size: 11px; }
+:root[data-density="roomy"] { --cell-y: 14px; --cell-x: 18px; }
+
+/* Таблица с бюджетом столбцов. `col` здесь — не жёсткий закон, а приоритет:
+   на широком экране столбцы получают свои 268/266 px, а на узком сжимаются
+   до многоточия. Именно поэтому НЕ ставим table-layout: fixed — иначе на
+   1366 px фиксированные столбцы выдавливают «Клиента» в ноль. */
+table.data.fit th, table.data.fit td { overflow: hidden; }
+table.data.fit td .who-cell, table.data.fit td .copy-chip { max-width: 100%; }
+/* Ниже этого минимума сжимать нечего — честнее горизонтальный скролл.
+   Ограничение только для полноэкранных списков: у мини-таблиц внутри карточек
+   (дашборд) своя, гораздо меньшая ширина, и 880 px там ломали бы вёрстку. */
+.table-wrap table.data.fit { min-width: 880px; }
+.table-wrap table.data.fit.is-wide { min-width: 1020px; }
+
+/* Липкие первые столбцы: при горизонтальной прокрутке видно, о ком строка.
+   `stick-1` — самый левый (ID или чекбокс), `stick-2` — следующий за ним
+   (Клиент/Заказ); смещение второго — ширина первого. */
+table.data.stick-first th.stick-1, table.data.stick-first td.stick-1 {
+  position: sticky; left: 0; z-index: 1; background: var(--surface);
+}
+table.data.stick-first th.stick-2, table.data.stick-first td.stick-2 {
+  position: sticky; left: var(--stick-1-w, 54px); z-index: 1; background: var(--surface);
+}
+table.data.stick-first th.stick-1, table.data.stick-first th.stick-2 {
+  z-index: 3; background: var(--surface-2);
+}
+table.data.stick-first tbody tr:hover td.stick-1,
+table.data.stick-first tbody tr:hover td.stick-2 { background: var(--surface-2); }
+table.data.stick-first tr.is-selected td.stick-1,
+table.data.stick-first tr.is-selected td.stick-2 { background: var(--accent-soft); }
+
+/* Настраиваемые столбцы: список скрытых ключей лежит в data-cols-hidden,
+   выбор хранит localStorage (кнопка «Столбцы» в шапке страницы). */
+table.data[data-cols-hidden~="tags"] [data-col="tags"],
+table.data[data-cols-hidden~="status"] [data-col="status"],
+table.data[data-cols-hidden~="expires"] [data-col="expires"],
+table.data[data-cols-hidden~="days"] [data-col="days"],
+table.data[data-cols-hidden~="orders"] [data-col="orders"],
+table.data[data-cols-hidden~="link"] [data-col="link"],
+table.data[data-cols-hidden~="plan"] [data-col="plan"],
+table.data[data-cols-hidden~="sum"] [data-col="sum"],
+table.data[data-cols-hidden~="provider"] [data-col="provider"],
+table.data[data-cols-hidden~="created"] [data-col="created"],
+table.data[data-cols-hidden~="paid"] [data-col="paid"] { display: none !important; }
+
+/* ------------------------------------------- мастер-деталь (список + карточка) */
+/* Клиент открывается сбоку, список остаётся на месте: не нужно возвращаться
+   «назад» после каждого просмотра. ВАЖНО: колонку под карточку резервируем
+   только когда карточка действительно есть (`has-card`), иначе grid держит
+   392 px пустыми и список выглядит обрезанным. */
+.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+.split.has-card { grid-template-columns: minmax(0, 1fr) 392px; }
+.split-main { min-width: 0; }
+.side-card { position: sticky; top: calc(var(--topbar-h) + 12px); max-height: calc(100vh - var(--topbar-h) - 30px); overflow-y: auto; }
+.side-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 2px; }
+.side-title {
+  margin: 16px 0 6px; font-size: var(--fz-xs); font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.side-notes { display: flex; flex-direction: column; gap: 8px; }
+.side-note { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; }
+.side-note-form { margin-top: 8px; }
+.side-note-form input { flex: 1 1 auto; min-width: 0; }
+.side-list { display: flex; flex-direction: column; }
+.side-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid var(--border); font-size: var(--fz-sm);
+}
+.side-row:last-child { border-bottom: 0; }
+.side-row .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* На ноутбуке 13–15″ карточка сбоку отнимала бы у таблицы слишком много:
+   ниже 1820 px она встаёт сверху во всю ширину, список остаётся целым. */
+@media (max-width: 1820px) {
+  .split.has-card { grid-template-columns: minmax(0, 1fr); }
+  .side-card { position: static; max-height: none; order: -1; }
+}
+
+/* Карточка открыта — списку достаётся меньше ширины. Форму «+ дни» из строки
+   убираем: те же кнопки есть в карточке, а столбец «Действия» перестаёт
+   выдавливать таблицу в скролл. Ссылку ужимаем: полный адрес в подсказке. */
+.split .quick-grant { display: none; }
+.split th.c-link { width: 216px; }
+@media (max-width: 1620px) { .split th.c-link { width: 150px; } }
+
+/* ------------------------------------------------------------- тосты */
+/* Результат действия без перезагрузки: плашка в углу, список обновляется
+   на месте (см. admin.js). Ошибки живут дольше успехов. */
+.toasts {
+  position: fixed; right: 18px; bottom: 18px; z-index: 80;
+  display: flex; flex-direction: column; gap: 8px;
+  max-width: min(430px, calc(100% - 36px));
+}
+.toast {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 10px 12px;
+  font-size: var(--fz-sm); color: var(--text); animation: toast-in .18s ease;
+}
+.toast.ok { border-left-color: var(--ok); }
+.toast.err { border-left-color: var(--err); }
+.toast svg { flex: 0 0 auto; margin-top: 1px; }
+.toast.ok svg { color: var(--ok); }
+.toast.err svg { color: var(--err); }
+.toast .grow { min-width: 0; }
+.toast button { margin-left: auto; color: var(--text-3); font-size: 16px; line-height: 1; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
+/* ------------------------------------------------ командная палитра ⌘K */
+/* Одно поле вместо хождения по меню: разделы, клиенты и заказы в одном списке.
+   Разметка живёт в base.html, данные ищет /admin/search. */
+.cmdk { position: fixed; inset: 0; z-index: 70; display: none; }
+.cmdk.open { display: block; }
+.cmdk-back { position: absolute; inset: 0; background: rgba(15, 23, 42, .45); }
+.cmdk-panel {
+  position: relative; margin: 10vh auto 0; width: min(580px, calc(100% - 32px));
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.cmdk-panel input {
+  width: 100%; border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+  padding: 15px 18px; font-size: var(--fz-md); background: transparent; color: var(--text);
+}
+.cmdk-panel input:focus { outline: none; }
+.cmdk-list { max-height: 54vh; overflow-y: auto; padding: 6px; }
+.cmdk-group {
+  padding: 8px 10px 4px; font-size: var(--fz-xs); font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.cmdk-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+  border-radius: var(--radius); cursor: pointer; color: var(--text);
+}
+.cmdk-item:hover, .cmdk-item.active { background: var(--accent-soft); color: var(--accent); }
+.cmdk-item .grow { min-width: 0; flex: 1 1 auto; }
+.cmdk-item .t { display: block; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item .s { display: block; font-size: var(--fz-xs); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item.active .s { color: var(--accent); opacity: .8; }
+.cmdk-item svg { color: var(--text-3); }
+.cmdk-item.active svg, .cmdk-item:hover svg { color: var(--accent); }
+.cmdk-empty { padding: 18px 14px; color: var(--text-3); font-size: var(--fz-sm); }
+.cmdk-foot {
+  display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border);
+  font-size: var(--fz-xs); color: var(--text-3);
+}
+.cmdk-foot kbd { padding: 0 5px; }
+.topbar .cmdk-hint { font-size: var(--fz-xs); color: var(--text-3); }
+@media (max-width: 1240px) { .topbar .cmdk-hint { display: none; } }
+
+/* Меню столбцов в шапке страницы */
+.colmenu { position: relative; }.colmenu > summary {
+  list-style: none; cursor: pointer; user-select: none;
+}
+.colmenu > summary::-webkit-details-marker { display: none; }
+.colmenu[open] > summary { border-color: var(--accent-border); color: var(--accent); }
+.colmenu-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 208px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg); padding: 8px;
+}
+.colmenu-pop label {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border-radius: var(--radius-sm); font-size: var(--fz-sm); color: var(--text-2); cursor: pointer;
+}
+.colmenu-pop label:hover { background: var(--surface-3); color: var(--text); }
+.colmenu-pop .hint { padding: 2px 8px 6px; }
+
+/* Бюджет столбцов. Ровно один столбец без ширины (Клиент) забирает остаток —
+   он и должен тянуться, потому что там имя и Telegram-ник. */
+th.c-id { width: 54px; }
+th.c-check { width: 36px; }
+th.c-tags { width: 148px; }
+th.c-status { width: 120px; }
+th.c-date { width: 132px; }
+th.c-days { width: 104px; }
+th.c-num { width: 84px; }
+th.c-link { width: 268px; min-width: 120px; }
+th.c-actions { width: 266px; }
+th.c-plan { width: 148px; }
+th.c-sum { width: 118px; }
+th.c-provider { width: 168px; }
+
+/* Бюджет столбцов на ноутбуках: на 15″ (и тем более 13″) те же столбцы
+   должны ужиматься, а не уезжать за край. Ключевое — «Клиент» иначе не
+   помещается, поэтому первыми сжимаются ссылка, метки и действия. */
+@media (max-width: 1620px) {
+  th.c-link { width: 208px; }
+  th.c-actions { width: 244px; }
+  th.c-tags { width: 124px; }
+  th.c-provider { width: 140px; }
+  th.c-plan { width: 132px; }
+}
+@media (max-width: 1500px) {
+  th.c-link { width: 148px; min-width: 88px; }
+  th.c-actions { width: 228px; }
+  th.c-tags { width: 104px; }
+  th.c-date { width: 118px; }
+  th.c-days { width: 88px; }
+  th.c-num { width: 68px; }
+  th.c-status { width: 106px; }
+  th.c-provider { width: 124px; }
+  th.c-plan { width: 132px; }
+  /* Быстрая выдача дней из списка — удобство широкого экрана. На 13–14″
+     её место занимает «Клиент»: та же операция есть в карточке клиента. */
+  table.data.fit .quick-grant { display: none; }
+  /* Второстепенные столбцы заказов уходят, чтобы очередь не уезжала в скролл. */
+  .hide-md { display: none !important; }
+}
+
+/* 13–14″: последнее, что уходит, — метки клиента. Они есть в карточке и в
+   фильтре «Все метки», а «Клиент» и «Действия» нужны в каждой строке. */
+@media (max-width: 1400px) {
+  .hide-sm { display: none !important; }
+}
+
+/* Имя и ник в одну строку с многоточием: раньше «Мария Зайцева» ломалась
+   на три строки и строка таблицы вырастала вдвое. */
+.who-cell .nm, .who-cell .meta {
+  display: block; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.who-cell > span:last-child { min-width: 0; flex: 1 1 auto; }
+
+/* Ссылка-подписка: короткая подпись + открыть + скопировать. Копирование
+   по-прежнему кладёт в буфер полный адрес — он же в подсказке. */
+.copy-chip.is-flex { display: flex; width: 100%; }
+.copy-chip .icon-btn, .copy-chip button { flex: 0 0 auto; }
+.icon-btn {
+  display: grid; place-items: center; padding: 2px; border-radius: var(--radius-xs);
+  color: var(--text-3); background: transparent; border: 0; cursor: pointer;
+}
+.icon-btn:hover { color: var(--accent); background: var(--accent-soft); }
+.icon-btn svg { width: 14px; height: 14px; }
+
+.input-days { width: 56px; }
+
+/* В ячейках с выравниванием вправо (`right`) запрещён перенос строк. Для
+   подписи-пояснения под суммой это лишнее: она распирала столбец. */
+.wrap, .right .wrap { white-space: normal; }
+
+/* Container query для карточки «Заявки на оплату»: её ширина зависит от сетки
+   дашборда, а не от окна, поэтому обычные media queries тут не работают.
+   Узкая карточка убирает «Тариф» — он есть в очереди заказов. */
+.card.mini-pending { container-type: inline-size; }
+@container (max-width: 620px) {
+  .mini-pending .hide-narrow { display: none !important; }
+}
+
+/* Заблокированный клиент помечен и строкой: на 13″ колонка меток (где стоит
+   бейдж) скрыта, а состояние должно читаться всегда. */
+table.data tr.row-blocked > td:first-child { box-shadow: inset 3px 0 0 var(--err); }
+
+/* В таблице с фиксированными столбцами действия обязаны укладываться в одну
+   строку: перенос кнопок удваивал высоту строки (93 px вместо 54). */
+table.data.fit .row-actions { flex-wrap: nowrap; }
+table.data.fit .row-actions .btn { white-space: nowrap; }
+
+/* Свёрнутый сайдбар: освобождает ~180 px под данные. Иконки остаются,
+   подписи уходят в подсказки (title), состояние помнит localStorage и
+   применяется атрибутом на <html> до первой отрисовки — без мигания. */
+:root[data-nav="min"] .sidebar { width: var(--sidebar-min); flex-basis: var(--sidebar-min); }
+:root[data-nav="min"] .brand { justify-content: center; padding: 0; }
+:root[data-nav="min"] .brand > span:not(.brand-mark) { display: none; }
+:root[data-nav="min"] .nav { padding: 12px 8px 20px; }
+:root[data-nav="min"] .nav-title { display: none; }
+:root[data-nav="min"] .nav-group + .nav-group { margin-top: 10px; }
+:root[data-nav="min"] .nav a { justify-content: center; padding: 10px 0; position: relative; }
+:root[data-nav="min"] .nav a > span:not(.count) { display: none; }
+:root[data-nav="min"] .nav a .count {
+  position: absolute; top: 1px; right: 7px; margin: 0; padding: 0 4px;
+  min-width: 16px; font-size: 10px; line-height: 16px;
+}
+:root[data-nav="min"] .sidebar-foot { padding: 10px 8px; }
+:root[data-nav="min"] .sidebar-foot .who { flex-direction: column; gap: 6px; }
+:root[data-nav="min"] .sidebar-foot .who > span:not(.avatar) { display: none; }
+:root[data-nav="min"] .sidebar-foot .btn { margin-left: 0 !important; }
+
+/* Кнопки-переключатели в шапке */
+.topbar .tools { display: flex; align-items: center; gap: 4px; }
+.density-toggle span { font-size: var(--fz-xs); font-weight: 550; }
+@media (max-width: 1240px) { .density-toggle span { display: none; } }
+
+/* На широком экране сетки не должны рассыпаться в десяток узких колонок:
+   панели дашборда — 2–3 в ряд, плитки метрик — 6 в ряд. */
+@media (min-width: 1500px) {
+  .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stats { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
 
 /* ------------------------------------------------------------- адаптив */
 .sidebar-toggle { display: none; }
@@ -735,7 +1052,7 @@ table.data th{position:static!important}
       
 
       <div class="nav-group">
-        <a href="/admin" class=""
+        <a href="/admin" class="" title="Дашборд"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
@@ -746,7 +1063,7 @@ table.data th{position:static!important}
       <div class="nav-group">
         <div class="nav-title">Операции</div>
         
-        <a href="/admin/orders" class=""
+        <a href="/admin/orders" class="" title="Очередь заказов"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
@@ -754,14 +1071,21 @@ table.data th{position:static!important}
         <span class="count">4</span>
       </a>
         
-        <a href="/admin/users" class="active"
+        <a href="/admin/users" class="active" title="Пользователи"
          aria-current=page>
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><path d="M16 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1"/><circle cx="9.5" cy="7" r="3.2"/><path d="M21 19v-1a4 4 0 0 0-3-3.87"/><path d="M16.5 4.2a3.2 3.2 0 0 1 0 6"/></svg><span>Пользователи</span>
         
       </a>
-        <a href="/admin/refunds" class=""
+        <a href="/admin/downtime" class="" title="Компенсация простоя"
+         >
+        <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg><span>Компенсация простоя</span>
+        
+      </a>
+        <a href="/admin/refunds" class="" title="Возвраты"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
@@ -771,14 +1095,14 @@ table.data th{position:static!important}
       </div>
       <div class="nav-group">
         <div class="nav-title">Деньги</div>
-        <a href="/admin/finance" class=""
+        <a href="/admin/finance" class="" title="Финансы и отчёты"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><path d="M4 20V4"/><path d="M4 20h16"/><rect x="7" y="12" width="3" height="5" rx="1"/><rect x="12" y="8" width="3" height="9" rx="1"/><rect x="17" y="5" width="3" height="12" rx="1"/></svg><span>Финансы и отчёты</span>
         
       </a>
-        <a href="/admin/plans" class=""
+        <a href="/admin/plans" class="" title="Тарифы"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
@@ -788,7 +1112,7 @@ table.data th{position:static!important}
       </div>
       <div class="nav-group">
         <div class="nav-title">Инфраструктура</div>
-        <a href="/admin/nodes" class=""
+        <a href="/admin/nodes" class="" title="Ноды"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
@@ -796,7 +1120,7 @@ table.data th{position:static!important}
         
       </a>
         
-        <a href="/admin/alerts" class=""
+        <a href="/admin/alerts" class="" title="Алерты"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
@@ -807,14 +1131,14 @@ table.data th{position:static!important}
       </div>
       <div class="nav-group">
         <div class="nav-title">Рост</div>
-        <a href="/admin/referrals" class=""
+        <a href="/admin/referrals" class="" title="Рефералы и промокоды"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M3 12h18"/><path d="M12 8v13"/><path d="M12 8S10.5 3 8 3a2.5 2.5 0 0 0 0 5z"/><path d="M12 8s1.5-5 4-5a2.5 2.5 0 0 1 0 5z"/></svg><span>Рефералы и промокоды</span>
         
       </a>
-        <a href="/admin/broadcast" class=""
+        <a href="/admin/broadcast" class="" title="Рассылки"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
@@ -825,14 +1149,14 @@ table.data th{position:static!important}
       
       <div class="nav-group">
         <div class="nav-title">Система</div>
-        <a href="/admin/audit" class=""
+        <a href="/admin/audit" class="" title="Журнал действий"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v5h5"/><path d="M12 8v4.5l3 1.8"/></svg><span>Журнал действий</span>
         
       </a>
-        <a href="/admin/team" class=""
+        <a href="/admin/team" class="" title="Команда и роли"
          >
         <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
@@ -872,9 +1196,27 @@ table.data th{position:static!important}
       </div>
       <div class="spacer"></div>
       
-      <button class="btn btn-ghost btn-icon" data-theme-toggle type="button" aria-label="Тема">
-        <span data-theme-icon>☾</span>
-      </button>
+      <div class="tools">
+        <button class="btn btn-ghost btn-sm" data-cmdk-open type="button"
+                title="Быстрый переход: клиент, заказ или раздел (⌘K)" aria-label="Быстрый переход">
+          <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg><span class="cmdk-hint">⌘K</span>
+        </button>
+        <button class="btn btn-ghost btn-sm density-toggle" data-density-toggle type="button"
+                title="Плотность таблиц: обычная / компактная" aria-label="Плотность таблиц">
+          <svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M4 6h16M4 12h16M4 18h16"/><path d="M4 6v12"/></svg><span data-density-label>Обычно</span>
+        </button>
+        <button class="btn btn-ghost btn-icon" data-nav-min type="button"
+                title="Свернуть меню" aria-label="Свернуть меню"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+        <button class="btn btn-ghost btn-icon" data-theme-toggle type="button" aria-label="Тема">
+          <span data-theme-icon>☾</span>
+        </button>
+      </div>
     </header>
     
 
@@ -892,6 +1234,20 @@ table.data th{position:static!important}
     </div>
   </div>
   <div class="actions">
+    <details class="colmenu" data-colmenu data-table="users">
+      <summary class="btn btn-ghost btn-sm"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg> Столбцы</summary>
+      <div class="colmenu-pop">
+        <div class="hint xs dim">Что показывать в списке</div>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="tags"> Метки</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="status"> Статус</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="expires"> Действует до</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="days"> Осталось дней</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="orders"> Оплат</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="link"> Ссылка-подписка</label>
+      </div>
+    </details>
     
     <a class="btn btn-ghost" href="/admin/export/users.csv?"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
@@ -974,51 +1330,66 @@ table.data th{position:static!important}
 </form>
 
 
+
+<div class="split">
+<div class="split-main">
 <div class="table-wrap">
   <div class="table-scroll">
-    <table class="data">
+    <table class="data fit stick-first" data-table="users">
+      
       <thead>
         <tr>
-          <th>ID</th><th>Клиент</th><th>Метки</th><th>Статус</th><th>Действует до</th>
-          <th class="right">Осталось</th><th class="right">Оплат</th><th>Ссылка-подписка</th><th class="actions">Действия</th>
+          <th class="c-id stick-1">ID</th><th class="stick-2">Клиент</th><th class="c-tags hide-sm" data-col="tags">Метки</th>
+          <th class="c-status" data-col="status">Статус</th><th class="c-date" data-col="expires">Действует до</th>
+          <th class="right c-days" data-col="days">Осталось</th><th class="right c-num" data-col="orders">Оплат</th>
+          <th class="c-link" data-col="link">Ссылка-подписка</th><th class="actions c-actions">Действия</th>
         </tr>
       </thead>
       <tbody>
         
-        <tr data-row data-search="8 Мария Зайцева mzaytseva 333222111 vip">
-          <td class="id">8</td>
-          <td>
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=8"
+            data-search="8 Мария Зайцева mzaytseva 333222111 vip">
+          <td class="id stick-1">8</td>
+          <td class="stick-2">
             <div class="who-cell">
               <span class="avatar">МЗ</span>
-              <span style="min-width:0">
-                <a class="nm" href="/admin/users/8">Мария Зайцева</a>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=8" title="Мария Зайцева · открыть карточку сбоку">Мария Зайцева</a>
                 <span class="meta">333222111 · @mzaytseva</span>
               </span>
             </div>
           </td>
-          <td>
+          <td class="hide-sm" data-col="tags">
             <span class="tag">vip</span> 
             
+            
           </td>
-          <td>
+          <td data-col="status">
             
               
               <span class="badge badge-ok">Активна</span>
             
           </td>
-          <td class="small dim nowrap">06.10.2031 19:19</td>
-          <td class="right">
+          <td class="small dim nowrap" data-col="expires">08.10.2031 14:15</td>
+          <td class="right" data-col="days">
             
               <b class="">1826</b>
               <div class="xs dim">1826 дней</div>
             
           </td>
-          <td class="right">5</td>
-          <td>
+          <td class="right" data-col="orders">5</td>
+          <td data-col="link">
             
-            <span class="copy-chip">
-              <span class="v" title="http://127.0.0.1:8080/sub/GFeeHg_7lZL-nvweoORacwyb5JsanGWr">http://127.0.0.1:8080/sub/GFeeHg_7lZL-nvweoORacwyb5JsanGWr</span>
-              <button type="button" data-copy="http://127.0.0.1:8080/sub/GFeeHg_7lZL-nvweoORacwyb5JsanGWr" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/tcv284UE5KNgfxbD38XV3L8fiEbrfTvI">
+              <span class="v">sub/tcv284UE…fTvI</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/tcv284UE5KNgfxbD38XV3L8fiEbrfTvI" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/tcv284UE5KNgfxbD38XV3L8fiEbrfTvI" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
             </span>
@@ -1028,9 +1399,9 @@ table.data th{position:static!important}
             <div class="row-actions">
               <a class="btn btn-sm" href="/admin/users/8">Карточка</a>
               
-              <form method="post" action="/admin/users/8/grant" class="inline-form"
+              <form method="post" action="/admin/users/8/grant" class="inline-form quick-grant"
                     title="Начислить дни без оплаты">
-                <input type="number" name="days" value="7" min="1" max="3650" style="width:72px" aria-label="Дней">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
                 <button class="btn btn-sm" type="submit">+ дни</button>
               </form>
               
@@ -1038,40 +1409,49 @@ table.data th{position:static!important}
           </td>
         </tr>
         
-        <tr data-row data-search="7 Пётр Лебедев petr 661029384 ">
-          <td class="id">7</td>
-          <td>
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=7"
+            data-search="7 Пётр Лебедев petr 661029384 ">
+          <td class="id stick-1">7</td>
+          <td class="stick-2">
             <div class="who-cell">
               <span class="avatar">ПЛ</span>
-              <span style="min-width:0">
-                <a class="nm" href="/admin/users/7">Пётр Лебедев</a>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=7" title="Пётр Лебедев · открыть карточку сбоку">Пётр Лебедев</a>
                 <span class="meta">661029384 · @petr</span>
               </span>
             </div>
           </td>
-          <td>
+          <td class="hide-sm" data-col="tags">
+            
             
             
           </td>
-          <td>
+          <td data-col="status">
             
               
               <span class="badge badge-ok">Активна</span>
             
           </td>
-          <td class="small dim nowrap">28.09.2028 19:19</td>
-          <td class="right">
+          <td class="small dim nowrap" data-col="expires">30.09.2028 14:15</td>
+          <td class="right" data-col="days">
             
               <b class="">723</b>
               <div class="xs dim">723 дня</div>
             
           </td>
-          <td class="right">4</td>
-          <td>
+          <td class="right" data-col="orders">4</td>
+          <td data-col="link">
             
-            <span class="copy-chip">
-              <span class="v" title="http://127.0.0.1:8080/sub/2-SSocH2qxdejPi3HsiP3Xa3azW_yei7">http://127.0.0.1:8080/sub/2-SSocH2qxdejPi3HsiP3Xa3azW_yei7</span>
-              <button type="button" data-copy="http://127.0.0.1:8080/sub/2-SSocH2qxdejPi3HsiP3Xa3azW_yei7" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/ky0djzKscOxri6H765gxGfWYLmPGR7V3">
+              <span class="v">sub/ky0djzKs…R7V3</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/ky0djzKscOxri6H765gxGfWYLmPGR7V3" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/ky0djzKscOxri6H765gxGfWYLmPGR7V3" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
             </span>
@@ -1081,9 +1461,9 @@ table.data th{position:static!important}
             <div class="row-actions">
               <a class="btn btn-sm" href="/admin/users/7">Карточка</a>
               
-              <form method="post" action="/admin/users/7/grant" class="inline-form"
+              <form method="post" action="/admin/users/7/grant" class="inline-form quick-grant"
                     title="Начислить дни без оплаты">
-                <input type="number" name="days" value="7" min="1" max="3650" style="width:72px" aria-label="Дней">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
                 <button class="btn btn-sm" type="submit">+ дни</button>
               </form>
               
@@ -1091,40 +1471,49 @@ table.data th{position:static!important}
           </td>
         </tr>
         
-        <tr data-row data-search="6 Сергей Волков svolkov 745213098 ">
-          <td class="id">6</td>
-          <td>
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=6"
+            data-search="6 Сергей Волков svolkov 745213098 ">
+          <td class="id stick-1">6</td>
+          <td class="stick-2">
             <div class="who-cell">
               <span class="avatar">СВ</span>
-              <span style="min-width:0">
-                <a class="nm" href="/admin/users/6">Сергей Волков</a>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=6" title="Сергей Волков · открыть карточку сбоку">Сергей Волков</a>
                 <span class="meta">745213098 · @svolkov</span>
               </span>
             </div>
           </td>
-          <td>
+          <td class="hide-sm" data-col="tags">
+            
             
             
           </td>
-          <td>
+          <td data-col="status">
             
               
               <span class="badge badge-ok">Активна</span>
             
           </td>
-          <td class="small dim nowrap">31.03.2028 19:19</td>
-          <td class="right">
+          <td class="small dim nowrap" data-col="expires">02.04.2028 14:15</td>
+          <td class="right" data-col="days">
             
               <b class="">542</b>
               <div class="xs dim">542 дня</div>
             
           </td>
-          <td class="right">6</td>
-          <td>
+          <td class="right" data-col="orders">6</td>
+          <td data-col="link">
             
-            <span class="copy-chip">
-              <span class="v" title="http://127.0.0.1:8080/sub/q8a98Egf5AGGXBmP5-bvP1PBXnialxBH">http://127.0.0.1:8080/sub/q8a98Egf5AGGXBmP5-bvP1PBXnialxBH</span>
-              <button type="button" data-copy="http://127.0.0.1:8080/sub/q8a98Egf5AGGXBmP5-bvP1PBXnialxBH" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/n7h0cZSPbno8jM8ON5MeME0MNgHsGzVN">
+              <span class="v">sub/n7h0cZSP…GzVN</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/n7h0cZSPbno8jM8ON5MeME0MNgHsGzVN" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/n7h0cZSPbno8jM8ON5MeME0MNgHsGzVN" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
             </span>
@@ -1134,9 +1523,9 @@ table.data th{position:static!important}
             <div class="row-actions">
               <a class="btn btn-sm" href="/admin/users/6">Карточка</a>
               
-              <form method="post" action="/admin/users/6/grant" class="inline-form"
+              <form method="post" action="/admin/users/6/grant" class="inline-form quick-grant"
                     title="Начислить дни без оплаты">
-                <input type="number" name="days" value="7" min="1" max="3650" style="width:72px" aria-label="Дней">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
                 <button class="btn btn-sm" type="submit">+ дни</button>
               </form>
               
@@ -1144,40 +1533,49 @@ table.data th{position:static!important}
           </td>
         </tr>
         
-        <tr data-row data-search="5 Ольга Смирнова olga_s 128374651 конфликт">
-          <td class="id">5</td>
-          <td>
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=5"
+            data-search="5 Ольга Смирнова olga_s 128374651 конфликт">
+          <td class="id stick-1">5</td>
+          <td class="stick-2">
             <div class="who-cell">
               <span class="avatar">ОС</span>
-              <span style="min-width:0">
-                <a class="nm" href="/admin/users/5">Ольга Смирнова</a>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=5" title="Ольга Смирнова · открыть карточку сбоку">Ольга Смирнова</a>
                 <span class="meta">128374651 · @olga_s</span>
               </span>
             </div>
           </td>
-          <td>
+          <td class="hide-sm" data-col="tags">
             <span class="tag">конфликт</span> 
             
+            
           </td>
-          <td>
+          <td data-col="status">
             
               
               <span class="badge badge-ok">Активна</span>
             
           </td>
-          <td class="small dim nowrap">02.10.2027 19:19</td>
-          <td class="right">
+          <td class="small dim nowrap" data-col="expires">04.10.2027 14:15</td>
+          <td class="right" data-col="days">
             
               <b class="">361</b>
               <div class="xs dim">361 день</div>
             
           </td>
-          <td class="right">6</td>
-          <td>
+          <td class="right" data-col="orders">6</td>
+          <td data-col="link">
             
-            <span class="copy-chip">
-              <span class="v" title="http://127.0.0.1:8080/sub/GtvBsXH6_Pd4oRRHpfom8AwJFyz2nxLm">http://127.0.0.1:8080/sub/GtvBsXH6_Pd4oRRHpfom8AwJFyz2nxLm</span>
-              <button type="button" data-copy="http://127.0.0.1:8080/sub/GtvBsXH6_Pd4oRRHpfom8AwJFyz2nxLm" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/BrN-9GQU8WFYJWjwb--pl63IrSUw0FMk">
+              <span class="v">sub/BrN-9GQU…0FMk</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/BrN-9GQU8WFYJWjwb--pl63IrSUw0FMk" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/BrN-9GQU8WFYJWjwb--pl63IrSUw0FMk" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
             </span>
@@ -1187,9 +1585,9 @@ table.data th{position:static!important}
             <div class="row-actions">
               <a class="btn btn-sm" href="/admin/users/5">Карточка</a>
               
-              <form method="post" action="/admin/users/5/grant" class="inline-form"
+              <form method="post" action="/admin/users/5/grant" class="inline-form quick-grant"
                     title="Начислить дни без оплаты">
-                <input type="number" name="days" value="7" min="1" max="3650" style="width:72px" aria-label="Дней">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
                 <button class="btn btn-sm" type="submit">+ дни</button>
               </form>
               
@@ -1197,40 +1595,49 @@ table.data th{position:static!important}
           </td>
         </tr>
         
-        <tr data-row data-search="4 Максим Орлов  900112233 шеринг">
-          <td class="id">4</td>
-          <td>
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=4"
+            data-search="4 Максим Орлов  900112233 шеринг">
+          <td class="id stick-1">4</td>
+          <td class="stick-2">
             <div class="who-cell">
               <span class="avatar">МО</span>
-              <span style="min-width:0">
-                <a class="nm" href="/admin/users/4">Максим Орлов</a>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=4" title="Максим Орлов · открыть карточку сбоку">Максим Орлов</a>
                 <span class="meta">900112233</span>
               </span>
             </div>
           </td>
-          <td>
+          <td class="hide-sm" data-col="tags">
             <span class="tag">шеринг</span> 
             
+            
           </td>
-          <td>
+          <td data-col="status">
             
               
               <span class="badge badge-ok">Активна</span>
             
           </td>
-          <td class="small dim nowrap">04.10.2032 19:19</td>
-          <td class="right">
+          <td class="small dim nowrap" data-col="expires">06.10.2032 14:15</td>
+          <td class="right" data-col="days">
             
               <b class="">2190</b>
               <div class="xs dim">2190 дней</div>
             
           </td>
-          <td class="right">6</td>
-          <td>
+          <td class="right" data-col="orders">6</td>
+          <td data-col="link">
             
-            <span class="copy-chip">
-              <span class="v" title="http://127.0.0.1:8080/sub/-46-5URMSqihl-ZmJJA7RNey6LIR-8g5">http://127.0.0.1:8080/sub/-46-5URMSqihl-ZmJJA7RNey6LIR-8g5</span>
-              <button type="button" data-copy="http://127.0.0.1:8080/sub/-46-5URMSqihl-ZmJJA7RNey6LIR-8g5" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/twq1FlElrDRdu9TVKNjpsSHxSw7Lt6M1">
+              <span class="v">sub/twq1FlEl…t6M1</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/twq1FlElrDRdu9TVKNjpsSHxSw7Lt6M1" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/twq1FlElrDRdu9TVKNjpsSHxSw7Lt6M1" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
             </span>
@@ -1240,9 +1647,9 @@ table.data th{position:static!important}
             <div class="row-actions">
               <a class="btn btn-sm" href="/admin/users/4">Карточка</a>
               
-              <form method="post" action="/admin/users/4/grant" class="inline-form"
+              <form method="post" action="/admin/users/4/grant" class="inline-form quick-grant"
                     title="Начислить дни без оплаты">
-                <input type="number" name="days" value="7" min="1" max="3650" style="width:72px" aria-label="Дней">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
                 <button class="btn btn-sm" type="submit">+ дни</button>
               </form>
               
@@ -1250,40 +1657,49 @@ table.data th{position:static!important}
           </td>
         </tr>
         
-        <tr data-row data-search="3 Ирина Петрова irina.p 552341987 ">
-          <td class="id">3</td>
-          <td>
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=3"
+            data-search="3 Ирина Петрова irina.p 552341987 ">
+          <td class="id stick-1">3</td>
+          <td class="stick-2">
             <div class="who-cell">
               <span class="avatar">ИП</span>
-              <span style="min-width:0">
-                <a class="nm" href="/admin/users/3">Ирина Петрова</a>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=3" title="Ирина Петрова · открыть карточку сбоку">Ирина Петрова</a>
                 <span class="meta">552341987 · @irina.p</span>
               </span>
             </div>
           </td>
-          <td>
+          <td class="hide-sm" data-col="tags">
+            
             
             
           </td>
-          <td>
+          <td data-col="status">
             
               
               <span class="badge badge-ok">Активна</span>
             
           </td>
-          <td class="small dim nowrap">22.09.2029 19:19</td>
-          <td class="right">
+          <td class="small dim nowrap" data-col="expires">24.09.2029 14:15</td>
+          <td class="right" data-col="days">
             
               <b class="">1082</b>
               <div class="xs dim">1082 дня</div>
             
           </td>
-          <td class="right">6</td>
-          <td>
+          <td class="right" data-col="orders">6</td>
+          <td data-col="link">
             
-            <span class="copy-chip">
-              <span class="v" title="http://127.0.0.1:8080/sub/msWibOjNB85DkjZVaWmikhGtnEjpawjw">http://127.0.0.1:8080/sub/msWibOjNB85DkjZVaWmikhGtnEjpawjw</span>
-              <button type="button" data-copy="http://127.0.0.1:8080/sub/msWibOjNB85DkjZVaWmikhGtnEjpawjw" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/9rM5xmQuSF8ZajA5ZmNOIcQ2wcaLzhzK">
+              <span class="v">sub/9rM5xmQu…zhzK</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/9rM5xmQuSF8ZajA5ZmNOIcQ2wcaLzhzK" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/9rM5xmQuSF8ZajA5ZmNOIcQ2wcaLzhzK" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
             </span>
@@ -1293,9 +1709,9 @@ table.data th{position:static!important}
             <div class="row-actions">
               <a class="btn btn-sm" href="/admin/users/3">Карточка</a>
               
-              <form method="post" action="/admin/users/3/grant" class="inline-form"
+              <form method="post" action="/admin/users/3/grant" class="inline-form quick-grant"
                     title="Начислить дни без оплаты">
-                <input type="number" name="days" value="7" min="1" max="3650" style="width:72px" aria-label="Дней">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
                 <button class="btn btn-sm" type="submit">+ дни</button>
               </form>
               
@@ -1303,40 +1719,49 @@ table.data th{position:static!important}
           </td>
         </tr>
         
-        <tr data-row data-search="2 Дмитрий Соколов dsokolov 811223344 ">
-          <td class="id">2</td>
-          <td>
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=2"
+            data-search="2 Дмитрий Соколов dsokolov 811223344 ">
+          <td class="id stick-1">2</td>
+          <td class="stick-2">
             <div class="who-cell">
               <span class="avatar">ДС</span>
-              <span style="min-width:0">
-                <a class="nm" href="/admin/users/2">Дмитрий Соколов</a>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=2" title="Дмитрий Соколов · открыть карточку сбоку">Дмитрий Соколов</a>
                 <span class="meta">811223344 · @dsokolov</span>
               </span>
             </div>
           </td>
-          <td>
+          <td class="hide-sm" data-col="tags">
+            
             
             
           </td>
-          <td>
+          <td data-col="status">
             
               
               <span class="badge badge-ok">Активна</span>
             
           </td>
-          <td class="small dim nowrap">03.01.2028 19:19</td>
-          <td class="right">
+          <td class="small dim nowrap" data-col="expires">05.01.2028 14:15</td>
+          <td class="right" data-col="days">
             
               <b class="">454</b>
               <div class="xs dim">454 дня</div>
             
           </td>
-          <td class="right">5</td>
-          <td>
+          <td class="right" data-col="orders">5</td>
+          <td data-col="link">
             
-            <span class="copy-chip">
-              <span class="v" title="http://127.0.0.1:8080/sub/jn7Z1ahbgwd0OJxpn8pjGpbs0pJMKDtP">http://127.0.0.1:8080/sub/jn7Z1ahbgwd0OJxpn8pjGpbs0pJMKDtP</span>
-              <button type="button" data-copy="http://127.0.0.1:8080/sub/jn7Z1ahbgwd0OJxpn8pjGpbs0pJMKDtP" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/g9DLJQ8yUwVhgjTEmghyuTsq4jZz7X3M">
+              <span class="v">sub/g9DLJQ8y…7X3M</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/g9DLJQ8yUwVhgjTEmghyuTsq4jZz7X3M" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/g9DLJQ8yUwVhgjTEmghyuTsq4jZz7X3M" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
             </span>
@@ -1346,9 +1771,9 @@ table.data th{position:static!important}
             <div class="row-actions">
               <a class="btn btn-sm" href="/admin/users/2">Карточка</a>
               
-              <form method="post" action="/admin/users/2/grant" class="inline-form"
+              <form method="post" action="/admin/users/2/grant" class="inline-form quick-grant"
                     title="Начислить дни без оплаты">
-                <input type="number" name="days" value="7" min="1" max="3650" style="width:72px" aria-label="Дней">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
                 <button class="btn btn-sm" type="submit">+ дни</button>
               </form>
               
@@ -1356,40 +1781,49 @@ table.data th{position:static!important}
           </td>
         </tr>
         
-        <tr data-row data-search="1 Анна Ковалёва anna_k 473829104 vip">
-          <td class="id">1</td>
-          <td>
+        
+        <tr data-row class=""
+            
+            data-card-url="/admin/users?status=all&amp;page=1&amp;card=1"
+            data-search="1 Анна Ковалёва anna_k 473829104 vip">
+          <td class="id stick-1">1</td>
+          <td class="stick-2">
             <div class="who-cell">
               <span class="avatar">АК</span>
-              <span style="min-width:0">
-                <a class="nm" href="/admin/users/1">Анна Ковалёва</a>
+              <span>
+                <a class="nm" href="/admin/users?status=all&amp;page=1&amp;card=1" title="Анна Ковалёва · открыть карточку сбоку">Анна Ковалёва</a>
                 <span class="meta">473829104 · @anna_k</span>
               </span>
             </div>
           </td>
-          <td>
+          <td class="hide-sm" data-col="tags">
             <span class="tag">vip</span> 
             
+            
           </td>
-          <td>
+          <td data-col="status">
             
               
               <span class="badge badge-ok">Активна</span>
             
           </td>
-          <td class="small dim nowrap">04.04.2027 19:19</td>
-          <td class="right">
+          <td class="small dim nowrap" data-col="expires">06.04.2027 14:15</td>
+          <td class="right" data-col="days">
             
               <b class="">180</b>
               <div class="xs dim">180 дней</div>
             
           </td>
-          <td class="right">6</td>
-          <td>
+          <td class="right" data-col="orders">6</td>
+          <td data-col="link">
             
-            <span class="copy-chip">
-              <span class="v" title="http://127.0.0.1:8080/sub/kl1VHPVw7eJy3MhSaBjjcSl5_gA81bTS">http://127.0.0.1:8080/sub/kl1VHPVw7eJy3MhSaBjjcSl5_gA81bTS</span>
-              <button type="button" data-copy="http://127.0.0.1:8080/sub/kl1VHPVw7eJy3MhSaBjjcSl5_gA81bTS" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+            
+            <span class="copy-chip is-flex" title="http://127.0.0.1:8080/sub/bR4nNZlsvaOSLoSOkipMnBnQu1PUIum1">
+              <span class="v">sub/bR4nNZls…Ium1</span>
+              <a class="icon-btn" href="http://127.0.0.1:8080/sub/bR4nNZlsvaOSLoSOkipMnBnQu1PUIum1" target="_blank" rel="noopener" title="Открыть ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     width="16" height="16"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+              <button type="button" data-copy="http://127.0.0.1:8080/sub/bR4nNZlsvaOSLoSOkipMnBnQu1PUIum1" title="Скопировать ссылку" aria-label="Скопировать ссылку"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
      width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg></button>
             </span>
@@ -1399,9 +1833,9 @@ table.data th{position:static!important}
             <div class="row-actions">
               <a class="btn btn-sm" href="/admin/users/1">Карточка</a>
               
-              <form method="post" action="/admin/users/1/grant" class="inline-form"
+              <form method="post" action="/admin/users/1/grant" class="inline-form quick-grant"
                     title="Начислить дни без оплаты">
-                <input type="number" name="days" value="7" min="1" max="3650" style="width:72px" aria-label="Дней">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
                 <button class="btn btn-sm" type="submit">+ дни</button>
               </form>
               
@@ -1420,6 +1854,9 @@ table.data th{position:static!important}
   
 </div>
 
+</div>
+
+</div>
 
 
 
@@ -1427,6 +1864,7 @@ table.data th{position:static!important}
   </div>
 </div>
 <script>
+window.addEventListener("DOMContentLoaded", function() {
 /* Kometa — админ-панель: минимальный ванильный JS.
    Никаких зависимостей и CDN: панель работает на localhost без интернета.
    Всё, что здесь есть, — прогрессивное улучшение: формы работают и без JS. */
@@ -1434,6 +1872,15 @@ table.data th{position:static!important}
   "use strict";
 
   var THEME_KEY = "kometa-admin-theme";
+  var NAV_KEY = "kometa-admin-nav";
+  var DENSITY_KEY = "kometa-admin-density";
+
+  function store(key, value) {
+    try {
+      if (value) localStorage.setItem(key, value);
+      else localStorage.removeItem(key);
+    } catch (e) { /* приватный режим — просто не запоминаем */ }
+  }
 
   /* ------------------------------------------------------------- тема */
   function applyTheme(theme) {
@@ -1464,6 +1911,440 @@ table.data th{position:static!important}
       localStorage.setItem(THEME_KEY, next);
     } catch (e) { /* приватный режим — просто не запоминаем */ }
     applyTheme(next);
+  });
+
+  /* ------------------------------------- плотность таблиц и меню-рейка */
+  // Задача: на 15″ в экран должно входить больше данных. Плотность меняет
+  // отступы ячеек, «рейка» — ширину меню (252 px → 68 px). Оба выбора
+  // запоминаются; восстановление делает инлайн-скрипт в base.html.
+  var DENSITIES = [
+    { id: "", label: "Обычно", hint: "обычная плотность" },
+    { id: "compact", label: "Плотно", hint: "компактные строки" },
+    { id: "roomy", label: "Просторно", hint: "просторные строки" }
+  ];
+
+  function densityIndex() {
+    var current = document.documentElement.getAttribute("data-density") || "";
+    for (var i = 0; i < DENSITIES.length; i++) {
+      if (DENSITIES[i].id === current) return i;
+    }
+    return 0;
+  }
+
+  function applyDensity(index) {
+    var item = DENSITIES[index];
+    if (item.id) document.documentElement.setAttribute("data-density", item.id);
+    else document.documentElement.removeAttribute("data-density");
+    store(DENSITY_KEY, item.id);
+    var btn = document.querySelector("[data-density-toggle]");
+    if (!btn) return;
+    var label = btn.querySelector("[data-density-label]");
+    if (label) label.textContent = item.label;
+    btn.setAttribute("title", "Плотность таблиц: " + item.hint + " (нажми, чтобы сменить)");
+  }
+
+  applyDensity(densityIndex());
+
+  document.addEventListener("click", function (event) {
+    if (!event.target.closest("[data-density-toggle]")) return;
+    applyDensity((densityIndex() + 1) % DENSITIES.length);
+  });
+
+  function applyNav(mode) {
+    if (mode === "min") document.documentElement.setAttribute("data-nav", "min");
+    else document.documentElement.removeAttribute("data-nav");
+    var btn = document.querySelector("[data-nav-min]");
+    if (!btn) return;
+    var min = mode === "min";
+    btn.setAttribute("title", min ? "Развернуть меню" : "Свернуть меню");
+    btn.setAttribute("aria-label", min ? "Развернуть меню" : "Свернуть меню");
+    btn.setAttribute("aria-pressed", min ? "true" : "false");
+  }
+
+  applyNav(document.documentElement.getAttribute("data-nav") === "min" ? "min" : "");
+
+  document.addEventListener("click", function (event) {
+    if (!event.target.closest("[data-nav-min]")) return;
+    var next = document.documentElement.getAttribute("data-nav") === "min" ? "" : "min";
+    store(NAV_KEY, next);
+    applyNav(next);
+  });
+
+  /* -------------------------------------------- горячие клавиши списков */
+  // «/» — поиск, Esc — выйти из поиска. Мелочь, но в работе экономит клик.
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
+      var active = document.activeElement;
+      if (active && active.tagName === "INPUT") active.blur();
+      return;
+    }
+    if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+    var tag = (event.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    var search = document.querySelector("input[name=q], .search input, input[type=search]");
+    if (!search) return;
+    event.preventDefault();
+    search.focus();
+    search.select();
+  });
+
+  /* ------------------------------------------------ столбцы таблиц */
+  // Кнопка «Столбцы» в шапке страницы: какие столбцы показывать, решает
+  // пользователь. Набор хранится в localStorage по имени таблицы, поэтому
+  // у модератора и владельца списки могут выглядеть по-разному.
+  var COLS_KEY = "kometa-admin-cols";
+
+  function colsStore() {
+    try {
+      return JSON.parse(localStorage.getItem(COLS_KEY) || "{}") || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function applyCols(table) {
+    var id = table.getAttribute("data-table");
+    if (!id) return;
+    var cfg = colsStore()[id] || {};
+    var hidden = Object.keys(cfg).filter(function (key) { return cfg[key] === false; });
+    if (hidden.length) table.setAttribute("data-cols-hidden", hidden.join(" "));
+    else table.removeAttribute("data-cols-hidden");
+    var menu = document.querySelector('[data-colmenu][data-table="' + id + '"]');
+    if (menu) {
+      Array.prototype.forEach.call(menu.querySelectorAll("[data-col-toggle]"), function (box) {
+        box.checked = cfg[box.getAttribute("data-col-toggle")] !== false;
+      });
+    }
+  }
+
+  function applyAllCols() {
+    Array.prototype.forEach.call(document.querySelectorAll("table.data[data-table]"), applyCols);
+  }
+
+  applyAllCols();
+
+  document.addEventListener("change", function (event) {
+    var box = event.target.closest("[data-col-toggle]");
+    if (!box) return;
+    var menu = box.closest("[data-colmenu]");
+    if (!menu) return;
+    var id = menu.getAttribute("data-table");
+    var table = document.querySelector('table.data[data-table="' + id + '"]');
+    if (!table) return;
+    var store = colsStore();
+    store[id] = store[id] || {};
+    store[id][box.getAttribute("data-col-toggle")] = box.checked;
+    try {
+      localStorage.setItem(COLS_KEY, JSON.stringify(store));
+    } catch (e) { /* приватный режим — просто не запоминаем */ }
+    applyCols(table);
+  });
+
+  document.addEventListener("click", function (event) {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-colmenu][open]"), function (menu) {
+      if (!menu.contains(event.target)) menu.removeAttribute("open");
+    });
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-colmenu][open]"), function (menu) {
+      menu.removeAttribute("open");
+    });
+  });
+
+  /* ------------------------------------------------ командная палитра ⌘K */
+  // Один ввод вместо хождения по меню: разделы (из прав роли), клиенты и
+  // заказы (из /admin/search). Разметка — в base.html.
+  var cmdk = document.getElementById("cmdk");
+  var cmdkInput = document.getElementById("cmdk-input");
+  var cmdkList = document.getElementById("cmdk-list");
+  var cmdkSections = [];
+  try {
+    var raw = document.getElementById("cmdk-sections");
+    cmdkSections = raw ? JSON.parse(raw.textContent || "[]") : [];
+  } catch (e) {
+    cmdkSections = [];
+  }
+  var cmdkRows = [];
+  var cmdkIndex = 0;
+  var cmdkSeq = 0;
+  var cmdkTimer = null;
+  var cmdkKind = { user: "Клиент", order: "Заказ" };
+
+  function cmdkEscape(text) {
+    return String(text == null ? "" : text).replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
+  function cmdkRender(query, found, loading) {
+    if (!cmdkList) return;
+    var needle = query.trim().toLowerCase();
+    var sections = cmdkSections.filter(function (item) {
+      if (!needle) return true;
+      return (item.title + " " + (item.keys || "")).toLowerCase().indexOf(needle) !== -1;
+    }).slice(0, needle ? 4 : 8);
+
+    var rows = sections.map(function (item) {
+      return { kind: "Раздел", title: item.title, sub: "", url: item.url };
+    });
+    (found || []).forEach(function (item) {
+      rows.push({ kind: cmdkKind[item.kind] || "", title: item.title, sub: item.sub || "", url: item.url });
+    });
+
+    if (!rows.length) {
+      cmdkRows = [];
+      cmdkIndex = 0;
+      cmdkList.innerHTML = '<div class="cmdk-empty">' + (loading ? "Ищу…" : "Ничего не нашлось") + "</div>";
+      return;
+    }
+    cmdkRows = rows;
+    if (cmdkIndex >= rows.length) cmdkIndex = rows.length - 1;
+    if (cmdkIndex < 0) cmdkIndex = 0;
+    cmdkList.innerHTML = rows.map(function (row, index) {
+      return '<div class="cmdk-item' + (index === cmdkIndex ? " active" : "") + '" role="option" ' +
+        'data-url="' + cmdkEscape(row.url) + '">' +
+        '<span class="grow"><span class="t">' + cmdkEscape(row.title) + "</span>" +
+        (row.sub ? '<span class="s">' + cmdkEscape(row.sub) + "</span>" : "") + "</span>" +
+        (row.kind ? '<span class="badge">' + cmdkEscape(row.kind) + "</span>" : "") +
+        "</div>";
+    }).join("");
+  }
+
+  function cmdkFetch(query) {
+    var seq = ++cmdkSeq;
+    if (query.trim().length < 2) {
+      cmdkRender(query, [], false);
+      return;
+    }
+    fetch("/admin/search?q=" + encodeURIComponent(query), { headers: { "X-Panel-Ajax": "1" } })
+      .then(function (response) { return response.ok ? response.json() : { items: [] }; })
+      .then(function (data) {
+        if (seq === cmdkSeq) cmdkRender(query, data.items || [], false);
+      })
+      .catch(function () {
+        if (seq === cmdkSeq) cmdkRender(query, [], false);
+      });
+  }
+
+  function cmdkIsOpen() {
+    return !!cmdk && cmdk.classList.contains("open");
+  }
+
+  function cmdkOpen() {
+    if (!cmdk) return;
+    cmdk.classList.add("open");
+    cmdkIndex = 0;
+    if (cmdkInput) {
+      cmdkInput.value = "";
+      cmdkInput.focus();
+    }
+    cmdkRender("", [], false);
+  }
+
+  function cmdkClose() {
+    if (cmdk) cmdk.classList.remove("open");
+  }
+
+  function cmdkGo() {
+    var row = cmdkRows[cmdkIndex];
+    if (row) window.location.href = row.url;
+  }
+
+  function cmdkMove(step) {
+    if (!cmdkRows.length) return;
+    cmdkIndex = (cmdkIndex + step + cmdkRows.length) % cmdkRows.length;
+    Array.prototype.forEach.call(cmdkList.querySelectorAll(".cmdk-item"), function (node, index) {
+      node.classList.toggle("active", index === cmdkIndex);
+    });
+    var active = cmdkList.querySelector(".cmdk-item.active");
+    if (active && active.scrollIntoView) active.scrollIntoView({ block: "nearest" });
+  }
+
+  document.addEventListener("click", function (event) {
+    if (event.target.closest("[data-cmdk-open]")) {
+      event.preventDefault();
+      cmdkOpen();
+      return;
+    }
+    if (event.target.closest("[data-cmdk-close]")) {
+      cmdkClose();
+      return;
+    }
+    var item = event.target.closest(".cmdk-item");
+    if (item) window.location.href = item.getAttribute("data-url");
+  });
+
+  if (cmdkInput) {
+    cmdkInput.addEventListener("input", function () {
+      window.clearTimeout(cmdkTimer);
+      var value = cmdkInput.value;
+      cmdkTimer = window.setTimeout(function () { cmdkFetch(value); }, 160);
+    });
+    cmdkInput.addEventListener("keydown", function (event) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        cmdkMove(1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        cmdkMove(-1);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        cmdkGo();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        cmdkClose();
+      }
+    });
+  }
+
+  document.addEventListener("keydown", function (event) {
+    var key = (event.key || "").toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && key === "k") {
+      event.preventDefault();
+      if (cmdkIsOpen()) cmdkClose();
+      else cmdkOpen();
+      return;
+    }
+    if (key === "escape" && cmdkIsOpen()) cmdkClose();
+  });
+
+  /* ------------------------------------ действия без перезагрузки страницы */
+  // Любая POST-форма панели уходит через fetch: сервер (flash_redirect)
+  // отвечает JSON-ом, мы показываем тост и обновляем содержимое на месте.
+  // Если JS выключен или сервер ответил не JSON — обычная отправка формы.
+  var toasts = document.getElementById("toasts");
+
+  function toast(kind, text) {
+    if (!toasts || !text) return;
+    var el = document.createElement("div");
+    el.className = "toast " + (kind === "err" ? "err" : "ok");
+    el.setAttribute("role", kind === "err" ? "alert" : "status");
+    var path = kind === "err"
+      ? '<path d="M12 4 2.8 19.2h18.4z"/><path d="M12 10v4.5M12 17.4h.01"/>'
+      : '<path d="M4.5 12.5l5 5 10-11"/>';
+    el.innerHTML =
+      '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + "</svg>" +
+      '<span class="grow"></span>' +
+      '<button class="icon-btn" type="button" aria-label="Закрыть">×</button>';
+    el.querySelector(".grow").textContent = String(text);
+    el.querySelector("button").addEventListener("click", function () { el.remove(); });
+    toasts.appendChild(el);
+    window.setTimeout(function () { el.remove(); }, kind === "err" ? 9000 : 4200);
+  }
+
+  function syncNavCounts(doc) {
+    var fresh = {};
+    Array.prototype.forEach.call(doc.querySelectorAll(".nav a"), function (link) {
+      var badge = link.querySelector(".count");
+      fresh[link.getAttribute("href")] = badge ? badge.textContent.trim() : "";
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".nav a"), function (link) {
+      var badge = link.querySelector(".count");
+      var value = fresh[link.getAttribute("href")];
+      if (badge && value !== undefined) badge.textContent = value;
+    });
+  }
+
+  function loadContent(url, push) {
+    return fetch(url, { headers: { "X-Panel-Ajax": "1" } })
+      .then(function (response) { return response.ok ? response.text() : ""; })
+      .then(function (html) {
+        if (!html) return;
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var fresh = doc.querySelector(".content");
+        var current = document.querySelector(".content");
+        if (!fresh || !current) return;
+        var scroll = window.scrollY;
+        current.replaceWith(fresh);
+        syncNavCounts(doc);
+        applyAllCols();
+        window.scrollTo(0, scroll);
+        if (push) window.history.pushState({ panel: true }, "", url);
+      })
+      .catch(function () { /* не смогли обновить — данные уже сохранены на сервере */ });
+  }
+
+  function refreshContent() {
+    return loadContent(window.location.href, false);
+  }
+
+  // Мастер-деталь: клик по строке открывает карточку сбоку, не уводя со списка.
+  document.addEventListener("click", function (event) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button) return;
+    var closer = event.target.closest("[data-drawer-close]");
+    if (closer) {
+      event.preventDefault();
+      loadContent(closer.getAttribute("href"), true);
+      return;
+    }
+    var row = event.target.closest("tr[data-card-url]");
+    if (!row) return;
+    if (event.target.closest("button, input, select, form, label, .copy-chip")) return;
+    var link = event.target.closest("a");
+    // Ссылки «Карточка» и прочие ведут на отдельные страницы — их не трогаем.
+    if (link && !link.classList.contains("nm")) return;
+    event.preventDefault();
+    loadContent(row.getAttribute("data-card-url"), true);
+  });
+
+  window.addEventListener("popstate", function () {
+    loadContent(window.location.href, false);
+  });
+
+  function submitAjax(form, action) {
+    var button = form.querySelector('button[type="submit"]') || form.querySelector("button");
+    if (button) button.disabled = true;
+    return fetch(action, {
+      method: "POST",
+      body: new FormData(form),
+      headers: { "X-Panel-Ajax": "1" },
+      redirect: "follow",
+    })
+      .then(function (response) {
+        if (response.redirected && response.url.indexOf("/admin/login") !== -1) {
+          window.location.href = response.url;
+          return null;
+        }
+        var type = response.headers.get("content-type") || "";
+        if (type.indexOf("application/json") === -1) {
+          // Сервер ответил страницей (например, отказ по правам) — отдаём
+          // решение ему и отправляем форму обычным способом.
+          if (button) button.disabled = false;
+          form.submit();
+          return null;
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        toast(data.ok ? "ok" : "err", data.ok ? (data.message || "Готово") : (data.error || "Не получилось"));
+        if (data.ok) return refreshContent();
+        return null;
+      })
+      .catch(function (error) {
+        toast("err", "Сеть недоступна: " + error.message);
+      })
+      .then(function () {
+        if (button) button.disabled = false;
+      });
+  }
+
+  document.addEventListener("submit", function (event) {
+    var form = event.target;
+    if (!form || form.tagName !== "FORM") return;
+    if (event.defaultPrevented) return; // пользователь отменил подтверждение
+    if (form.hasAttribute("data-no-ajax")) return;
+    if ((form.getAttribute("method") || "get").toLowerCase() !== "post") return;
+    var action = form.getAttribute("action") || window.location.href;
+    if (/\/admin\/(login|logout)\b/.test(action)) return; // вход и выход — навигацией
+    event.preventDefault();
+    // Отправляем после того, как отработают остальные обработчики submit:
+    // массовые действия дописывают в форму выбранные id (см. «массовые
+    // действия» выше), и FormData должна собираться уже с ними.
+    window.setTimeout(function () { submitAjax(form, action); }, 0);
   });
 
   /* ---------------------------------------------------- мобильное меню */
@@ -1637,7 +2518,27 @@ table.data th{position:static!important}
   });
 })();
 
+});
 </script>
+
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="true"></div>
+
+
+<div class="cmdk" id="cmdk" role="dialog" aria-modal="true" aria-label="Быстрый переход">
+  <div class="cmdk-back" data-cmdk-close></div>
+  <div class="cmdk-panel">
+    <input type="text" id="cmdk-input" placeholder="Клиент, заказ или раздел…" autocomplete="off" spellcheck="false"
+           aria-label="Поиск по панели" aria-controls="cmdk-list">
+    <div class="cmdk-list" id="cmdk-list" role="listbox"></div>
+    <div class="cmdk-foot">
+      <span><kbd>↑</kbd> <kbd>↓</kbd> выбор</span>
+      <span><kbd>↵</kbd> открыть</span>
+      <span><kbd>esc</kbd> закрыть</span>
+    </div>
+  </div>
+</div>
+<script type="application/json" id="cmdk-sections">[{"keys": "\u043e\u0431\u0437\u043e\u0440 \u0433\u043b\u0430\u0432\u043d\u0430\u044f \u0441\u0432\u043e\u0434\u043a\u0430", "title": "\u0414\u0430\u0448\u0431\u043e\u0440\u0434", "url": "/admin"}, {"keys": "\u0437\u0430\u043a\u0430\u0437\u044b \u043e\u043f\u043b\u0430\u0442\u044b \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c", "title": "\u041e\u0447\u0435\u0440\u0435\u0434\u044c \u0437\u0430\u043a\u0430\u0437\u043e\u0432", "url": "/admin/orders"}, {"keys": "\u043a\u043b\u0438\u0435\u043d\u0442\u044b \u043b\u044e\u0434\u0438 \u0431\u0430\u0437\u0430", "title": "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0438", "url": "/admin/users"}, {"keys": "\u0432\u043e\u0437\u0432\u0440\u0430\u0442 \u0434\u0435\u043d\u044c\u0433\u0438 refund", "title": "\u0412\u043e\u0437\u0432\u0440\u0430\u0442\u044b", "url": "/admin/refunds"}, {"keys": "\u043f\u0440\u043e\u0441\u0442\u043e\u0439 downtime \u0430\u0432\u0430\u0440\u0438\u044f", "title": "\u041a\u043e\u043c\u043f\u0435\u043d\u0441\u0430\u0446\u0438\u044f \u043f\u0440\u043e\u0441\u0442\u043e\u044f", "url": "/admin/downtime"}, {"keys": "\u0434\u0435\u043d\u044c\u0433\u0438 \u0432\u044b\u0440\u0443\u0447\u043a\u0430 \u043f\u0440\u0438\u0431\u044b\u043b\u044c", "title": "\u0424\u0438\u043d\u0430\u043d\u0441\u044b \u0438 \u043e\u0442\u0447\u0451\u0442\u044b", "url": "/admin/finance"}, {"keys": "\u0446\u0435\u043d\u044b \u043f\u043b\u0430\u043d\u044b \u0442\u0430\u0440\u0438\u0444", "title": "\u0422\u0430\u0440\u0438\u0444\u044b", "url": "/admin/plans"}, {"keys": "\u0441\u0435\u0440\u0432\u0435\u0440\u044b \u043f\u0430\u043d\u0435\u043b\u0438 \u043b\u043e\u043a\u0430\u0446\u0438\u0438", "title": "\u041d\u043e\u0434\u044b", "url": "/admin/nodes"}, {"keys": "\u043e\u0448\u0438\u0431\u043a\u0438 \u043f\u0440\u043e\u0431\u043b\u0435\u043c\u044b", "title": "\u0410\u043b\u0435\u0440\u0442\u044b", "url": "/admin/alerts"}, {"keys": "\u043f\u0440\u043e\u043c\u043e \u043f\u0440\u0438\u0433\u043b\u0430\u0448\u0435\u043d\u0438\u044f", "title": "\u0420\u0435\u0444\u0435\u0440\u0430\u043b\u044b \u0438 \u043f\u0440\u043e\u043c\u043e\u043a\u043e\u0434\u044b", "url": "/admin/referrals"}, {"keys": "\u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f \u0440\u0430\u0441\u0441\u044b\u043b\u043a\u0430", "title": "\u0420\u0430\u0441\u0441\u044b\u043b\u043a\u0438", "url": "/admin/broadcast"}, {"keys": "\u0430\u0443\u0434\u0438\u0442 \u0438\u0441\u0442\u043e\u0440\u0438\u044f \u043a\u0442\u043e \u0447\u0442\u043e", "title": "\u0416\u0443\u0440\u043d\u0430\u043b \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439", "url": "/admin/audit"}, {"keys": "\u0434\u043e\u0441\u0442\u0443\u043f\u044b \u0441\u043e\u0442\u0440\u0443\u0434\u043d\u0438\u043a\u0438", "title": "\u041a\u043e\u043c\u0430\u043d\u0434\u0430 \u0438 \u0440\u043e\u043b\u0438", "url": "/admin/team"}]</script>
+
 
 </body>
 </html>

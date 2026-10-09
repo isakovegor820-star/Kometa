@@ -12,6 +12,18 @@
     </div>
   </div>
   <div class="actions">
+    <details class="colmenu" data-colmenu data-table="users">
+      <summary class="btn btn-ghost btn-sm">{{ icon('filter') }} Столбцы</summary>
+      <div class="colmenu-pop">
+        <div class="hint xs dim">Что показывать в списке</div>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="tags"> Метки</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="status"> Статус</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="expires"> Действует до</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="days"> Осталось дней</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="orders"> Оплат</label>
+        <label><input type="checkbox" class="checkbox" data-col-toggle="link"> Ссылка-подписка</label>
+      </div>
+    </details>
     {% if 'finance.export' in caps %}
     <a class="btn btn-ghost" href="/admin/export/users.csv?{{ query_string(current) }}">{{ icon('download') }} CSV</a>
     {% endif %}
@@ -55,33 +67,51 @@
 </form>
 
 {% if items %}
+{# Мастер-деталь: список слева, карточка выбранного клиента справа.
+   Карточку открывает ?card=<id> — ссылка работает и без JS, а с JS
+   содержимое подменяется на месте (см. admin.js).
+   `has-card` включает вторую колонку только когда карточка есть: иначе grid
+   держал бы под неё 392 px и список выглядел бы обрезанным. #}
+<div class="split{{ ' has-card' if card else '' }}">
+<div class="split-main">
 <div class="table-wrap">
   <div class="table-scroll">
-    <table class="data">
+    <table class="data fit stick-first" data-table="users">
+      {# Ширина столбцов задана на заголовках: единственный «резиновый» — Клиент,
+         он забирает остаток. Так имя и ник помещаются в одну строку, а таблица
+         перестаёт уезжать в горизонтальный скролл из-за длинной ссылки.
+         data-col — ключ для меню «Столбцы» (см. admin.js). #}
       <thead>
         <tr>
-          <th>ID</th><th>Клиент</th><th>Метки</th><th>Статус</th><th>Действует до</th>
-          <th class="right">Осталось</th><th class="right">Оплат</th><th>Ссылка-подписка</th><th class="actions">Действия</th>
+          <th class="c-id stick-1">ID</th><th class="stick-2">Клиент</th><th class="c-tags hide-sm" data-col="tags">Метки</th>
+          <th class="c-status" data-col="status">Статус</th><th class="c-date" data-col="expires">Действует до</th>
+          <th class="right c-days" data-col="days">Осталось</th><th class="right c-num" data-col="orders">Оплат</th>
+          <th class="c-link" data-col="link">Ссылка-подписка</th><th class="actions c-actions">Действия</th>
         </tr>
       </thead>
       <tbody>
         {% for item in items %}
-        <tr data-row data-search="{{ item.user.id }} {{ item.user.display_name }} {{ item.user.username or '' }} {{ item.user.tg_id }} {{ item.user.tags }}">
-          <td class="id">{{ item.user.id }}</td>
-          <td>
+        {% set card_url = '/admin/users?' ~ query_string(current, status=status, page=page_data.page, card=item.user.id) %}
+        <tr data-row class="{{ 'row-blocked' if item.user.is_blocked else '' }}"
+            {% if item.user.is_blocked %}title="Клиент заблокирован"{% endif %}
+            data-card-url="{{ card_url }}"
+            data-search="{{ item.user.id }} {{ item.user.display_name }} {{ item.user.username or '' }} {{ item.user.tg_id }} {{ item.user.tags }}">
+          <td class="id stick-1">{{ item.user.id }}</td>
+          <td class="stick-2">
             <div class="who-cell">
               <span class="avatar">{{ initials(item.user.display_name) }}</span>
-              <span style="min-width:0">
-                <a class="nm" href="/admin/users/{{ item.user.id }}">{{ item.user.display_name }}</a>
+              <span>
+                <a class="nm" href="{{ card_url }}" title="{{ item.user.display_name }} · открыть карточку сбоку">{{ item.user.display_name }}</a>
                 <span class="meta">{{ item.user.tg_id }}{% if item.user.username %} · @{{ item.user.username }}{% endif %}</span>
               </span>
             </div>
           </td>
-          <td>
-            {% for tag in item.tags %}<span class="tag">{{ tag }}</span> {% endfor %}
+          <td class="hide-sm" data-col="tags">
+            {% for tag in item.tags[:2] %}<span class="tag">{{ tag }}</span> {% endfor %}
+            {% if item.tags|length > 2 %}<span class="tag" title="{{ item.tags|join(', ') }}">+{{ item.tags|length - 2 }}</span>{% endif %}
             {% if item.user.is_blocked %}<span class="badge badge-err">заблокирован</span>{% endif %}
           </td>
-          <td>
+          <td data-col="status">
             {% if item.sub %}
               {% set badge = SUBSCRIPTION_STATUS.get(item.sub.status, (item.sub.status, 'neutral')) %}
               <span class="badge badge-{{ badge[1] if badge[1] != 'neutral' else '' }}">{{ badge[0] }}</span>
@@ -89,18 +119,21 @@
               <span class="badge">без подписки</span>
             {% endif %}
           </td>
-          <td class="small dim nowrap">{{ dt(item.sub.expires_at) if item.sub else '—' }}</td>
-          <td class="right">
+          <td class="small dim nowrap" data-col="expires">{{ dt(item.sub.expires_at) if item.sub else '—' }}</td>
+          <td class="right" data-col="days">
             {% if item.sub %}
               <b class="{{ 'muted' if item.sub.days_left == 0 else '' }}">{{ item.sub.days_left }}</b>
               <div class="xs dim">{{ days_word(item.sub.days_left) }}</div>
             {% else %}—{% endif %}
           </td>
-          <td class="right">{{ item.orders }}</td>
-          <td>
+          <td class="right" data-col="orders">{{ item.orders }}</td>
+          <td data-col="link">
             {% if item.link %}
-            <span class="copy-chip">
-              <span class="v" title="{{ item.link }}">{{ item.link }}</span>
+            {# В таблице показываем короткую подпись (sub/26e8f0a1…f0a6): полный
+               адрес — в подсказке и в буфере обмена по кнопке. #}
+            <span class="copy-chip is-flex" title="{{ item.link }}">
+              <span class="v">{{ link_label(item.link) }}</span>
+              <a class="icon-btn" href="{{ item.link }}" target="_blank" rel="noopener" title="Открыть ссылку">{{ icon('external') }}</a>
               <button type="button" data-copy="{{ item.link }}" title="Скопировать ссылку" aria-label="Скопировать ссылку">{{ icon('copy') }}</button>
             </span>
             {% else %}<span class="dim">—</span>{% endif %}
@@ -109,9 +142,9 @@
             <div class="row-actions">
               <a class="btn btn-sm" href="/admin/users/{{ item.user.id }}">Карточка</a>
               {% if 'users.act' in caps %}
-              <form method="post" action="/admin/users/{{ item.user.id }}/grant" class="inline-form"
+              <form method="post" action="/admin/users/{{ item.user.id }}/grant" class="inline-form quick-grant"
                     title="Начислить дни без оплаты">
-                <input type="number" name="days" value="7" min="1" max="3650" style="width:72px" aria-label="Дней">
+                <input class="input-days" type="number" name="days" value="7" min="1" max="3650" aria-label="Дней">
                 <button class="btn btn-sm" type="submit">+ дни</button>
               </form>
               {% endif %}
@@ -124,6 +157,19 @@
   </div>
 </div>
 {% include "_pagination.html" with context %}
+</div>
+{% if card %}
+{# Данные карточки приходят словарём: раскладываем их по именам, которые
+   понимает партиал. `card_tags` — потому что `tags` на странице занят
+   списком меток для фильтра. #}
+{% with user=card.user, sub=card.sub, plan=card.plan, link=card.link, orders=card.orders,
+        events=card.events, notes=card.notes, card_tags=card.tags,
+        paid_total=card.paid_total, refunded_total=card.refunded_total,
+        status_label=card.status_label %}
+{% include "_user_drawer.html" %}
+{% endwith %}
+{% endif %}
+</div>
 {% else %}
 <div class="card">
   <div class="empty">

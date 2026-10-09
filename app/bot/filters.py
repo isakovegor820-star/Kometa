@@ -11,8 +11,8 @@ settings = get_settings()
 
 
 class IsAdmin(BaseFilter):
-    """Пропускает только администраторов из ADMIN_IDS."""
+        """Пропускает только администраторов из ADMIN_IDS."""
 
-    async def __call__(self, event: TelegramObject) -> bool:
-        user = getattr(event, "from_user", None)
-        return bool(user and user.id in settings.admin_id_list)
+        async def __call__(self, event: TelegramObject) -> bool:
+                user = getattr(event, "from_user", None)
+                return bool(user and user.id in settings.admin_id_list)

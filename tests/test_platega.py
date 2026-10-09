@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from app.payments.base import PaymentError, PaymentStatus
-from app.payments.platega import PlategaProvider
+from app.payments.platega import PlategaProvider, parse_payment_methods
 
 MERCHANT_ID = "test-merchant-id"
 SECRET = "test-secret-key"
@@ -74,49 +74,72 @@ async def test_create_invoice_sends_expected_request():
 
     body = captured["body"]
     assert body["paymentMethod"] == 2
-    assert body["paymentDetails"] == {"amount": 19900, "currency": "RUB"}
+    assert body["paymentDetails"] == {"amount": 199.0, "currency": "RUB"}
     assert body["payload"] == "order:42"
     assert body["description"] == "Kometa: 1 месяц"
     assert body["return"] == "https://kometa.example/ok"
     assert body["failedUrl"] == "https://kometa.example/fail"
 
-    # id — наш uuid4 (уникальный на каждый вызов), а не что-то из ответа.
-    parsed = uuid.UUID(body["id"])
-    assert parsed.version == 4
+    # id транзакции генерирует Platega: со своим id API отвечает 400
+    # (в схеме запроса additionalProperties: false, поле прямо запрещено).
+    assert "id" not in body
+    assert "metadata" not in body
 
     await provider.close()
 
 
-async def test_create_invoice_generates_unique_ids():
-    """Повтор того же id Platega отвергает, поэтому uuid не переиспользуется."""
-    ids: list[str] = []
+async def test_create_invoice_takes_transaction_id_from_response():
+    """external_id — это transactionId от Platega, а не наш uuid.
+
+    Иначе вебхук (в колбэке нет payload, только id транзакции) не найдёт заказ,
+    и оплата не выдаст доступ.
+    """
+    bodies: list[dict] = []
+    served: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        ids.append(json.loads(request.content)["id"])
-        return httpx.Response(200, json=process_response())
+        bodies.append(json.loads(request.content))
+        tx = f"b7a1f0b1-0000-4000-8000-0000000000{len(bodies):02d}"
+        served.append(tx)
+        return httpx.Response(200, json=process_response(transactionId=tx))
 
     provider = make_provider(handler)
-    await provider.create_invoice(1, 199, "Kometa")
-    await provider.create_invoice(1, 199, "Kometa")
+    first = await provider.create_invoice(1, 199, "Kometa")
+    second = await provider.create_invoice(1, 199, "Kometa")
 
-    assert len(set(ids)) == 2
+    assert "id" not in bodies[0] and "id" not in bodies[1]
+    assert first.external_id == served[0]
+    assert second.external_id == served[1]
+    assert first.external_id != second.external_id
+    await provider.close()
+
+
+async def test_create_invoice_without_transaction_id_is_reported():
+    """Нет transactionId — нет ни опроса статуса, ни поиска заказа. Честная ошибка."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        data = process_response()
+        data.pop("transactionId")
+        return httpx.Response(200, json=data)
+
+    provider = make_provider(handler)
+    with pytest.raises(PaymentError, match="transactionId"):
+        await provider.create_invoice(1, 199, "Kometa")
     await provider.close()
 
 
 async def test_create_invoice_returns_pay_url_and_external_id():
-    """Разбор ответа: pay_url из redirect, external_id — наш id транзакции."""
-    sent: dict = {}
+    """Разбор ответа: pay_url из redirect, external_id — transactionId от Platega."""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        sent["id"] = json.loads(request.content)["id"]
         return httpx.Response(200, json=process_response())
 
-    provider = make_provider(handler, payment_method=10)
+    provider = make_provider(handler, payment_method=11)
     invoice = await provider.create_invoice(42, 199, "Kometa: 1 месяц")
 
     assert invoice.provider == "platega_card"
     assert invoice.pay_url == REDIRECT
-    assert invoice.external_id == sent["id"]
+    assert invoice.external_id == "b7a1f0b1-0000-4000-8000-000000000001"
     assert invoice.amount_rub == 199
     assert invoice.currency == "RUB"
     assert "199.00" in invoice.instructions and "Карта МИР" in invoice.instructions
@@ -150,13 +173,29 @@ async def test_create_invoice_uses_exact_kopecks():
     provider = make_provider(handler)
     invoice = await provider.create_invoice(3, 199, "Kometa", exact_kopecks=19913)
 
-    assert captured["body"]["paymentDetails"]["amount"] == 19913
+    # По умолчанию рубли: 19913 копеек — это 199.13 ₽.
+    assert captured["body"]["paymentDetails"]["amount"] == 199.13
     assert "199.13" in invoice.instructions
     await provider.close()
 
 
+async def test_amount_unit_kopecks_sends_kopecks():
+    """Режим копеек оставлен для совместимости: сумма уходит целым числом."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=process_response())
+
+    provider = make_provider(handler, amount_unit="kopecks")
+    await provider.create_invoice(42, 199, "Kometa", exact_kopecks=19913)
+
+    assert captured["body"]["paymentDetails"]["amount"] == 19913
+    await provider.close()
+
+
 async def test_amount_unit_rubles_sends_rubles():
-    """amount_unit="rubles" — на случай, если Platega ждёт рубли, а не копейки."""
+    """amount_unit="rubles" (по умолчанию) — сумма уходит рублями с копейками."""
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -167,6 +206,71 @@ async def test_amount_unit_rubles_sends_rubles():
     await provider.create_invoice(42, 199, "Kometa", exact_kopecks=19913)
 
     assert captured["body"]["paymentDetails"]["amount"] == 199.13
+    await provider.close()
+
+
+async def test_default_amount_unit_is_rubles():
+    """По умолчанию — рубли: актуальная схема API.
+
+    Ошибка в эту сторону безопаснее: при копейках клиент увидел бы счёт
+    в 100 раз больше.
+    """
+    assert PlategaProvider(MERCHANT_ID, SECRET).amount_unit == "rubles"
+
+
+# ------------------------------------------------------------------ metadata
+async def test_metadata_is_sent_only_when_enabled():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=process_response())
+
+    provider = make_provider(handler, send_metadata=True)
+    await provider.create_invoice(
+        42, 199, "Kometa", payer_user_id=926194553, payer_user_name="@egor", payer_ip="10.0.0.1"
+    )
+
+    assert captured["body"]["metadata"] == {
+        "userId": "926194553",
+        "userName": "@egor",
+        "clientIp": "10.0.0.1",
+    }
+    await provider.close()
+
+    captured.clear()
+    off = make_provider(handler)  # по умолчанию metadata не шлём
+    await off.create_invoice(42, 199, "Kometa", payer_user_id=926194553)
+    assert "metadata" not in captured["body"]
+    await off.close()
+
+
+async def test_metadata_skips_empty_fields():
+    """Без имени и IP уезжает только userId: лишние ключи — риск 400."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=process_response())
+
+    provider = make_provider(handler, send_metadata=True)
+    await provider.create_invoice(42, 199, "Kometa", payer_user_id=5)
+
+    assert captured["body"]["metadata"] == {"userId": "5"}
+    await provider.close()
+
+
+async def test_metadata_absent_without_payer():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=process_response())
+
+    provider = make_provider(handler, send_metadata=True)
+    await provider.create_invoice(42, 199, "Kometa")
+
+    assert "metadata" not in captured["body"]
     await provider.close()
 
 
@@ -187,13 +291,37 @@ def test_code_and_title_depend_on_payment_method():
         "platega_sbp",
         "СБП / QR-код",
     )
-    assert PlategaProvider(MERCHANT_ID, SECRET, payment_method=10).code == "platega_card"
-    assert PlategaProvider(MERCHANT_ID, SECRET, payment_method=10).title == "Карта МИР"
+    assert PlategaProvider(MERCHANT_ID, SECRET, payment_method=11).code == "platega_card"
+    assert PlategaProvider(MERCHANT_ID, SECRET, payment_method=11).title == "Карта МИР"
     assert PlategaProvider(MERCHANT_ID, SECRET, payment_method=12).code == "platega_intl"
     assert PlategaProvider(MERCHANT_ID, SECRET, payment_method=12).title == "Зарубежная карта"
+    assert PlategaProvider(MERCHANT_ID, SECRET, payment_method=13).code == "platega_crypto"
+    assert PlategaProvider(MERCHANT_ID, SECRET, payment_method=14).code == "platega_sberpay"
     unknown = PlategaProvider(MERCHANT_ID, SECRET, payment_method=99)
     assert unknown.code == "platega"
     assert unknown.title
+
+
+def test_legacy_card_method_10_becomes_11():
+    """Старая настройка «карты = 10» не должна превращаться в 400 на платеже."""
+    provider = PlategaProvider(MERCHANT_ID, SECRET, payment_method=10)
+    assert provider.payment_method == 11
+    assert provider.code == "platega_card"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2,11", [2, 11]),
+        ("2, 10", [2, 11]),  # 10 — старый номер карт
+        ("2,10,11", [2, 11]),  # дубликат после замены схлопывается
+        ("2,99,7", [2]),  # чужие номера отбрасываются
+        ("", []),
+        ("мусор", []),
+    ],
+)
+def test_parse_payment_methods(raw, expected):
+    assert parse_payment_methods(raw) == expected
 
 
 # ------------------------------------------------------------------- ошибки
@@ -233,6 +361,29 @@ async def test_plain_error_is_reported_with_code_and_text():
     provider = make_provider(handler)
     with pytest.raises(PaymentError, match="401"):
         await provider.create_invoice(1, 100, "Kometa")
+    await provider.close()
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        # Реальные ответы API, проверены живыми запросами 08.10.2026.
+        ("Merchant secret key is not correct.", "API-ключ"),
+        ("Merchant not exists.", "ID мерчанта"),
+        ("X-MerchantId or X-Secret is not specified.", "PLATEGA_MERCHANT_ID"),
+    ],
+)
+async def test_auth_errors_explain_what_to_fix(message, expected):
+    """401 от Platega должен называть, что именно поправить, а не «HTTP 401»."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"code": "Auth:SIGN_1001", "message": message})
+
+    provider = make_provider(handler)
+    with pytest.raises(PaymentError) as exc:
+        await provider.create_invoice(1, 100, "Kometa")
+
+    assert expected in str(exc.value)
     await provider.close()
 
 
@@ -319,10 +470,12 @@ async def test_check_payment_status_mapping(platega_status: str, expected: Payme
 
 
 async def test_check_payment_converts_amount_to_rubles():
+    """В режиме рублей сумма из paymentDetails — уже рубли."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            json={"status": "CONFIRMED", "paymentDetails": {"amount": 19913, "currency": "RUB"}},
+            json={"status": "CONFIRMED", "paymentDetails": {"amount": 199, "currency": "RUB"}},
         )
 
     provider = make_provider(handler)
@@ -330,7 +483,23 @@ async def test_check_payment_converts_amount_to_rubles():
 
     assert check.status is PaymentStatus.PAID
     assert check.amount == 199
-    assert check.raw["paymentDetails"]["amount"] == 19913
+    assert check.raw["paymentDetails"]["amount"] == 199
+    await provider.close()
+
+
+async def test_check_payment_kopecks_mode_divides_by_100():
+    """В режиме копеек та же сумма — 19913 копеек = 199 ₽."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"status": "CONFIRMED", "paymentDetails": {"amount": 19913, "currency": "RUB"}},
+        )
+
+    provider = make_provider(handler, amount_unit="kopecks")
+    check = await provider.check_payment("tx-1")
+
+    assert check.amount == 199
     await provider.close()
 
 

@@ -313,7 +313,9 @@ def test_mtproto_dry_run_mentions_version_requirement(curl_shim):
     result = run(
         MTPROTO,
         "--port", "8443",
-        env=clean_env(PANEL_URL=FAKE_PANEL, PANEL_TOKEN=FAKE_TOKEN),
+        # Прячем локальную панель: на сервере, где 3x-ui установлена, скрипт иначе
+        # узнаёт версию локально и до подсказки про --check-version не доходит.
+        env=clean_env(PANEL_URL=FAKE_PANEL, PANEL_TOKEN=FAKE_TOKEN, XUI_BIN="/nonexistent/x-ui"),
         path_prefix=shim_dir,
     )
     text = output(result)

@@ -35,12 +35,42 @@ _EXTRA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("orders", "refunded_at", "DATETIME"),
     ("orders", "refunded_by", "VARCHAR(64)"),
     ("orders", "refund_note", "TEXT"),
+    # Оплата по закрытому заказу: когда об этом сообщили админам (один раз).
+    ("orders", "payment_alerted_at", "DATETIME"),
     ("users", "promo_code", "VARCHAR(32)"),
     ("users", "bonus_days_balance", "INTEGER DEFAULT 0"),
     ("users", "tags", "VARCHAR(128) DEFAULT ''"),
     # Обязательная подписка на канал: когда проверку проходили в последний раз.
     ("users", "channel_verified_at", "DATETIME"),
+    # Источник привлечения: из какого канала/размещения пришёл человек.
+    # Без этих полей нельзя посчитать CAC по каналам (docs/МАРКЕТИНГ-ЭКОНОМИКА.md).
+    ("users", "source", "VARCHAR(32) DEFAULT ''"),
+    ("users", "source_detail", "VARCHAR(64) DEFAULT ''"),
+    ("users", "source_at", "DATETIME"),
+    # Автосценарии: когда и что последний раз отправляли, чтобы не спамить.
+    ("users", "last_lifecycle_at", "DATETIME"),
+    ("users", "last_lifecycle_kind", "VARCHAR(32) DEFAULT ''"),
+    # Партнёры: ссылка ``?start=src_<код>``, выплата за платежи, история расчётов.
+    ("users", "partner_id", "INTEGER"),
+    ("orders", "partner_id", "INTEGER"),
+    ("orders", "partner_reward_rub", "FLOAT DEFAULT 0"),
+    ("promo_codes", "partner_id", "INTEGER"),
+    # Многоразовый промокод: работает и после первой использованной скидки.
+    ("promo_codes", "repeatable", "BOOLEAN DEFAULT 0"),
+    # Персональные ссылки под конкретного человека: своя скидка и свой срок.
+    ("users", "personal_link_id", "INTEGER"),
+    ("promo_codes", "personal_link_id", "INTEGER"),
     ("referrals", "rewarded_at", "DATETIME"),
+    # Награда за продления друга: рефералка, привязанная к удержанию.
+    ("referrals", "renewal_bonus_days", "INTEGER DEFAULT 0"),
+    ("referrals", "renewals_count", "INTEGER DEFAULT 0"),
+    ("referrals", "renewal_rewarded_at", "DATETIME"),
+    # Подарочный сертификат: покупка в подарок с активацией позже.
+    ("orders", "gift_token", "VARCHAR(32)"),
+    ("orders", "gift_recipient_tg_id", "BIGINT"),
+    ("orders", "gift_message", "VARCHAR(200)"),
+    ("orders", "gift_activated_at", "DATETIME"),
+    ("orders", "gift_activated_by", "INTEGER"),
     # Аудит действий администратора — в том же журнале событий.
     ("events", "actor_name", "VARCHAR(64)"),
     ("events", "actor_role", "VARCHAR(16)"),
@@ -61,6 +91,9 @@ _EXTRA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("nodes", "last_probe_error", "VARCHAR(300) DEFAULT ''"),
     # Шаг последней пробы: tcp/tls — порт проверен, panel/config — не состоялась.
     ("nodes", "last_probe_stage", "VARCHAR(16) DEFAULT ''"),
+    # Замер по каждому TCP-порту (JSON): доказательство для диагноза
+    # «какой именно порт не пускает», когда другой открыт.
+    ("nodes", "last_probe_ports", "TEXT DEFAULT ''"),
 )
 
 #: Индексы для запросов панели: create_all создаёт их только на новых базах.
@@ -92,16 +125,21 @@ async def _apply_light_migrations(conn) -> None:  # noqa: ANN001 - AsyncConnecti
 
 
 async def seed_plans() -> None:
-    """Идемпотентно создаёт тарифы из ТЗ (цены можно менять в БД)."""
+    """Идемпотентно создаёт тарифы (цены можно менять в БД).
+
+    Важно: сид только ДОБАВЛЯЕТ отсутствующие тарифы и никогда не перезаписывает
+    цену существующих. Смена цен — через админку (/admin) или SQL; правка этих
+    констант влияет лишь на новые установки.
+    """
     from sqlalchemy import select
 
     from app.db.models import Plan
 
     defaults = [
-        dict(code="m1", title="1 месяц", days=30, price_rub=199, price_stars=180, devices_limit=3, sort_order=1),
-        dict(code="m3", title="3 месяца", days=90, price_rub=499, price_stars=450, devices_limit=3, sort_order=2),
-        dict(code="m6", title="6 месяцев", days=180, price_rub=890, price_stars=800, devices_limit=3, sort_order=3),
-        dict(code="m12", title="12 месяцев", days=365, price_rub=1590, price_stars=1420, devices_limit=3, sort_order=4),
+        dict(code="m1", title="1 месяц", days=30, price_rub=120, price_stars=110, devices_limit=3, sort_order=1),
+        dict(code="m3", title="3 месяца", days=90, price_rub=299, price_stars=270, devices_limit=3, sort_order=2),
+        dict(code="m6", title="6 месяцев", days=180, price_rub=539, price_stars=485, devices_limit=3, sort_order=3),
+        dict(code="m12", title="12 месяцев", days=365, price_rub=959, price_stars=860, devices_limit=3, sort_order=4),
     ]
     async with SessionMaker() as session:
         for item in defaults:

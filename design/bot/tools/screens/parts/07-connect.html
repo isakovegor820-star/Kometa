@@ -1,0 +1,86 @@
+<main class="canvas">
+  <aside class="side">
+    <div class="eyebrow">Экран 07 · подключение</div>
+    <h1 class="title">Три шага и кнопка<br>своего приложения</h1>
+    <p class="lead">Инструкция <code>HOWTO</code> целиком, без сокращений: поставить
+    приложение, добавить подписку, обновить и подключиться. Кнопки приложений —
+    под сообщением, профиль добавляется сам.</p>
+    <ul class="notes">
+      <li><b>Три шага, а не десять.</b> Список приложений — по платформам, как в боте:
+      Android, iPhone/iPad, Windows, macOS.</li>
+      <li><b>Одно нажатие — профиль в приложении.</b> Telegram запрещает схемы
+      <code>happ://</code>, <code>v2rayng://</code>, <code>hiddify://</code> в кнопках,
+      поэтому кнопка ведёт на нашу https-страницу <code>/connect/&lt;token&gt;</code>.</li>
+      <li><b>Есть запасной путь.</b> «Скопировать ссылку» — если кнопка не сработала:
+      вставить ссылку в приложении вручную.</li>
+      <li><b>Ровно пять рядов.</b> Как в <code>connect_kb</code>: три приложения, ссылка
+      и выход. Если не работает — инструкция и так ведёт в поддержку (R9: рядов ≤ 5).</li>
+    </ul>
+  </aside>
+
+  <section class="stage">
+    <!--PHONE-->
+    <div class="tg">
+      {{STATUS}}
+      {{HEAD}}
+      <div class="tg-body">
+        <div class="msg">
+          <b>Как подключить</b><br><br>
+          <b>1. Установи приложение</b><br>
+          • Android: v2rayNG, Hiddify или Happ<br>
+          • iPhone/iPad: Streisand или Happ<br>
+          • Windows: Hiddify или v2rayN<br>
+          • macOS: Hiddify или sing-box<br><br>
+          <b>2. Добавь подписку</b><br>
+          Открой приложение → «Подписки» / «Subscription» → «+» → вставь ссылку
+          из раздела «Моя подписка» → сохрани.<br><br>
+          <b>3. Обнови и подключись</b><br>
+          Нажми «Обновить подписки», выбери локацию с меньшим пингом и включи
+          соединение.<br><br>
+          Если не работает — напиши в поддержку, поможем за несколько минут.
+        </div>
+        <div class="kb">
+          <div class="kbrow one"><div class="btn primary">Подключить в Happ</div></div>
+          <div class="kbrow one"><div class="btn">Подключить в v2rayNG</div></div>
+          <div class="kbrow one"><div class="btn">Подключить в Hiddify</div></div>
+          <div class="kbrow one"><div class="btn">Скопировать ссылку</div></div>
+          <div class="kbrow one"><div class="btn ghost">← В меню</div></div>
+        </div>
+      </div>
+      <div class="tg-input">
+        <div class="field">Сообщение</div>
+        <svg viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="8" y="2.5" width="6" height="11" rx="3"/><path d="M4.5 10.5a6.5 6.5 0 0 0 13 0"/><path d="M11 17v3"/></svg>
+      </div>
+    </div>
+    <!--/PHONE-->
+    <div class="stage-cap">Мокап клиента Telegram · 420 px · тексты инструкции — из бота</div>
+  </section>
+
+  <aside class="side right">
+    <h2>Тексты — из бота</h2>
+    <ul class="src">
+      <li><code>texts.HOWTO</code> — инструкция целиком: «1. Установи приложение»,
+      «2. Добавь подписку», «3. Обнови и подключись», список приложений по платформам</li>
+      <li><code>keyboards.connect_kb()</code> — пять кнопок: «Подключить в Happ»,
+      «Подключить в v2rayNG», «Подключить в Hiddify», «Скопировать ссылку»,
+      «← В меню» (подписи — <code>START-COPY.md</code>, раздел 4, пункты 35–39)</li>
+      <li><code>texts.SUBSCRIPTION_COPY</code> — точные пути в приложениях:
+      «Happ → «+» → «Добавить подписку»», «v2rayNG → «+» → «Импорт из буфера обмена»»,
+      «Hiddify → «Новый профиль» → «Добавить из ссылки»»</li>
+      <li>комментарий в <code>connect_kb()</code> — Telegram отвечает
+      <code>Bad Request: Unsupported URL protocol</code> на схемы приложений
+      (проверено на живом боте 06.10.2026), поэтому кнопки ведут на
+      <code>/connect/&lt;token&gt;</code></li>
+      <li><code>texts.SUBSCRIPTION_LINK_HINT</code> — «Ссылка постоянная: не удаляй
+      профиль, при смене сервера она обновится сама»</li>
+    </ul>
+    <div class="callout warn"><b>«Как подключить ТВ» в боте нет.</b> В <code>HOWTO</code>
+    перечислены Android, iPhone/iPad, Windows и macOS — инструкции для телевизора
+    в текстах не существует. Ставить кнопку, за которой пусто, нельзя: в макете
+    ровно те пять кнопок, что есть в <code>connect_kb</code>. ТВ упоминается только
+    как поддерживаемое устройство — в приветствии и в тексте поддержки.</div>
+    <div class="callout"><b>Ссылки-схемы не выдуманы:</b> кнопка «Подключить в Happ» —
+    это https-страница бота, которая открывает приложение по схеме. Так это
+    работает в коде, так нарисовано.</div>
+  </aside>
+</main>

@@ -28,6 +28,8 @@ from sqlalchemy import func, or_, select
 from app.config import get_settings
 from app.db.models import (
     Broadcast,
+    Partner,
+    PersonalLink,
     Plan,
     PromoCode,
     PromoRedemption,
@@ -37,7 +39,14 @@ from app.db.models import (
     utcnow,
 )
 from app.db.session import SessionMaker
-from app.services import audit, notifications, promo as promo_service, referral as referral_service
+from app.services import (
+    audit,
+    notifications,
+    partners as partner_service,
+    personal_links as personal_link_service,
+    promo as promo_service,
+    referral as referral_service,
+)
 from app.web import ui
 from app.web.admin.common import flash_redirect, page, require
 
@@ -695,3 +704,393 @@ async def _run_broadcast(broadcast_id: int, bot) -> None:  # noqa: ANN001 - aiog
         )
     except Exception as exc:  # noqa: BLE001 - уведомление не важнее рассылки
         logger.warning("Не смог уведомить админов о рассылке %s: %s", broadcast_id, exc)
+
+
+# --------------------------------------------------------------- партнёры
+@router.get("/partners", response_class=HTMLResponse)
+async def partners_page(request: Request):
+    """Партнёры: ссылка, промокод, процент и что именно отслеживается.
+
+    Отдельная страница от рефералки намеренно: рефералка — программа для
+    клиентов (дни подписки за друга), партнёры — внешние каналы, которым мы
+    платим деньгами. Смешивать их в одной таблице значит путать «сколько
+    начислили дней» и «сколько должны рублей».
+    """
+    auth = await require(request, "growth.view")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        stats = await partner_service.all_stats(db)
+        summary = await partner_service.totals(stats)
+
+    return await page(
+        request,
+        "partners.html",
+        auth,
+        title="Партнёры и рефералы",
+        page="referrals",
+        stats=stats,
+        summary=summary,
+        reward_titles=partner_service.REWARD_TITLES,
+        can_act=ui.can(auth.role, "growth.act"),
+        bot_username=settings.bot_username,
+        reward_kinds=list(partner_service.REWARD_KINDS),
+    )
+
+
+@router.post("/partners")
+async def partner_create(request: Request):
+    """Создать партнёра: ссылка, промокод, процент скидки и условия выплаты."""
+    auth = await require(request, "growth.act")
+    if isinstance(auth, Response):
+        return auth
+
+    form = await request.form()
+    name = str(form.get("name") or "").strip()
+    slug = str(form.get("slug") or "").strip()
+    code = str(form.get("promo_code") or "").strip()
+    try:
+        discount = int(str(form.get("discount_percent") or "0").strip() or 0)
+    except ValueError:
+        return flash_redirect("/admin/partners", error="Скидка должна быть числом")
+    try:
+        reward_value = float(str(form.get("reward_value") or "0").replace(",", ".").strip() or 0)
+    except ValueError:
+        return flash_redirect("/admin/partners", error="Выплата должна быть числом")
+    reward_kind = str(form.get("reward_kind") or partner_service.REWARD_PERCENT)
+    note = str(form.get("note") or "").strip()
+
+    async with SessionMaker() as db:
+        try:
+            partner = await partner_service.create_partner(
+                db,
+                name=name,
+                slug=slug,
+                discount_percent=discount,
+                reward_kind=reward_kind,
+                reward_value=reward_value,
+                note=note,
+                promo_code=code,
+            )
+        except partner_service.PartnerError as exc:
+            await db.rollback()
+            return flash_redirect("/admin/partners", error=str(exc))
+        await audit.log_action(
+            db,
+            "admin.partner_created",
+            actor=_actor(auth),
+            payload={
+                "partner_id": partner.id,
+                "name": partner.name,
+                "slug": partner.slug,
+                "discount_percent": partner.discount_percent,
+                "reward_kind": partner.reward_kind,
+                "reward_value": partner.reward_value,
+            },
+        )
+        await db.commit()
+        name_created, slug_created = partner.name, partner.slug
+
+    return flash_redirect("/admin/partners", message=f"Партнёр «{name_created}» создан: src_{slug_created}")
+
+
+@router.post("/partners/{partner_id}")
+async def partner_save(partner_id: int, request: Request):
+    """Изменить условия партнёра. Код ссылки не меняется: ссылки уже разошлись."""
+    auth = await require(request, "growth.act")
+    if isinstance(auth, Response):
+        return auth
+
+    form = await request.form()
+    try:
+        discount = int(str(form.get("discount_percent") or "0").strip() or 0)
+    except ValueError:
+        return flash_redirect("/admin/partners", error="Скидка должна быть числом")
+    try:
+        reward_value = float(str(form.get("reward_value") or "0").replace(",", ".").strip() or 0)
+    except ValueError:
+        return flash_redirect("/admin/partners", error="Выплата должна быть числом")
+
+    async with SessionMaker() as db:
+        partner = await db.get(Partner, partner_id)
+        if partner is None:
+            return flash_redirect("/admin/partners", error="Партнёр не найден")
+        try:
+            await partner_service.update_partner(
+                db,
+                partner,
+                name=str(form.get("name") or partner.name),
+                discount_percent=discount,
+                reward_kind=str(form.get("reward_kind") or partner.reward_kind),
+                reward_value=reward_value,
+                note=str(form.get("note") or ""),
+                is_active=form.get("is_active") == "on",
+            )
+        except partner_service.PartnerError as exc:
+            await db.rollback()
+            return flash_redirect("/admin/partners", error=str(exc))
+        await audit.log_action(
+            db,
+            "admin.partner_updated",
+            actor=_actor(auth),
+            payload={
+                "partner_id": partner.id,
+                "discount_percent": partner.discount_percent,
+                "reward_kind": partner.reward_kind,
+                "reward_value": partner.reward_value,
+                "is_active": partner.is_active,
+            },
+        )
+        await db.commit()
+        label = partner.name
+
+    return flash_redirect("/admin/partners", message=f"Условия партнёра «{label}» обновлены")
+
+
+@router.post("/partners/{partner_id}/payout")
+async def partner_payout(partner_id: int, request: Request):
+    """Отметить выплату партнёру.
+
+    Сумма по умолчанию — весь текущий долг: чаще всего платят целиком, а
+    частичную выплату можно вписать руками.
+    """
+    auth = await require(request, "growth.act")
+    if isinstance(auth, Response):
+        return auth
+
+    form = await request.form()
+    raw = str(form.get("amount") or "").strip().replace(",", ".")
+
+    async with SessionMaker() as db:
+        partner = await db.get(Partner, partner_id)
+        if partner is None:
+            return flash_redirect("/admin/partners", error="Партнёр не найден")
+        current = await partner_service.partner_stats(db, partner)
+        if raw:
+            try:
+                amount = float(raw)
+            except ValueError:
+                return flash_redirect("/admin/partners", error="Сумма выплаты должна быть числом")
+        else:
+            amount = current.debt_rub
+        if amount <= 0:
+            return flash_redirect("/admin/partners", error="Выплачивать нечего: долг нулевой")
+        try:
+            await partner_service.register_payout(db, partner, amount)
+        except partner_service.PartnerError as exc:
+            await db.rollback()
+            return flash_redirect("/admin/partners", error=str(exc))
+        await audit.log_action(
+            db,
+            "admin.partner_paid_out",
+            actor=_actor(auth),
+            payload={"partner_id": partner.id, "amount_rub": amount, "debt_was": current.debt_rub},
+        )
+        await db.commit()
+        label = partner.name
+
+    return flash_redirect("/admin/partners", message=f"Выплата {amount:.0f} ₽ отмечена для «{label}»")
+
+
+@router.get("/partners/{partner_id}", response_class=HTMLResponse)
+async def partner_card(partner_id: int, request: Request):
+    """Карточка партнёра: кто пришёл, сколько заплатил, что отслеживается."""
+    auth = await require(request, "growth.view")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        partner = await db.get(Partner, partner_id)
+        if partner is None:
+            return flash_redirect("/admin/partners", error="Партнёр не найден")
+        stats = await partner_service.partner_stats(db, partner)
+        people = await partner_service.users_of_partner(db, partner)
+
+    return await page(
+        request,
+        "partner.html",
+        auth,
+        title=f"Партнёр {partner.name}",
+        page="referrals",
+        partner=partner,
+        stats=stats,
+        people=people,
+        reward_titles=partner_service.REWARD_TITLES,
+        can_act=ui.can(auth.role, "growth.act"),
+        bot_username=settings.bot_username,
+    )
+
+
+# ---------------------------------------------------- персональные ссылки
+@router.get("/links", response_class=HTMLResponse)
+async def links_page(request: Request):
+    """Персональные ссылки: свой процент под конкретного человека.
+
+    Отдельная страница от партнёров: партнёр — это канал с выплатой, а
+    персональная ссылка — именное приглашение со своей скидкой и сроком.
+    У ссылки может не быть партнёра вообще (друг, коллега, разовый пост).
+    """
+    auth = await require(request, "growth.view")
+    if isinstance(auth, Response):
+        return auth
+
+    raw_partner = request.query_params.get("partner", "")
+    preset_partner = int(raw_partner) if raw_partner.isdigit() else None
+
+    async with SessionMaker() as db:
+        stats = await personal_link_service.all_link_stats(db)
+        summary = await personal_link_service.link_totals(stats)
+        partner_rows = await partner_service.list_partners(db, limit=100)
+
+    return await page(
+        request,
+        "links.html",
+        auth,
+        title="Персональные ссылки",
+        page="referrals",
+        stats=stats,
+        summary=summary,
+        partners_rows=partner_rows,
+        can_act=ui.can(auth.role, "growth.act"),
+        bot_username=settings.bot_username,
+        referral_percent=settings.referral_discount_percent,
+        preset_partner=preset_partner,
+    )
+
+
+@router.post("/links")
+async def link_create(request: Request):
+    """Создать персональную ссылку: своя скидка, свой срок, свой лимит."""
+    auth = await require(request, "growth.act")
+    if isinstance(auth, Response):
+        return auth
+
+    form = await request.form()
+    try:
+        discount = int(str(form.get("discount_percent") or "0").strip() or 0)
+        max_rub = int(str(form.get("discount_max_rub") or "0").strip() or 0)
+        uses = int(str(form.get("uses_limit") or "0").strip() or 0)
+        days = int(str(form.get("days") or "0").strip() or 0)
+    except ValueError:
+        return flash_redirect("/admin/links", error="Числовые поля должны быть числами")
+
+    raw_partner = str(form.get("partner_id") or "").strip()
+    partner_id = int(raw_partner) if raw_partner.isdigit() else None
+
+    async with SessionMaker() as db:
+        try:
+            link = await personal_link_service.create_link(
+                db,
+                title=str(form.get("title") or ""),
+                code=str(form.get("code") or ""),
+                owner_name=str(form.get("owner_name") or ""),
+                partner_id=partner_id,
+                discount_percent=discount,
+                discount_max_rub=max_rub,
+                uses_limit=uses,
+                days=days,
+                note=str(form.get("note") or ""),
+            )
+        except personal_link_service.PersonalLinkError as exc:
+            await db.rollback()
+            return flash_redirect("/admin/links", error=str(exc))
+        await audit.log_action(
+            db,
+            "admin.personal_link_created",
+            actor=_actor(auth),
+            payload={
+                "link_id": link.id,
+                "code": link.code,
+                "title": link.title,
+                "discount_percent": link.discount_percent,
+                "uses_limit": link.uses_limit,
+                "partner_id": partner_id,
+            },
+        )
+        await db.commit()
+        code_created, title_created = link.code, link.title
+
+    return flash_redirect("/admin/links", message=f"Ссылка для «{title_created}» готова: код {code_created}")
+
+
+@router.post("/links/{link_id}")
+async def link_save(link_id: int, request: Request):
+    """Изменить условия ссылки. Код не меняется: ссылка уже отправлена."""
+    auth = await require(request, "growth.act")
+    if isinstance(auth, Response):
+        return auth
+
+    form = await request.form()
+    try:
+        discount = int(str(form.get("discount_percent") or "0").strip() or 0)
+        max_rub = int(str(form.get("discount_max_rub") or "0").strip() or 0)
+        uses = int(str(form.get("uses_limit") or "0").strip() or 0)
+    except ValueError:
+        return flash_redirect("/admin/links", error="Числовые поля должны быть числами")
+
+    async with SessionMaker() as db:
+        link = await db.get(PersonalLink, link_id)
+        if link is None:
+            return flash_redirect("/admin/links", error="Ссылка не найдена")
+        try:
+            await personal_link_service.update_link(
+                db,
+                link,
+                title=str(form.get("title") or link.title),
+                discount_percent=discount,
+                discount_max_rub=max_rub,
+                uses_limit=uses,
+                is_active=form.get("is_active") == "on",
+                note=str(form.get("note") or ""),
+            )
+        except personal_link_service.PersonalLinkError as exc:
+            await db.rollback()
+            return flash_redirect("/admin/links", error=str(exc))
+        await audit.log_action(
+            db,
+            "admin.personal_link_updated",
+            actor=_actor(auth),
+            payload={
+                "link_id": link.id,
+                "discount_percent": link.discount_percent,
+                "uses_limit": link.uses_limit,
+                "is_active": link.is_active,
+            },
+        )
+        await db.commit()
+        label = link.title
+
+    return flash_redirect("/admin/links", message=f"Условия ссылки «{label}» обновлены")
+
+
+@router.get("/links/{link_id}", response_class=HTMLResponse)
+async def link_card(link_id: int, request: Request):
+    """Карточка ссылки: кто пришёл, сколько заплатил, во что обошлась скидка."""
+    auth = await require(request, "growth.view")
+    if isinstance(auth, Response):
+        return auth
+
+    async with SessionMaker() as db:
+        link = await db.get(PersonalLink, link_id)
+        if link is None:
+            return flash_redirect("/admin/links", error="Ссылка не найдена")
+        stats = await personal_link_service.link_stats(db, link)
+        people = await personal_link_service.users_of_link(db, link)
+        promo_row = await personal_link_service.promo_for_link(db, link.id)
+        partner = await db.get(Partner, link.partner_id) if link.partner_id else None
+
+    return await page(
+        request,
+        "link.html",
+        auth,
+        title=f"Ссылка {link.code}",
+        page="referrals",
+        link=link,
+        stats=stats,
+        people=people,
+        promo_row=promo_row,
+        partner=partner,
+        can_act=ui.can(auth.role, "growth.act"),
+        bot_username=settings.bot_username,
+    )

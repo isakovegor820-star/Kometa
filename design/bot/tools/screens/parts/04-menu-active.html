@@ -1,0 +1,84 @@
+<main class="canvas">
+  <aside class="side">
+    <div class="eyebrow">Экран 04 · моя подписка (sub:show)</div>
+    <h1 class="title">Живой кабинет вместо<br>«Отсутствует, Баланс: 0 ₽»</h1>
+    <p class="lead">Это то, что открывается из меню по кнопке «Моя подписка»
+    (<code>sub:show</code>). У конкурента в кабинете пусто и тревожно — здесь экран
+    отвечает на единственный вопрос клиента: «всё ли работает?»</p>
+    <ul class="notes">
+      <li><b>Статус теми же словами, что в боте.</b> «✅ активна», «Осталось 35 дн.»,
+      «Устройств: до 3» — поля <code>MY_SUB_ACTIVE</code>, ничего не переименовано.</li>
+      <li><b>Локации с замером.</b> Зелёный — отвечает и вот задержка, красный — нет.
+      Подписано честно: замер с сервера, не с телефона.</li>
+      <li><b>Ссылка-подписка — главная кнопка.</b> Это то, за чем в меню приходят.</li>
+      <li><b>Пять кнопок вместо восьми.</b> Выход «← В меню» есть на экране —
+      по дизайн-системе он обязателен (R11).</li>
+    </ul>
+  </aside>
+
+  <section class="stage">
+    <!--PHONE-->
+    <div class="tg">
+      {{STATUS}}
+      {{HEAD}}
+      <div class="tg-body">
+        <div class="msg">
+          <b>Твоя подписка</b>
+          <div class="rows">
+            <div class="row"><span class="k">Статус</span><span class="v ok">✅ активна</span></div>
+            <div class="row"><span class="k">Действует до</span><span class="v">12.11.2026</span></div>
+            <div class="row"><span class="k">Осталось</span><span class="v">35 дн.</span></div>
+            <div class="row"><span class="k">Устройств</span><span class="v">до 3</span></div>
+            <div class="row"><span class="k">Трафик</span><span class="v">без ограничений</span></div>
+          </div>
+        </div>
+        <div class="msg">
+          <b>Локации</b>
+          <div class="fine" style="margin:4px 0 6px">Задержка — замер с сервера, не с телефона.</div>
+          <div class="locs">
+            <div class="loc"><span>🇩🇪 Германия</span><span class="ping ok"><span class="dot"></span>42 мс</span></div>
+            <div class="loc"><span>🇫🇮 Финляндия</span><span class="ping ok"><span class="dot"></span>58 мс</span></div>
+            <div class="loc"><span>🇳🇱 Нидерланды</span><span class="ping err"><span class="dot"></span>не отвечает</span></div>
+          </div>
+          <div class="chip-row"><span class="chip">🛟 есть резервный профиль</span></div>
+        </div>
+        <div class="kb">
+          <div class="kbrow one"><div class="btn primary">Ссылка-подписка</div></div>
+          <div class="kbrow"><div class="btn">Продлить подписку</div><div class="btn">Обновить</div></div>
+          <div class="kbrow"><div class="btn">Как подключить</div><div class="btn">Помощь</div></div>
+        </div>
+      </div>
+      <div class="reply">
+        <div class="rrow"><div class="rb">Моя подписка</div><div class="rb">Тарифы</div></div>
+        <div class="rrow"><div class="rb">Как подключить</div><div class="rb">Если не открывается</div></div>
+        <div class="rrow"><div class="rb">Документы и цены</div><div class="rb">Помощь</div></div>
+      </div>
+    </div>
+    <!--/PHONE-->
+    <div class="stage-cap">Мокап клиента Telegram · 420 px · задержки и дата — пример</div>
+  </section>
+
+  <aside class="side right">
+    <h2>Тексты — из бота</h2>
+    <ul class="src">
+      <li><code>texts.MY_SUB_ACTIVE</code> — карточка целиком: статус, дата, дни,
+      устройства, трафик и «Ссылка-подписка 👇»</li>
+      <li><code>texts.STATUS_ACTIVE</code> — «✅ активна»; в макете статус подан
+      словом и цветом точки, без эмодзи-салата (R1–R3 дизайн-системы)</li>
+      <li><code>keyboards.subscription_kb()</code> — «Ссылка-подписка» (primary),
+      «Продлить подписку» (success), «Обновить», «← В меню» — новые подписи
+      <code>START-COPY.md</code>, раздел 4</li>
+      <li><code>app/web/sub.py</code> — «Локации и задержка (замер с сервера, не
+      с телефона)», форматы «🟢 {N} мс», «🔴 не отвечает», «⚪ нет замера»</li>
+      <li><code>services/finmodel_vps.COUNTRY_CATALOG</code> — имена «🇩🇪 Германия»,
+      «🇫🇮 Финляндия», «🇳🇱 Нидерланды»</li>
+      <li><code>texts.RESERVE_HELP</code> — профиль с пометкой «резерв» и то, что это
+      не отдельный тариф</li>
+    </ul>
+    <div class="callout warn"><b>Найденная дыра:</b> список локаций
+    (<code>sub:locations</code>) в боте есть, но <b>ни одна клавиатура на него не ведёт</b> —
+    кнопки нет. В макете локации показаны прямо в меню, чтобы фича не была мёртвой.</div>
+    <div class="callout"><b>Сейчас в .env</b> <code>SALES_ENABLED=false</code>: цены видны,
+    оплата — заглушка. Статусы и локации от этого не зависят.</div>
+  </aside>
+</main>

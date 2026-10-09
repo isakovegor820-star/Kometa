@@ -83,7 +83,7 @@ def calc_discount_rub(base_rub: int, percent: int, max_rub: int = 0) -> int:
     Рубли целые, потому что все платёжные провайдеры и автоподтверждение
     переводов работают с целыми суммами (копейки — только уникальная
     надбавка для сопоставления платежа). Округляем вниз, чтобы цена
-    выглядела круглой: 199 ₽ − 99 ₽ = 100 ₽.
+    выглядела круглой: 120 ₽ − 60 ₽ = 60 ₽ (прежняя сетка: 199 ₽ − 99 ₽ = 100 ₽).
     """
     if base_rub <= 0 or percent <= 0:
         return 0
@@ -192,10 +192,14 @@ async def _reject_reason(session: AsyncSession, user: User, promo: PromoCode) ->
         return REASON_USES_OVER
     if promo.kind == "referral" and promo.owner_user_id == user.id:
         return REASON_SELF
-    if await has_used_discount(session, user):
-        return REASON_ALREADY_USED
-    if promo.first_only and await has_paid_order(session, user):
-        return REASON_NOT_FIRST
+    if not promo.repeatable:
+        # Обычное правило: одна скидка на аккаунт за всю жизнь. Многоразовые
+        # коды (тестовые прогоны, компенсации) его сознательно обходят — иначе
+        # второй раз код не сработает никогда.
+        if await has_used_discount(session, user):
+            return REASON_ALREADY_USED
+        if promo.first_only and await has_paid_order(session, user):
+            return REASON_NOT_FIRST
     return None
 
 
@@ -215,8 +219,11 @@ async def available(session: AsyncSession, user: User, raw: str | None = None) -
     """Какой промокод применится к заказу прямо сейчас.
 
     Порядок: код, введённый руками → скидка за приглашение (если человек
-    пришёл по ссылке) → ничего. Введённый руками код имеет приоритет:
-    человек сделал действие осознанно.
+    пришёл по ссылке) → скидка партнёра (если человек пришёл по его ссылке) →
+    ничего. Введённый руками код имеет приоритет: человек сделал действие
+    осознанно. Партнёрская скидка идёт последней, но **до** пустого результата:
+    человек, пришедший по партнёрской ссылке, должен получить обещанное без
+    ввода кода.
     """
     candidates: list[str] = []
     manual = normalize(raw) or normalize(user.promo_code)
@@ -227,6 +234,30 @@ async def available(session: AsyncSession, user: User, raw: str | None = None) -
         referrer = await session.get(User, user.referred_by)
         if referrer is not None and not referrer.is_blocked:
             candidates.append(code_for_referral(referrer.referral_code))
+
+    # Персональная ссылка: своя скидка под конкретного адресата. Идёт раньше
+    # партнёрской — условия личной договорённости важнее общих условий канала.
+    if user.personal_link_id is not None:
+        personal_promo = await session.scalar(
+            select(PromoCode)
+            .where(PromoCode.personal_link_id == user.personal_link_id, PromoCode.kind == "personal")
+            .order_by(PromoCode.id)
+            .limit(1)
+        )
+        if personal_promo is not None:
+            candidates.append(personal_promo.code)
+
+    # Партнёрский код: ищем по привязке человека, а не по тексту ссылки —
+    # иначе скидка слетит, если он вернётся в бота без параметров.
+    if user.partner_id is not None:
+        partner_promo = await session.scalar(
+            select(PromoCode)
+            .where(PromoCode.partner_id == user.partner_id, PromoCode.kind == "partner")
+            .order_by(PromoCode.id)
+            .limit(1)
+        )
+        if partner_promo is not None:
+            candidates.append(partner_promo.code)
 
     for code in candidates:
         promo_row, reason = await check_code(session, user, code)
@@ -260,11 +291,27 @@ async def redeem(
 
     Один пользователь — одна скидка: если запись уже есть (например, человек
     оплатил два заказа со скидкой подряд), второй раз не начисляем.
+
+    Исключение — многоразовый код (``repeatable``): он для того и нужен, чтобы
+    срабатывать снова. Тогда каждое новое срабатывание увеличивает счётчик
+    ``uses_count`` (чтобы работал ``uses_limit``), но новую запись не создаём —
+    инвариант «одна запись на пользователя» остаётся в силе.
     """
     existing = await session.scalar(select(PromoRedemption).where(PromoRedemption.user_id == user.id))
     if existing is not None:
         if existing.order_id == order.id:
             existing.confirmed_at = existing.confirmed_at or datetime.now(timezone.utc)
+            return None
+        if promo.repeatable:
+            promo.uses_count = (promo.uses_count or 0) + 1
+            logger.info(
+                "Многоразовый код %s сработал повторно (пользователь %s), всего %s",
+                promo.code,
+                user.id,
+                promo.uses_count,
+            )
+            await session.flush()
+            return existing
         logger.info("Скидка уже использована пользователем %s, повторно не фиксируем", user.id)
         return None
 
@@ -292,9 +339,14 @@ async def create_admin_code(
     days: int = 0,
     first_only: bool = True,
     max_discount_rub: int = 0,
+    repeatable: bool = False,
     note: str | None = None,
 ) -> PromoCode:
-    """Создать обычный (не реферальный) промокод руками владельца."""
+    """Создать обычный (не реферальный) промокод руками владельца.
+
+    ``repeatable=True`` делает код многоразовым для одного и того же аккаунта —
+    для тестовых прогонов и компенсаций.
+    """
     from datetime import timedelta
 
     normalized = normalize(code)
@@ -310,6 +362,7 @@ async def create_admin_code(
         percent=max(1, min(100, percent)),
         max_discount_rub=max(0, max_discount_rub),
         first_only=first_only,
+        repeatable=repeatable,
         uses_limit=max(0, uses_limit),
         is_active=True,
         expires_at=(

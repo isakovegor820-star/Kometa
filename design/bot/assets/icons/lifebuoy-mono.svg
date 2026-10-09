@@ -1,0 +1,9 @@
+<!-- Kometa icon set · lifebuoy · 24×24 · stroke 1.75 · #45E698 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+ width="24" height="24"
+ fill="none" stroke="#45E698" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="12" cy="12" r="9"/>
+  <circle cx="12" cy="12" r="3.75"/>
+  <path d="M5.64 5.64 9.35 9.35M18.36 5.64 14.65 9.35"/>
+  <path d="M5.64 18.36 9.35 14.65M18.36 18.36 14.65 14.65"/>
+</svg>

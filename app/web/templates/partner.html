@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page = 'referrals' %}
+{% block title %}Партнёр {{ partner.name }} — Kometa{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div class="titles">
+    <h1>{{ partner.name }}</h1>
+    <div class="sub">
+      <code>?start=src_{{ partner.slug }}</code>
+      {% if stats.promo_code %} · промокод <code>{{ stats.promo_code }}</code>{% endif %}
+      · {{ partner.reward_text }} · время UTC
+    </div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="/admin/partners">{{ icon('users') }} Все партнёры</a>
+  </div>
+</div>
+
+{# --- что принёс этот партнёр ------------------------------------------ #}
+<div class="stats">
+  <div class="stat">
+    <div class="k">{{ icon('users') }} Пришли по ссылке</div>
+    <div class="v">{{ num(stats.clicked) }}</div>
+    <div class="d">закрепились за партнёром</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('check') }} Платящих</div>
+    <div class="v">{{ num(stats.payers) }}</div>
+    <div class="d">конверсия {{ (stats.conversion * 100)|round(0)|int }} %</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('card') }} Выручка</div>
+    <div class="v">{{ money(stats.revenue_rub) }}</div>
+    <div class="d">{{ num(stats.orders) }} оплат · скидок {{ money(stats.discount_rub) }}</div>
+  </div>
+  <div class="stat">
+    <div class="k">{{ icon('wallet') }} Долг партнёру</div>
+    <div class="v">{{ money(stats.debt_rub) }}</div>
+    <div class="d">начислено {{ money(stats.reward_rub) }} · выплачено {{ money(stats.paid_out_rub) }}</div>
+  </div>
+</div>
+
+{% if stats.payers %}
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>{{ icon('chart') }} Стоимость канала</h2>
+  </div>
+  <div class="card-body">
+    <dl class="kv">
+      <dt>CAC канала</dt>
+      <dd>
+        {{ money(stats.cac_rub) }} за платящего клиента
+        <div class="hint">(выплата {{ money(stats.reward_rub) }} + скидки {{ money(stats.discount_rub) }}) ÷ {{ num(stats.payers) }} платящих.
+          Потолок — 218 ₽, предел 327 ₽ (docs/МАРКЕТИНГ-ЭКОНОМИКА.md).</div>
+      </dd>
+      <dt>ROI</dt>
+      <dd>{{ stats.roi|round(1) }}× — рублей выручки на каждый рубль, отданный каналу</dd>
+      <dt>Условия</dt>
+      <dd>
+        скидка аудитории {% if partner.discount_percent %}−{{ partner.discount_percent }} %{% else %}нет{% endif %},
+        выплата {{ partner.reward_text }};
+        {% if partner.paid_out_at %}последняя выплата {{ partner.paid_out_at.strftime('%d.%m.%Y') }}{% else %}выплат ещё не было{% endif %}
+      </dd>
+    </dl>
+  </div>
+</div>
+{% endif %}
+
+{% if can_act %}
+{# --- изменение условий ------------------------------------------------ #}
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>{{ icon('edit') }} Условия партнёра</h2>
+    <div class="actions"><span class="xs dim">код ссылки <code>src_{{ partner.slug }}</code> не меняется</span></div>
+  </div>
+  <form method="post" action="/admin/partners/{{ partner.id }}">
+    <div class="card-body form-grid">
+      <div class="field">
+        <label for="c-name">Имя</label>
+        <input id="c-name" type="text" name="name" value="{{ partner.name }}" maxlength="64" required>
+      </div>
+      <div class="field">
+        <label for="c-discount">Скидка его аудитории, %</label>
+        <input id="c-discount" type="number" name="discount_percent" value="{{ partner.discount_percent }}" min="0" max="100">
+      </div>
+      <div class="field">
+        <label for="c-kind">Как платим</label>
+        <select id="c-kind" name="reward_kind">
+          {% for kind, title in reward_titles.items() %}
+          <option value="{{ kind }}" {% if partner.reward_kind == kind %}selected{% endif %}>{{ title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="c-value">Размер выплаты</label>
+        <input id="c-value" type="text" name="reward_value" value="{{ partner.reward_value|round(2) if partner.reward_value != partner.reward_value|round(0) else partner.reward_value|int }}" autocomplete="off">
+        <span class="hint">% при «проценте», рубли за оплату при «фиксе».</span>
+      </div>
+      <div class="field">
+        <label for="c-note">Заметка</label>
+        <input id="c-note" type="text" name="note" value="{{ partner.note or '' }}" maxlength="200">
+      </div>
+      <div class="field">
+        <span class="label">Состояние</span>
+        <div class="check-row">
+          <input type="hidden" name="is_active" value="off">
+          <label><input type="checkbox" class="checkbox" name="is_active" value="on" {% if partner.is_active %}checked{% endif %}> ссылка и промокод работают</label>
+        </div>
+        <span class="hint">Снятая галочка выключает и ссылку, и промокод: новые люди по ним не придут.</span>
+      </div>
+    </div>
+    <div class="card-foot">
+      <button class="btn btn-primary" type="submit">{{ icon('check') }} Сохранить</button>
+      <span class="hint">Уже приведённые люди остаются за партнёром: выплата по их оплатам продолжает считаться.</span>
+    </div>
+  </form>
+</div>
+
+{# --- выплата --------------------------------------------------------- #}
+<div class="card mt-16">
+  <div class="card-head"><h2>{{ icon('wallet') }} Выплата</h2></div>
+  <form method="post" action="/admin/partners/{{ partner.id }}/payout">
+    <div class="card-body form-grid">
+      <div class="field">
+        <label for="pay-amount">Сумма, ₽</label>
+        <input id="pay-amount" type="text" name="amount" value="{{ '%.2f'|format(stats.debt_rub) }}" autocomplete="off">
+        <span class="hint">По умолчанию — весь долг. Можно вписать часть: остаток останется в долге.</span>
+      </div>
+    </div>
+    <div class="card-foot">
+      <button class="btn btn-primary" type="submit" {% if stats.debt_rub <= 0 %}disabled{% endif %}>
+        {{ icon('check') }} Отметить выплату
+      </button>
+      <span class="hint">Деньги уходят человеку вручную (перевод, СБП). Здесь фиксируем факт и сумму — запись попадёт в журнал.</span>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+{# --- кто пришёл ------------------------------------------------------ #}
+<div class="card mt-16">
+  <div class="card-head">
+    <h2>{{ icon('users') }} Кого привёл</h2>
+    <div class="actions"><span class="xs dim">отсортировано по выручке</span></div>
+  </div>
+  {% if people %}
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Клиент</th>
+        <th class="num">Оплат</th>
+        <th class="num">Выручка</th>
+        <th class="actions"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in people %}
+      <tr>
+        <td>
+          <div class="who-cell">
+            <span class="avatar">{{ initials(row.user.display_name) }}</span>
+            <span style="min-width:0">
+              <a class="nm" href="/admin/users/{{ row.user.id }}">{{ row.user.display_name }}</a>
+              <span class="meta">{{ row.user.tg_id }}{% if row.user.is_blocked %} · заблокирован{% endif %}</span>
+            </span>
+          </div>
+        </td>
+        <td class="num">{{ num(row.orders) }}</td>
+        <td class="num">{{ money(row.revenue_rub) }}</td>
+        <td class="actions"><a class="btn btn-sm" href="/admin/users/{{ row.user.id }}">Карточка</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="card-body">
+    <p class="dim">Пока никто не пришёл по этой ссылке. Проверь, что ссылка отправлена целиком:
+      <code>{% if bot_username %}t.me/{{ bot_username }}?start=src_{{ partner.slug }}{% else %}?start=src_{{ partner.slug }}{% endif %}</code></p>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,8 @@
+<!-- Kometa icon set · device-laptop · 24×24 · stroke 1.75 · #45E698 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+ width="24" height="24"
+ fill="none" stroke="#45E698" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="4.25" y="4.75" width="15.5" height="10.25" rx="1.75"/>
+  <path d="M5.1 15 3.5 18.5M18.9 15 20.5 18.5"/>
+  <path d="M2.5 18.5h19"/>
+</svg>

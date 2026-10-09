@@ -10,19 +10,21 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from aiogram import Bot
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db.models import Order, Plan, Subscription, User
 from app.panels.base import PanelClient
 from app.payments.matching import allocate_signature
-from app.services import events, notifications, promo as promo_service, referral, subscriptions
+from app.services import events, notifications, partners, promo as promo_service, referral, subscriptions
 
 settings = get_settings()
 
 KIND_PURCHASE = "purchase"
 KIND_RENEW = "renew"
+#: Покупка подписки в подарок: доступ выдаётся не покупателю, а получателю.
+KIND_GIFT = "gift"
 
 
 async def _allocate_pay_kopecks(session: AsyncSession, base_rub: int) -> int:
@@ -182,6 +184,30 @@ async def mark_paid(
     if provider_payment_id:
         order.comment = f"payment_id={provider_payment_id}"
 
+    # Партнёр, который привёл этого человека: фиксируем снимок в заказе и
+    # считаем выплату. Партнёр получает с КАЖДОГО платежа, а не только с
+    # первого — так ему выгодно приводить тех, кто остаётся (app/services/partners.py).
+    await partners.accrue_reward(session, order, user)
+
+    # Подарочный сертификат: деньги получены, но доступ покупателю не выдаём.
+    # Дни уйдут получателю, когда он активирует ссылку (app/services/gift.py).
+    if order.gift_token:
+        sub = None
+        await session.flush()
+        await events.log_event(
+            session,
+            events.ORDER_PAID,
+            user_id=user.id,
+            payload={
+                "order_id": order.id,
+                "amount": order.amount_rub,
+                "provider": order.provider,
+                "gift": True,
+                "gift_token": order.gift_token,
+            },
+        )
+        return sub, False
+
     sub = await subscriptions.activate_plan(session, user, plan, panel)
     await session.flush()
     await events.log_event(
@@ -313,6 +339,80 @@ async def pending_orders(session: AsyncSession, limit: int = 50) -> list[Order]:
         .limit(limit)
     )
     return list((await session.scalars(stmt)).all())
+
+
+async def awaiting_payment(
+    session: AsyncSession,
+    *,
+    provider_prefix: str = "",
+    hours: int = 24,
+    limit: int = 100,
+    statuses: tuple[str, ...] = ("pending", "canceled", "expired"),
+) -> list[Order]:
+    """Заказы, по которым стоит спросить платёжную систему о статусе.
+
+    Кроме ``pending`` сюда попадают недавние ``canceled`` и ``expired``. Причина:
+    клиент мог оплатить счёт, пока бот был выключен (или вебхук не дошёл).
+    Платёжная ссылка живёт 15 минут, а заказ закрывается через 30 — если машина
+    спала, заказ успевает истечь, и платёж состоялся по уже закрытому заказу.
+    Такую оплату выдаём автоматически (см. ``finalize_order``).
+
+    ``statuses`` позволяет разделить два режима опроса: открытые счета (их
+    клиент оплачивает прямо сейчас — спрашиваем часто) и закрытые (оплата
+    могла прийти позже — спрашиваем редко, чтобы не долбить платёжную систему).
+
+    :param provider_prefix: ограничить одним провайдером (например ``platega``).
+    :param hours: насколько глубоко смотреть назад.
+    :param statuses: какие статусы заказов интересны.
+    """
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    stmt = (
+        select(Order)
+        .where(
+            Order.status.in_(statuses),
+            Order.created_at >= since,
+            Order.external_id.is_not(None),
+        )
+        .order_by(Order.created_at.desc())
+        .limit(limit)
+    )
+    if provider_prefix:
+        stmt = stmt.where(Order.provider.startswith(provider_prefix))
+    return list((await session.scalars(stmt)).all())
+
+
+async def pending_invoices(session: AsyncSession) -> int:
+    """Счета, которые ждут оплаты клиентом, а не решения админа.
+
+    ``pending`` — это выставленный счёт (Stars, Platega, крипта). Пока клиент не
+    заплатил, админу делать нечего: доступ выдастся сам. Раньше это число
+    попадало в сводку как «ждут подтверждения», и владелец шёл подтверждать
+    неоплаченные счета.
+    """
+    return int(
+        await session.scalar(
+            select(func.count(Order.id)).where(
+                Order.status == "pending", Order.provider != "manual"
+            )
+        )
+        or 0
+    )
+
+
+async def manual_requests(session: AsyncSession) -> int:
+    """Заявки на ручную оплату: тут админ действительно нужен.
+
+    Только перевод по реквизитам (``provider="manual"``): клиент нажал
+    «Оплатил, доступа нет», и подтвердить поступление может человек.
+    """
+    return int(
+        await session.scalar(
+            select(func.count(Order.id)).where(
+                Order.status == "pending", Order.provider == "manual"
+            )
+        )
+        or 0
+    )
 
 
 async def expire_stale_orders(session: AsyncSession) -> list[Order]:

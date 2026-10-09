@@ -1,0 +1,79 @@
+<main class="canvas">
+  <aside class="side">
+    <div class="eyebrow">Экран 01 · hero после гейта канала</div>
+    <h1 class="title">3 дня бесплатно —<br>карта не нужна</h1>
+    <p class="lead">Первый экран нового человека — гейт канала «Остался один шаг»
+    (<code>START-COPY.md</code>, 3.0). Этот экран — второй: одно сообщение, в котором
+    фото, подпись и кнопки.</p>
+    <ul class="notes">
+      <li><b>Одно сообщение вместо трёх.</b> Фото + подпись + три кнопки. Подпись —
+      279 знаков видимого текста (314 с тегами) при лимите caption 1024:
+      запас 745 знаков.</li>
+      <li><b>Обещание честное.</b> В пробном доступе 1 устройство, на тарифах — до 3.
+      Числа из <code>trial_days</code> и <code>devices_limit</code>, а не «на глаз».</li>
+      <li><b>Один главный призыв.</b> «Попробовать бесплатно» — primary.
+      Дальше цена и подключение, и всё.</li>
+      <li><b>Без сообщения-указателя и без длинного приветствия.</b> Нижняя клавиатура
+      ставится служебной строкой (<code>START-COPY.md</code>, 3.4), а не отдельным
+      сообщением «меню внизу».</li>
+    </ul>
+  </aside>
+
+  <section class="stage">
+    <!--PHONE-->
+    <div class="tg">
+      {{STATUS}}
+      {{HEAD}}
+      <div class="tg-body">
+        <div class="msg photo crop">
+          <img src="{{BANNER}}" alt="Kometa — 3 дня бесплатно">
+          <div class="cap">
+            <b>3 дня бесплатно — карта не нужна</b><br><br>
+            Проверь Kometa на своих сайтах и устройствах. Не подойдёт — просто
+            не платишь.
+            <div class="quote" style="margin-top:10px">
+              В пробном доступе: 1 устройство, безлимитный трафик, несколько локаций.
+              На тарифах — до 3 устройств.
+            </div>
+            <div style="margin-top:10px">Подключение занимает 2 минуты: пришлём ссылку
+            и кнопки приложений.</div>
+          </div>
+        </div>
+        <div class="kb">
+          <div class="kbrow one"><div class="btn primary">Попробовать бесплатно</div></div>
+          <div class="kbrow one"><div class="btn">Тарифы — от 120 ₽</div></div>
+          <div class="kbrow one"><div class="btn">Как подключить</div></div>
+        </div>
+      </div>
+    </div>
+    <!--/PHONE-->
+    <div class="stage-cap">Мокап клиента Telegram · 420 px · один экран = одно сообщение</div>
+    <div class="stage-cap">До этого экрана — гейт канала «Остался один шаг» (START-COPY 3.0)</div>
+  </section>
+
+  <aside class="side right">
+    <h2>Тексты — из START-COPY.md 3.1</h2>
+    <ul class="src">
+      <li>Подпись целиком — раздел <b>3.1</b> «hero: фото + подпись + кнопки в одном
+      сообщении»: заголовок «3 дня бесплатно — карта не нужна», blockquote про
+      пробный доступ, строка про 2 минуты</li>
+      <li>Факты под подписью: <code>settings.trial_days = 3</code>,
+      <code>trial_devices = 1</code>, <code>devices_limit = 3</code> у всех тарифов
+      (<code>seed_plans</code>), <code>LOCATIONS_NOTE</code> из .env</li>
+      <li>Кнопка 1: <b>Попробовать бесплатно</b> — <code>trial:start</code>,
+      семантика primary, доступ выдаётся сразу (<code>trial.py:23</code>)</li>
+      <li>Кнопка 2: <b>Тарифы — от 120 ₽</b> — <code>plans</code>, neutral,
+      цена минимального тарифа видна до нажатия</li>
+      <li>Кнопка 3: <b>Как подключить</b> — <code>sub:howto</code>, neutral,
+      открывает <code>HOWTO</code> новым сообщением</li>
+      <li>Гейт перед этим экраном: <code>CHANNEL_GATE_BODY</code>,
+      «Подписаться на канал» (primary) + «Я подписался» (success)</li>
+    </ul>
+    <div class="callout warn"><b>Что заменено.</b> Старые <code>texts.WELCOME</code>
+    (9 строк) и <code>MENU_NO_SUB</code> в макет не попали — по <code>START-COPY.md</code>
+    это текст, который убираем. Hero-подпись — 279 знаков вместо простыни.</div>
+    <div class="callout"><b>Техническая правда:</b> у фото-сообщения нет текста, поэтому
+    ответы кнопок обязаны быть новым сообщением или <code>edit_caption</code> —
+    <code>edit_text</code> вернёт ошибку (<code>START-COPY.md</code>, 3.1).</div>
+  </aside>
+</main>

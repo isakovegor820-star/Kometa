@@ -22,20 +22,22 @@ def test_plan_price_per_month():
     monthly = next(p for p in DEFAULT_PLANS if p.code == "m1")
     yearly = next(p for p in DEFAULT_PLANS if p.code == "m12")
 
-    assert monthly.per_month == 199
-    assert 130 < yearly.per_month < 133  # годовой тариф дешевле в пересчёте на месяц
+    assert monthly.per_month == 120  # базовая точка сетки от 08.10.2026
+    # годовой тариф заметно дешевле в пересчёте на месяц (79 ₽ против 120 ₽)
+    assert yearly.per_month < monthly.per_month * 0.7
+    assert yearly.per_month > monthly.per_month * 0.6
 
 
 def test_average_revenue_with_default_mix():
     net = average_monthly_revenue(DEFAULT_PLANS, PlanMix())
 
-    # 0.5*199 + 0.25*166 + 0.15*148 + 0.10*131 ≈ 181, плюс поправка на звёзды
-    assert 178 < net < 190
+    # 0.5*120 + 0.25*100 + 0.15*90 + 0.10*79 ≈ 106, плюс поправка на звёзды
+    assert 104 < net < 112
 
 
 def test_average_revenue_without_stars_bonus():
     net = average_monthly_revenue(DEFAULT_PLANS, PlanMix(), stars_net_factor=1.0)
-    assert 170 < net < 180
+    assert 101 < net < 109
 
 
 def test_mix_must_sum_to_one():
@@ -56,11 +58,12 @@ def test_all_monthly_plan_is_most_expensive():
     assert pricey > cheap
 
 
-def test_break_even_is_about_three_clients():
+def test_break_even_is_about_five_clients():
+    """При чеке ~110 ₽ ноду за 459 ₽ окупают ~4,2 платящих (было 2,8)."""
     net = average_monthly_revenue(DEFAULT_PLANS, PlanMix())
     users = break_even_users(net, Costs(nodes=1))
 
-    assert 2 < users < 3.5
+    assert 4 < users < 5.5
 
 
 def test_capacity_and_nodes():

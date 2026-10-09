@@ -3,7 +3,7 @@
 Проверяем ровно то, что обещано клиенту в интерфейсе:
   * друг по ссылке платит половину;
   * скидка одна на аккаунт и только на первую оплату;
-  * пригласивший получает +30 дней, даже если подписки у него ещё нет;
+  * пригласивший получает бонусные дни, даже если подписки у него ещё нет;
   * в звёздах цена тоже со скидкой, и Telegram подтверждает именно её;
   * накрутка ограничена: свой код не работает, лимит наград в месяц.
 """
@@ -69,9 +69,13 @@ async def test_referral_link_gives_half_price_on_first_order(session):
 
     order = await orders.create_order(session, friend, plan, provider="manual")
 
+    half = promo.calc_discount_rub(
+        plan.price_rub, settings.referral_discount_percent, settings.referral_discount_max_rub
+    )
+
     assert order.base_amount_rub == plan.price_rub
-    assert order.discount_rub == 99
-    assert order.amount_rub == 100  # 199 ₽ − 99 ₽
+    assert order.discount_rub == half
+    assert order.amount_rub == plan.price_rub - half  # половина цены тарифа
     assert order.promo_code == promo.code_for_referral(referrer.referral_code)
 
 
@@ -106,7 +110,9 @@ async def test_discount_is_given_only_once_per_account(session, panel):
 
     second = await orders.create_order(session, friend, plan, provider="manual")
 
-    assert first.discount_rub == 99
+    assert first.discount_rub == promo.calc_discount_rub(
+        plan.price_rub, settings.referral_discount_percent, settings.referral_discount_max_rub
+    )
     assert second.discount_rub == 0
     assert second.amount_rub == plan.price_rub
 
@@ -144,7 +150,9 @@ async def test_manual_code_links_buyer_to_code_owner(session, panel):
 
     buyer.promo_code = promo.code_for_referral(owner.referral_code)
     order = await orders.create_order(session, buyer, plan, provider="manual")
-    assert order.discount_rub == 99
+    assert order.discount_rub == promo.calc_discount_rub(
+        plan.price_rub, settings.referral_discount_percent, settings.referral_discount_max_rub
+    )
 
     await orders.mark_paid(session, order, panel)
 
@@ -181,11 +189,19 @@ async def test_reward_is_not_lost_without_subscription(session, panel):
 
     assert referrer.bonus_days_balance == settings.referral_bonus_days_referrer
 
-    # Подключается пробным доступом — накопленные дни добавляются к сроку
+    # Пробный доступ дни не сжигает: они ждут первой оплаты
     sub, granted = await subscriptions.start_trial(session, referrer, panel)
     assert granted is True
+    assert referrer.bonus_days_balance == settings.referral_bonus_days_referrer
+    assert sub.days_left <= settings.trial_days + 1
+
+    # Первая оплата забирает накопленные дни и продлевает срок
+    plan = await first_plan(session)
+    order = await orders.create_order(session, referrer, plan, provider="manual")
+    await orders.mark_paid(session, order, panel)
+    await session.refresh(sub)
     assert referrer.bonus_days_balance == 0
-    assert sub.days_left >= settings.referral_bonus_days_referrer
+    assert sub.days_left >= plan.days + settings.referral_bonus_days_referrer - 2
 
 
 async def test_reward_is_paid_once_per_friend(session, panel):
@@ -249,19 +265,22 @@ async def test_stars_invoice_uses_discounted_price(session, panel, bot, dispatch
     referrer = await make_user(session, 6501)
     await make_friend(session, referrer, 6502)
     plan = await first_plan(session)
+    half = promo.calc_discount_rub(
+        plan.price_rub, settings.referral_discount_percent, settings.referral_discount_max_rub
+    )
 
     await session.commit()  # отпускаем блокировку SQLite перед работой бота
     await dispatcher.feed_update(bot, make_update("/start", user_id=6502))
     bot.session.clear()
     await dispatcher.feed_update(bot, make_update(callback_data=f"plan:{plan.id}", user_id=6502))
-    assert "100 ₽" in bot.session.all_text()
+    assert f"{plan.price_rub - half} ₽" in bot.session.all_text()
 
     bot.session.clear()
     await dispatcher.feed_update(bot, make_update(callback_data=f"pay:{plan.id}:stars", user_id=6502))
 
     order = await session.scalar(last_order_of(6502))
-    assert order.discount_rub == 99
-    assert order.stars_amount == plan.price_stars - round(plan.price_stars * 99 / plan.price_rub)
+    assert order.discount_rub == half
+    assert order.stars_amount == plan.price_stars - round(plan.price_stars * half / plan.price_rub)
 
     bot.session.clear()
     await dispatcher.feed_update(bot, make_pre_checkout_update(order.id, order.stars_amount, user_id=6502))
@@ -300,19 +319,23 @@ async def test_referral_screen_explains_mechanics(session, bot, dispatcher):
     assert f"ref_{user.referral_code}" in text
     assert promo.code_for_referral(user.referral_code) in text
     assert "Как это работает" in text
-    assert "скидку 50%" in text
+    assert f"скидку {settings.referral_discount_percent}%" in text
 
 
 async def test_referral_greeting_shows_prices(session, bot, dispatcher):
     referrer = await make_user(session, 6801)
+    plan = await first_plan(session)
+    half = promo.calc_discount_rub(
+        plan.price_rub, settings.referral_discount_percent, settings.referral_discount_max_rub
+    )
     await session.commit()
     bot.session.clear()
 
     await dispatcher.feed_update(bot, make_update(f"/start ref_{referrer.referral_code}", user_id=6802))
     text = bot.session.all_text()
 
-    assert "Скидка 50% на первую оплату" in text
-    assert "199 ₽" in text and "100 ₽" in text
+    assert f"Скидка {settings.referral_discount_percent}% на первую оплату" in text
+    assert f"{plan.price_rub} ₽" in text and f"{plan.price_rub - half} ₽" in text
     assert promo.code_for_referral(referrer.referral_code) in text
 
 
@@ -444,3 +467,88 @@ async def test_friend_message_mentions_bonus(session, panel, bot, dispatcher):
 
     assert "Оплата получена" in sent
     assert f"+{settings.referral_bonus_days_invited} дня" in sent
+
+
+# ----------------------------------------------- многоразовые коды (тесты/компенсации)
+async def make_repeatable_code(session, plan, *, uses_limit: int = 10, code: str = "TEST10") -> PromoCode:
+    """Код «1 рубль на любой тариф»: 100 % с потолком на рубль меньше цены."""
+    row = PromoCode(
+        code=code,
+        kind="admin",
+        percent=100,
+        max_discount_rub=plan.price_rub - 1,
+        first_only=False,
+        repeatable=True,
+        uses_limit=uses_limit,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def test_repeatable_code_works_again_on_same_account(session, panel):
+    """Многоразовый код срабатывает повторно на том же аккаунте.
+
+    Обычное правило «одна скидка на аккаунт за всю жизнь» блокирует любой
+    второй код — из-за него тестовые прогоны и компенсации не работают.
+    """
+    user = await make_user(session, 5401)
+    plan = await first_plan(session)
+
+    once = PromoCode(code="ONCE50", kind="admin", percent=50, first_only=True, uses_limit=1)
+    session.add(once)
+    await session.flush()
+    user.promo_code = "ONCE50"
+    first = await orders.create_order(session, user, plan, provider="crypto")
+    await orders.mark_paid(session, first, panel)
+    assert await promo.has_used_discount(session, user) is True
+
+    repeatable = await make_repeatable_code(session, plan)
+    user.promo_code = "TEST10"
+
+    for _ in range(2):
+        order = await orders.create_order(session, user, plan, provider="crypto")
+        assert order.discount_rub == plan.price_rub - 1
+        assert order.amount_rub == 1, "многоразовый код должен снова давать 1 ₽"
+        await orders.mark_paid(session, order, panel)
+
+    await session.refresh(repeatable)
+    assert repeatable.uses_count == 2
+
+
+async def test_repeatable_code_still_respects_uses_limit(session, panel):
+    """Лимит многоразового кода работает: после него цена снова полная."""
+    user = await make_user(session, 5402)
+    plan = await first_plan(session)
+    await make_repeatable_code(session, plan, uses_limit=2)
+    user.promo_code = "TEST10"
+
+    for _ in range(2):
+        order = await orders.create_order(session, user, plan, provider="crypto")
+        assert order.amount_rub == 1
+        await orders.mark_paid(session, order, panel)
+
+    exhausted = await orders.create_order(session, user, plan, provider="crypto")
+    assert exhausted.discount_rub == 0
+    assert exhausted.amount_rub == plan.price_rub
+
+
+async def test_regular_code_is_still_blocked_after_first_discount(session, panel):
+    """Обычный код по-прежнему не срабатывает второй раз — правило не ослаблено."""
+    user = await make_user(session, 5403)
+    plan = await first_plan(session)
+
+    first_code = PromoCode(code="FIRST50", kind="admin", percent=50, first_only=True, uses_limit=5)
+    second_code = PromoCode(code="SECOND30", kind="admin", percent=30, first_only=True, uses_limit=5)
+    session.add_all([first_code, second_code])
+    await session.flush()
+
+    user.promo_code = "FIRST50"
+    first = await orders.create_order(session, user, plan, provider="crypto")
+    await orders.mark_paid(session, first, panel)
+
+    user.promo_code = "SECOND30"
+    second = await orders.create_order(session, user, plan, provider="crypto")
+
+    assert second.discount_rub == 0
+    assert second.amount_rub == plan.price_rub

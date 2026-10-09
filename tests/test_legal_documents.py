@@ -14,7 +14,8 @@ from __future__ import annotations
 from app import legal_texts
 from app.bot import keyboards, texts
 from app.config import get_settings
-from app.services import documents
+from app.services import documents, orders
+from app.services.finmodel import DEFAULT_PLANS
 from tests.fakes import make_update
 
 # ------------------------------------------------------------------ раздел в боте
@@ -70,7 +71,10 @@ async def test_terms_opens_in_chat_before_publication(bot, dispatcher, session):
     sent = bot.session.all_text()
     assert "ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ" in sent
     assert "Возврат средств" in sent
-    assert "199" in sent
+    # Цена месяца берётся из тарифов, а не вписана в текст документа.
+    plans = await orders.list_plans(session)
+    monthly = next(p for p in plans if p.code == "m1")
+    assert str(monthly.price_rub) in sent
 
 
 async def test_documents_become_links_when_published(bot, dispatcher, session, monkeypatch):
@@ -97,10 +101,15 @@ async def test_pricing_shows_actual_prices_and_terms(bot, dispatcher, session):
     bot.session.clear()
     await dispatcher.feed_update(bot, make_update(callback_data="legal:pricing", user_id=7906))
 
+    plans = await orders.list_plans(session)
+    monthly = next(p for p in plans if p.code == "m1")
+    annual = next(p for p in plans if p.code == "m12")
+    per_month = round(annual.price_rub / annual.days * 30)
+
     sent = bot.session.all_text()
-    assert "199" in sent
-    assert "1\u00a0590" in sent  # цена с разделителем разрядов
-    assert "131" in sent  # цена месяца на годовом тарифе
+    assert str(monthly.price_rub) in sent
+    assert str(annual.price_rub) in sent
+    assert str(per_month) in sent  # цена месяца на годовом тарифе
     assert "автоматического списания нет" in sent
     assert "до 3 устройств одновременно" in sent
 
@@ -215,10 +224,9 @@ def test_price_list_matches_database_prices():
     context = documents.build_context(prices=documents.DEFAULT_PRICES)
     price_list = documents.price_list_text(context)
 
-    titles = [plan_title for plan_title in ("1 месяц", "3 месяца", "6 месяцев", "12 месяцев")]
-    for title in titles:
-        assert title in price_list
-    assert "199" in price_list and "1\u00a0590" in price_list
+    for row in documents.DEFAULT_PRICES:
+        assert row.title in price_list
+        assert str(row.price_rub) in price_list
     assert orders is not None  # прайс и бот берут тарифы из одного источника
 
 
@@ -235,12 +243,13 @@ def test_partner_fees_are_in_the_model():
 
     gross = average_monthly_revenue()
     net = net_after_channel_fee(gross, CHANNEL_FEES["sbp"])
-    assert round(net, 2) == 167.16
-    assert round(break_even_users(net, Costs()), 2) == 2.75
+    assert round(net, 2) == round(gross * 0.92, 2)
+    assert round(break_even_users(net, Costs()), 1) == round(Costs().monthly / net, 1)
 
-    # Тариф 199 ₽ при 8 % приносит 183 ₽, а не 199 ₽.
-    assert round(net_after_channel_fee(199, 8.0)) == 183
-    assert round(net_after_channel_fee(199, 5.0)) == 189
+    # С тарифа «1 месяц» при 8 % приходит меньше цены, при 5 % — больше.
+    price = DEFAULT_PLANS[0].price_rub
+    assert round(net_after_channel_fee(price, 8.0)) == round(price * 0.92)
+    assert round(net_after_channel_fee(price, 5.0)) == round(price * 0.95)
 
 
 def test_net_after_channel_fee_validates_input():

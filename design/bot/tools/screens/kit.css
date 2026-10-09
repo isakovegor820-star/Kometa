@@ -1,0 +1,391 @@
+/* Kometa Bot — общий кит макетов экранов.
+   ЕДИНСТВЕННЫЙ источник значений — design/bot/tokens.css (копия значений ниже,
+   потому что каждый HTML самодостаточен и не ходит за внешними файлами). */
+
+:root {
+  --brand-ink: #04140F;
+  --brand-900: #02231A;
+  --brand-800: #06432F;
+  --brand-700: #0A5C3F;
+  --brand-600: #0E7350;
+  --brand-500: #1AAB75;
+  --brand-400: #2BC57F;
+  --brand-300: #45E698;
+  --brand-200: #8FF8AA;
+  --brand-100: #DCFF5C;
+
+  --accent-cyan: #35D6E8;
+  --accent-violet: #8B7BF7;
+
+  --action-primary-bg: var(--brand-500);
+  --action-primary-fg: #04140F;
+  --action-success-bg: var(--brand-300);
+  --action-success-fg: #04140F;
+  --action-danger-bg: #F04452;
+  --action-danger-fg: #FFFFFF;
+  --action-neutral-bg: transparent;
+
+  --surface-canvas: #0B0F12;
+  --surface-chat: #17212B;
+  --surface-1: #10171E;
+  --surface-2: #1B2733;
+  --surface-3: #22313F;
+  --surface-glass: rgba(255, 255, 255, 0.04);
+  --surface-glass-strong: rgba(255, 255, 255, 0.08);
+
+  --text-1: #F2F6F4;
+  --text-2: #A8B6B0;
+  --text-3: #6F7F7A;
+  --text-on-brand: #04140F;
+
+  --border-1: rgba(255, 255, 255, 0.07);
+  --border-2: rgba(255, 255, 255, 0.12);
+  --border-brand: rgba(69, 230, 152, 0.35);
+
+  --status-ok: var(--brand-300);
+  --status-warn: #F5B544;
+  --status-error: #F04452;
+  --status-info: var(--accent-cyan);
+
+  --grad-brand: linear-gradient(135deg, #2BC57F 0%, #45E698 52%, #DCFF5C 100%);
+  --grad-orbit: conic-gradient(from 200deg, #35D6E8, #8B7BF7, #45E698, #DCFF5C, #35D6E8);
+  --grad-hero: radial-gradient(120% 90% at 78% 18%, rgba(53, 214, 232, 0.18), transparent 60%),
+               radial-gradient(100% 80% at 12% 22%, rgba(69, 230, 152, 0.22), transparent 62%),
+               linear-gradient(160deg, #04140F 0%, #06432F 58%, #02231A 100%);
+
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --shadow-2: 0 6px 18px rgba(0, 0, 0, 0.36);
+  --shadow-3: 0 18px 44px rgba(0, 0, 0, 0.46);
+  --glow-brand: 0 0 0 1px rgba(69, 230, 152, 0.22), 0 8px 28px rgba(43, 197, 127, 0.28);
+
+  --font-ui: -apple-system, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --fs-caption: 13px;
+  --fs-body: 15px;
+  --fs-lead: 17px;
+  --fs-h3: 20px;
+  --fs-h2: 26px;
+  --fs-h1: 34px;
+
+  --lh-tight: 1.15;
+  --lh-body: 1.45;
+  --ls-caps: 0.06em;
+
+  --chat-max: 720px;
+  --btn-row-h: 44px;
+  --safe-bottom: 28px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Экспорт снимает всю высоту документа: полоса прокрутки попала бы в PNG. */
+html { scrollbar-width: none; }
+::-webkit-scrollbar { width: 0; height: 0; }
+
+body {
+  width: 1440px;
+  background: #05080a;
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------- страница -- */
+.canvas {
+  width: 1440px;
+  padding: 52px 56px 56px;
+  display: grid;
+  grid-template-columns: 400px 448px 400px;
+  gap: 40px;
+  align-items: start;
+}
+
+.side { display: flex; flex-direction: column; gap: var(--sp-4); }
+.side.right { padding-top: var(--sp-10); }
+
+.eyebrow {
+  font-size: var(--fs-caption);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--brand-300);
+  font-weight: 600;
+}
+
+h1.title { font-size: var(--fs-h2); line-height: var(--lh-tight); font-weight: 700; }
+
+.lead { font-size: var(--fs-body); color: var(--text-2); }
+
+.notes { list-style: none; display: flex; flex-direction: column; gap: var(--sp-3); }
+.notes li {
+  position: relative;
+  padding-left: 26px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+.notes li::before {
+  content: "";
+  position: absolute; left: 6px; top: 9px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--grad-brand);
+}
+.notes li b { color: var(--text-1); font-weight: 600; }
+
+.side.right h2 {
+  font-size: var(--fs-caption);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.src { list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); }
+.src li { font-size: var(--fs-caption); color: var(--text-2); line-height: 1.5; }
+.src code { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--brand-200); }
+.src em { color: var(--text-1); font-style: normal; }
+
+.callout {
+  border: 1px solid var(--border-1);
+  border-left: 3px solid var(--border-brand);
+  border-radius: var(--r-sm);
+  background: var(--surface-glass);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+.callout b { color: var(--text-1); }
+.callout.warn { border-left-color: var(--status-warn); }
+
+/* ---------------------------------------------------------------- сцена -- */
+.stage { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
+.stage-cap { font-size: var(--fs-caption); color: var(--text-3); text-align: center; }
+
+/* ------------------------------------------------- мокап клиента Telegram */
+.tg {
+  width: 420px;
+  min-height: 620px;
+  background: var(--surface-chat);
+  border: 1px solid var(--border-2);
+  border-radius: 26px;
+  overflow: hidden;
+  box-shadow: var(--shadow-3);
+  display: flex;
+  flex-direction: column;
+}
+
+.tg-status {
+  height: 44px; padding: 0 var(--sp-5);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--fs-caption); color: var(--text-2); font-weight: 600;
+}
+.tg-status .ico { display: flex; align-items: center; gap: 6px; }
+.tg-status svg { width: 20px; height: 20px; display: block; }
+
+.tg-head {
+  height: 58px; padding: 0 var(--sp-3);
+  display: flex; align-items: center; gap: var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+  background: rgba(255, 255, 255, 0.025);
+}
+.tg-back { width: 22px; height: 22px; color: var(--text-2); flex: none; }
+.tg-ava { width: 36px; height: 36px; border-radius: 50%; display: block; flex: none; }
+.tg-who { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.tg-name { font-size: var(--fs-body); font-weight: 600; }
+.tg-sub { font-size: var(--fs-caption); color: var(--brand-300); }
+.tg-dots { color: var(--text-2); font-size: var(--fs-lead); letter-spacing: 2px; }
+
+.tg-body {
+  flex: 1;
+  padding: var(--sp-3) var(--sp-2) var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+
+/* сообщения */
+.msg {
+  align-self: flex-start;
+  max-width: 356px;
+  background: var(--surface-1);
+  border-radius: var(--r-lg);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text-1);
+}
+.msg b { font-weight: 600; }
+.msg .dim { color: var(--text-2); }
+.msg .fine { font-size: var(--fs-caption); color: var(--text-3); }
+.msg.photo { padding: 0; overflow: hidden; width: 356px; }
+.msg.photo img { display: block; width: 100%; height: auto; }
+/* Баннер приветствия: в исходнике внизу тёмная полоса от кропа — обрезаем её,
+   оставляя только живую часть кадра (1280×601). */
+.msg.photo.crop img { aspect-ratio: 1280 / 601; object-fit: cover; object-position: top center; }
+.msg.photo .cap { padding: var(--sp-3) var(--sp-4); }
+.msg.tight { padding: var(--sp-2) var(--sp-4); }
+.msg.headline { font-size: var(--fs-lead); }
+
+/* блоки внутри сообщений */
+.rows { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-2); }
+.row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3);
+  font-size: var(--fs-body);
+}
+.row .k { color: var(--text-2); }
+.row .v { font-weight: 600; text-align: right; }
+.row .v.ok { color: var(--status-ok); }
+.row .v.warn { color: var(--status-warn); }
+.row .v.err { color: var(--status-error); }
+
+.divider { height: 1px; background: var(--border-1); margin: var(--sp-2) 0; }
+
+.locs { display: flex; flex-direction: column; margin-top: var(--sp-1); }
+.loc {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: 7px 0; font-size: var(--fs-body);
+  border-bottom: 1px solid var(--border-1);
+}
+.loc:last-child { border-bottom: 0; }
+.loc .ping { font-size: var(--fs-caption); color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+.loc .ping .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
+.loc .ping.ok .dot { background: var(--status-ok); }
+.loc .ping.err .dot { background: var(--status-error); }
+.loc .ping.err { color: var(--status-error); }
+.loc .ping.warn .dot { background: var(--status-warn); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--r-pill);
+  background: var(--surface-glass-strong);
+  border: 1px solid var(--border-1);
+  font-size: var(--fs-caption); color: var(--text-2);
+}
+.chip.ok { color: var(--brand-200); border-color: var(--border-brand); background: rgba(69, 230, 152, 0.10); }
+.chip.warn { color: var(--status-warn); border-color: rgba(245, 181, 68, 0.32); background: rgba(245, 181, 68, 0.10); }
+.chip.err { color: #FFB4B9; border-color: rgba(240, 68, 82, 0.35); background: rgba(240, 68, 82, 0.12); }
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: var(--sp-2); }
+
+/* «карточка тарифа» — в Telegram это blockquote: полоса слева, углы прямые
+   (так его рисует клиент; заодно это снимает P0 линтера про «карточку с левым акцентом»). */
+.quote {
+  border-left: 3px solid var(--border-brand);
+  background: var(--surface-glass);
+  border-radius: 0;
+  padding: var(--sp-3) var(--sp-4);
+  display: flex; flex-direction: column; gap: 5px;
+}
+.quote + .quote { margin-top: var(--sp-2); }
+.quote .q-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.quote .q-title { font-size: var(--fs-body); font-weight: 600; }
+.quote .q-price { font-size: var(--fs-body); font-weight: 600; }
+.quote .q-sub { font-size: var(--fs-caption); color: var(--text-2); }
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; border-radius: var(--r-pill);
+  background: rgba(69, 230, 152, 0.14);
+  border: 1px solid var(--border-brand);
+  color: var(--brand-200);
+  font-size: var(--fs-caption); font-weight: 600; white-space: nowrap;
+}
+.badge.gold { background: rgba(220, 255, 92, 0.14); border-color: rgba(220, 255, 92, 0.35); color: var(--brand-100); }
+
+/* строка суммы: тариф / скидка / итог */
+.sum { display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-2); }
+.sum .line { display: flex; justify-content: space-between; font-size: var(--fs-body); }
+.sum .line.discount { color: var(--brand-200); }
+.sum .total {
+  display: flex; justify-content: space-between; align-items: baseline;
+  border-top: 1px solid var(--border-1); padding-top: var(--sp-2); margin-top: 2px;
+  font-size: var(--fs-lead); font-weight: 700;
+}
+
+/* шаги инструкции */
+.steps { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); }
+.step { display: flex; gap: var(--sp-3); font-size: var(--fs-body); }
+.step .n {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(69, 230, 152, 0.14); border: 1px solid var(--border-brand);
+  color: var(--brand-200); font-size: var(--fs-caption); font-weight: 700;
+  display: flex; align-items: center; justify-content: center; margin-top: 2px;
+}
+.step .t { color: var(--text-1); }
+.step .t span { color: var(--text-2); font-size: var(--fs-caption); display: block; }
+
+/* ------------------------------------------------------ inline-клавиатура */
+/* Кнопки в Telegram живут под сообщением, а не внутри пузыря: тот же столбец,
+   ширина — по самому широкому ряду. */
+.kb { width: 356px; display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.kbrow { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.kbrow.one { grid-template-columns: 1fr; }
+.btn {
+  min-height: var(--btn-row-h);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: var(--fs-body);
+  display: flex; align-items: center; justify-content: center;
+  padding: 6px 10px; text-align: center;
+}
+.btn.primary { background: var(--action-primary-bg); color: var(--action-primary-fg); font-weight: 600; }
+.btn.success { background: var(--action-success-bg); color: var(--action-success-fg); font-weight: 600; }
+.btn.danger { background: var(--action-danger-bg); color: var(--action-danger-fg); font-weight: 600; }
+.btn.ghost { background: transparent; border: 1px solid var(--border-2); color: var(--text-2); }
+.btn.sm { font-size: var(--fs-caption); min-height: 40px; }
+
+/* ------------------------------------------------- постоянное меню снизу -- */
+.reply {
+  border-top: 1px solid var(--border-1);
+  background: var(--surface-1);
+  padding: var(--sp-2) 10px var(--sp-3);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.reply .rrow { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.reply .rb {
+  height: 40px; border-radius: var(--r-sm); background: var(--surface-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-caption); color: var(--text-1);
+}
+
+/* -------------------------------------------------- поле ввода сообщения */
+.tg-input {
+  display: flex; align-items: center; gap: 10px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--border-1);
+  background: var(--surface-1);
+}
+.tg-input .field {
+  flex: 1; height: 40px; border-radius: 20px; background: var(--surface-2);
+  display: flex; align-items: center; padding: 0 var(--sp-4);
+  font-size: var(--fs-caption); color: var(--text-3);
+}
+.tg-input svg { width: 22px; height: 22px; color: var(--text-3); flex: none; }
+
+/* подпись под мокапом в борде */
+.board {
+  width: 1440px; padding: 48px 60px 56px;
+  display: flex; flex-direction: column; gap: var(--sp-8);
+}
+.board-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-8); }
+.board-head h1 { font-size: var(--fs-h1); line-height: var(--lh-tight); }
+.board-head .sub { font-size: var(--fs-lead); color: var(--text-2); max-width: 620px; }
+.grid { display: grid; grid-template-columns: repeat(3, 380px); gap: 30px 32px; justify-content: center; }
+.cell { display: flex; flex-direction: column; gap: var(--sp-3); }
+.shot { zoom: 0.904; }
+.cell figcaption {
+  display: flex; flex-direction: column; gap: 2px;
+  border-top: 1px solid var(--border-1); padding-top: var(--sp-2); margin-top: auto;
+}
+.cell .no { font-size: var(--fs-caption); color: var(--brand-300); font-weight: 600; letter-spacing: var(--ls-caps); }
+.cell .nm { font-size: var(--fs-body); font-weight: 600; }
+.cell .ds { font-size: var(--fs-caption); color: var(--text-3); }
+.legend { display: flex; gap: var(--sp-6); flex-wrap: wrap; font-size: var(--fs-caption); color: var(--text-2); }
+.legend b { color: var(--text-1); }

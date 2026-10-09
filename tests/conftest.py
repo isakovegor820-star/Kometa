@@ -23,6 +23,14 @@ os.environ["TRIAL_GB"] = "10"
 os.environ["TRIAL_DEVICES"] = "1"
 os.environ["STARS_ENABLED"] = "true"
 os.environ["MANUAL_PAYMENT_DETAILS"] = "СБП: +7 900 000-00-00 (тест)"
+# Платёжные доступы в тестах пустые. Боевые ключи лежат в .env, и без этого
+# тест, забывший подменить транспорт, ушёл бы в реальный API платёжной системы.
+# Кому нужен настроенный провайдер — выставляет значения у себя (см.
+# tests/test_platega_webhook.py, tests/test_platega_polling.py).
+os.environ["PLATEGA_MERCHANT_ID"] = ""
+os.environ["PLATEGA_SECRET"] = ""
+os.environ["CRYPTOBOT_TOKEN"] = ""
+os.environ["WATA_TOKEN"] = ""
 # Продажи в тестах открыты по умолчанию: боевой .env может держать их
 # закрытыми до готовности ноды, но это не должно ломать сценарии покупки.
 os.environ["SALES_ENABLED"] = "true"
@@ -30,6 +38,15 @@ os.environ["SALES_ENABLED"] = "true"
 # Telegram API. Кто проверяет сам гейт — включает его у себя (test_channel_gate).
 os.environ["CHANNEL_GATE_ENABLED"] = "false"
 os.environ["CHANNEL_ID"] = ""
+# Админ-панель: пароль обязателен, иначе все страницы /admin отвечают
+# «Панель выключена». Раньше значения приходили из боевого .env (кэш настроек
+# не сбрасывался), и тесты были зелёными по случайности, а не по замыслу.
+os.environ["ADMIN_PANEL_PASSWORD"] = "test-admin-password"
+os.environ["ADMIN_PANEL_SECRET"] = "test-admin-secret"
+# Панель открыта для тестовых адресов: запросы идут с подставных IP
+# (203.0.113.x), а боевой режим «только localhost» их не пускает.
+# Сам запрет проверяется отдельно и явно — в tests/test_admin_access.py.
+os.environ["ADMIN_LOCAL_ONLY"] = "false"
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +58,59 @@ def reset_panel_registry():
     registry._cache.clear()
     yield
     registry._cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings_from_env_file():
+    """Тесты не читают боевой ``.env`` — только переменные окружения.
+
+    Зачем. ``Settings`` объявлен с ``env_file=BASE_DIR / ".env"``, а ``get_settings``
+    кэширован. Пока кэш жив, тесты видят окружение из шапки этого файла (оно
+    выставлено до импорта приложения). Но стоит любому тесту вызвать
+    ``get_settings.cache_clear()`` — и настройки перечитываются уже **с диска**,
+    то есть с боевого ``.env``: в тестах появляются ``PANEL_TYPE=xui``,
+    ``SALES_ENABLED=false``, ``PLATEGA_METHODS``, токены. Дальше падают чужие
+    тесты, и причина не видна: одиночный прогон зелёный, полный — красный
+    (08.10.2026 таких падений было 40, почти все платёжные).
+
+    Решение: на время теста ``Settings`` перестаёт читать файл, а кэш настроек
+    сбрасывается до и после каждого теста. Так тест, поменявший окружение или
+    настройку, не оставляет значение соседу — раньше это давало «плавающие»
+    падения в зависимости от случайного порядка.
+
+    Проверять сам ``.env`` (парсер, запись, чтение) нужно отдельными тестами с
+    временным файлом — так и делает ``tests/test_configure_env.py``.
+    """
+    from app import config as config_module
+
+    original_config = dict(config_module.Settings.model_config)
+    # env_file убираем ДО первого создания настроек: иначе любой тест, сбросивший
+    # кэш, перечитает боевой .env с диска.
+    config_module.Settings.model_config = config_module.SettingsConfigDict(
+        env_file=None,
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+    # Кэш настроек остаётся живым на весь прогон: тесты (и модули вроде
+    # tests/test_admin_autopay.py) держат ссылку на ЭКЗЕМПЛЯР настроек и правят
+    # его поля. Если сбрасывать кэш между тестами, они правили бы старый объект,
+    # а код читал новый — и тест падал бы по причине, которой нет в коде.
+    settings_instance = config_module.get_settings()
+    snapshot = {
+        name: getattr(settings_instance, name)
+        for name in (*config_module.Settings.model_fields, *config_module.Settings.model_computed_fields)
+    }
+    try:
+        yield
+    finally:
+        # Возвращаем настройки к состоянию до теста: monkeypatch снимает свои
+        # патчи, но прямое присваивание (`settings.x = ...`) осталось бы соседу.
+        for name, value in snapshot.items():
+            try:
+                setattr(settings_instance, name, value)
+            except (AttributeError, ValueError):  # pragma: no cover - защитная ветка
+                continue
+        config_module.Settings.model_config = original_config  # type: ignore[assignment]
 
 
 @pytest.fixture

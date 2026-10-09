@@ -11,11 +11,12 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,6 +52,21 @@ SSH_HINT = ssh_hint()
 
 FLASH_COOKIE = "kometa_flash"
 FLASH_TTL = 30
+
+#: Заголовок, которым панель помечает запросы из JS (тосты и обновление списка
+#: без перезагрузки страницы). Обработчики про него не знают: флаг читает
+#: flash_redirect, поэтому менять десятки маршрутов не пришлось.
+AJAX_HEADER = "x-panel-ajax"
+_ajax_request: ContextVar[bool] = ContextVar("panel_ajax", default=False)
+
+
+def set_ajax(value: bool) -> None:
+    """Пометить текущий запрос как ajax (вызывает middleware веб-слоя)."""
+    _ajax_request.set(bool(value))
+
+
+def is_ajax() -> bool:
+    return _ajax_request.get()
 
 #: Страницы пагинации: меньше 25 строк модератор листает вслепую, больше 200 — тормозит.
 PER_PAGE_CHOICES = (25, 50, 100, 200)
@@ -152,6 +168,8 @@ def forbidden(request: Request, session: Session, capability: str = "") -> HTMLR
         {
             "session_active": True,
             "admin": session.as_dict(),
+            "caps": ui.capabilities(session.role),
+            "cmdk_sections": ui.cmd_sections(ui.capabilities(session.role)),
             "page_title": "Нет доступа",
             "page": "forbidden",
             "nav_counts": NavCounts(0, 0),
@@ -199,6 +217,17 @@ def flash_redirect(
         должен быть виден в логе редиректов (например, кнопка проверки выписки
         в тестах и в отладке): cookie такого не показывает.
     """
+    # Запрос из JS: вместо редиректа отдаём результат словарём — панель
+    # показывает тост и обновляет список, не перезагружая страницу.
+    if is_ajax():
+        return JSONResponse(
+            {
+                "ok": not error,
+                "message": message or "",
+                "error": error or "",
+            }
+        )
+
     if query and (message or error):
         from urllib.parse import quote
 
@@ -249,6 +278,8 @@ async def page(
     # Права текущей роли: шаблоны не показывают кнопку, которую сервер всё
     # равно отклонит. Меню и действия берут права отсюда, а не из роли напрямую.
     context.setdefault("caps", ui.capabilities(session.role))
+    # Разделы для командной палитры (⌘K) — из тех же прав.
+    context.setdefault("cmdk_sections", ui.cmd_sections(context["caps"]))
     context.setdefault("page", "")
     context.setdefault("page_title", title or context.get("page_title", "Панель"))
     if "nav_counts" not in context:

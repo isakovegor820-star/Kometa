@@ -48,6 +48,10 @@ class Reward:
     referrer_sub: Subscription | None
     referrer_accrued: int
     limit_reached: bool
+    #: Дни за продление (вторая и следующие оплаты друга). 0 — это первая оплата.
+    renewal_days: int = 0
+    #: Номер оплаты друга: 1 — первая, 2 — первое продление и так далее.
+    renewal_number: int = 0
 
 
 def month_start(now: datetime | None = None) -> datetime:
@@ -96,9 +100,15 @@ async def rewards_this_month(session: AsyncSession, referrer_id: int) -> int:
 
 
 async def reward_on_payment(session: AsyncSession, order: Order, panel: PanelClient) -> Reward | None:
-    """Начислить бонусные дни, если это первая оплата приглашённого."""
+    """Начислить бонусные дни за оплату приглашённого.
+
+    Первая оплата друга даёт полную награду (``referral_bonus_days_referrer``),
+    каждое продление — ``referral_bonus_days_renewal``. Так программа работает
+    не только на привлечение, но и на удержание: пока друг платит, пригласивший
+    продолжает получать дни (см. docs/МАРКЕТИНГ-ЭКОНОМИКА.md).
+    """
     ref = await session.scalar(select(Referral).where(Referral.invited_id == order.user_id))
-    if ref is None or ref.paid_order_id is not None:
+    if ref is None:
         return None
 
     referrer = await session.get(User, ref.referrer_id)
@@ -106,7 +116,52 @@ async def reward_on_payment(session: AsyncSession, order: Order, panel: PanelCli
     if referrer is None or invited is None:
         return None
 
+    is_renewal = ref.paid_order_id is not None
     limit_reached = await rewards_this_month(session, ref.referrer_id) >= settings.referral_max_rewards_per_month
+
+    if is_renewal:
+        # Продление: награда поменьше, но повторяемая. Начисляем и засчитываем
+        # в тот же месячный лимит, чтобы накрутка через самопродление не прошла.
+        ref.renewals_count = (ref.renewals_count or 0) + 1
+        renewal_days = 0 if limit_reached else settings.referral_bonus_days_renewal
+        ref.renewal_bonus_days = (ref.renewal_bonus_days or 0) + renewal_days
+        if renewal_days > 0:
+            ref.renewal_rewarded_at = utcnow()
+            ref.rewarded_at = utcnow()
+        await session.flush()
+
+        referrer_sub: Subscription | None = None
+        accrued = 0
+        if renewal_days > 0:
+            referrer_sub, accrued = await subscriptions.add_bonus_days(
+                session, referrer, renewal_days, panel, reason="referral_renewal"
+            )
+        await events.log_event(
+            session,
+            events.REFERRAL_REWARDED,
+            user_id=referrer.id,
+            payload={
+                "invited_id": invited.id,
+                "order_id": order.id,
+                "renewal": True,
+                "renewal_number": ref.renewals_count,
+                "referrer_days": renewal_days,
+                "accrued_days": accrued,
+                "limit_reached": limit_reached,
+            },
+        )
+        return Reward(
+            referrer=referrer,
+            invited=invited,
+            referrer_days=renewal_days,
+            invited_days=0,
+            referrer_sub=referrer_sub,
+            referrer_accrued=accrued,
+            limit_reached=limit_reached,
+            renewal_days=renewal_days,
+            renewal_number=ref.renewals_count or 0,
+        )
+
     referrer_days = 0 if limit_reached else settings.referral_bonus_days_referrer
     invited_days = settings.referral_bonus_days_invited
 

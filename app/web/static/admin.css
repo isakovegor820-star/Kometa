@@ -90,8 +90,13 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --sidebar-w: 252px;
+  --sidebar-min: 68px;
   --topbar-h: 60px;
   --row-h: 44px;
+  /* Отступы ячейки таблицы. Меняются переключателем плотности (шапка панели):
+     на 15″ в «компактном» режиме в экран входит на треть больше строк. */
+  --cell-y: 10px;
+  --cell-x: 14px;
 
   /* Тени — минимальные, только чтобы отделить слой */
   --shadow-xs: 0 1px 2px rgba(16, 24, 40, .05);
@@ -227,6 +232,7 @@ h1 > svg, h2 > svg, h3 > svg, dd > svg, td > svg { vertical-align: -3px; margin-
   width: var(--sidebar-w); flex: 0 0 var(--sidebar-w);
   background: var(--surface); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
+  transition: width .16s ease, flex-basis .16s ease;
 }
 
 .brand {
@@ -288,7 +294,11 @@ h1 > svg, h2 > svg, h3 > svg, dd > svg, td > svg { vertical-align: -3px; margin-
   color: var(--accent); display: grid; place-items: center; font-weight: 650; font-size: 12px;
 }
 
-.content { padding: 22px 24px 72px; max-width: 1360px; width: 100%; }
+/* Контент занимает всю ширину окна. Раньше стоял жёсткий предел 1360 px: на 15″
+   ноутбуке и внешнем мониторе справа пустовало 300–600 px, пока таблица в это же
+   время уезжала в горизонтальный скролл. Верхний предел оставлен только для
+   сверхшироких экранов (≥2040 px), чтобы строка не растягивалась на «три метра». */
+.content { padding: 20px clamp(16px, 1.2vw, 30px) 80px; max-width: 2040px; width: 100%; }
 
 /* ------------------------------------------------------------ заголовок */
 .page-head {
@@ -429,10 +439,10 @@ table.data th {
   position: sticky; top: 0; z-index: 2;
   background: var(--surface-2); color: var(--text-2); font-weight: 600; font-size: var(--fz-xs);
   text-transform: uppercase; letter-spacing: .07em;
-  text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  text-align: left; padding: 9px var(--cell-x); border-bottom: 1px solid var(--border); white-space: nowrap;
 }
 table.data td {
-  padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: middle;
+  padding: var(--cell-y) var(--cell-x); border-bottom: 1px solid var(--border); vertical-align: middle;
 }
 table.data tbody tr:hover td { background: var(--surface-2); }
 table.data tbody tr:last-child td { border-bottom: 0; }
@@ -630,6 +640,9 @@ dialog.modal .modal-foot { display: flex; gap: 8px; justify-content: flex-end; p
 
 /* ----------------------------------------------------------- детали/ключ */
 .kv { display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 9px 14px; font-size: var(--fz-sm); }
+/* Узкая карточка (мастер-деталь): колонка подписей уже, иначе значению
+   не остаётся места и ссылка-подписка превращается в «sub/b…». */
+.kv-tight { grid-template-columns: 104px minmax(0, 1fr); gap: 7px 10px; }
 .kv dt { color: var(--text-2); }
 .kv dd { margin: 0; font-weight: 550; min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 560px) { .kv { grid-template-columns: 1fr; gap: 3px 0; } .kv dd { margin-bottom: 8px; } }
@@ -652,6 +665,306 @@ dialog.modal .modal-foot { display: flex; gap: 8px; justify-content: flex-end; p
 .meter.is-ok > i { background: var(--ok); }
 .meter.is-warn > i { background: var(--warn); }
 .meter.is-err > i { background: var(--err); }
+
+/* --------------------------------------------- широкий экран и плотность */
+/* Идея: на большом экране панель должна показывать больше данных, а не больше
+   воздуха. Ширина используется целиком, столбцы получают фиксированный бюджет,
+   а длинные значения (ссылки, имена) сокращаются с многоточием и живут
+   в подсказке — так таблица не уезжает в горизонтальный скролл. */
+
+/* Тройной режим плотности. Переключается кнопкой в шапке, выбор запоминается
+   в localStorage и применяется до первой отрисовки (см. base.html). */
+:root[data-density="compact"] { --cell-y: 6px; --cell-x: 12px; }
+:root[data-density="compact"] .who-cell .avatar { width: 26px; height: 26px; flex-basis: 26px; font-size: 11px; }
+:root[data-density="roomy"] { --cell-y: 14px; --cell-x: 18px; }
+
+/* Таблица с бюджетом столбцов. `col` здесь — не жёсткий закон, а приоритет:
+   на широком экране столбцы получают свои 268/266 px, а на узком сжимаются
+   до многоточия. Именно поэтому НЕ ставим table-layout: fixed — иначе на
+   1366 px фиксированные столбцы выдавливают «Клиента» в ноль. */
+table.data.fit th, table.data.fit td { overflow: hidden; }
+table.data.fit td .who-cell, table.data.fit td .copy-chip { max-width: 100%; }
+/* Ниже этого минимума сжимать нечего — честнее горизонтальный скролл.
+   Ограничение только для полноэкранных списков: у мини-таблиц внутри карточек
+   (дашборд) своя, гораздо меньшая ширина, и 880 px там ломали бы вёрстку. */
+.table-wrap table.data.fit { min-width: 880px; }
+.table-wrap table.data.fit.is-wide { min-width: 1020px; }
+
+/* Липкие первые столбцы: при горизонтальной прокрутке видно, о ком строка.
+   `stick-1` — самый левый (ID или чекбокс), `stick-2` — следующий за ним
+   (Клиент/Заказ); смещение второго — ширина первого. */
+table.data.stick-first th.stick-1, table.data.stick-first td.stick-1 {
+  position: sticky; left: 0; z-index: 1; background: var(--surface);
+}
+table.data.stick-first th.stick-2, table.data.stick-first td.stick-2 {
+  position: sticky; left: var(--stick-1-w, 54px); z-index: 1; background: var(--surface);
+}
+table.data.stick-first th.stick-1, table.data.stick-first th.stick-2 {
+  z-index: 3; background: var(--surface-2);
+}
+table.data.stick-first tbody tr:hover td.stick-1,
+table.data.stick-first tbody tr:hover td.stick-2 { background: var(--surface-2); }
+table.data.stick-first tr.is-selected td.stick-1,
+table.data.stick-first tr.is-selected td.stick-2 { background: var(--accent-soft); }
+
+/* Настраиваемые столбцы: список скрытых ключей лежит в data-cols-hidden,
+   выбор хранит localStorage (кнопка «Столбцы» в шапке страницы). */
+table.data[data-cols-hidden~="tags"] [data-col="tags"],
+table.data[data-cols-hidden~="status"] [data-col="status"],
+table.data[data-cols-hidden~="expires"] [data-col="expires"],
+table.data[data-cols-hidden~="days"] [data-col="days"],
+table.data[data-cols-hidden~="orders"] [data-col="orders"],
+table.data[data-cols-hidden~="link"] [data-col="link"],
+table.data[data-cols-hidden~="plan"] [data-col="plan"],
+table.data[data-cols-hidden~="sum"] [data-col="sum"],
+table.data[data-cols-hidden~="provider"] [data-col="provider"],
+table.data[data-cols-hidden~="created"] [data-col="created"],
+table.data[data-cols-hidden~="paid"] [data-col="paid"] { display: none !important; }
+
+/* ------------------------------------------- мастер-деталь (список + карточка) */
+/* Клиент открывается сбоку, список остаётся на месте: не нужно возвращаться
+   «назад» после каждого просмотра. ВАЖНО: колонку под карточку резервируем
+   только когда карточка действительно есть (`has-card`), иначе grid держит
+   392 px пустыми и список выглядит обрезанным. */
+.split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+.split.has-card { grid-template-columns: minmax(0, 1fr) 392px; }
+.split-main { min-width: 0; }
+.side-card { position: sticky; top: calc(var(--topbar-h) + 12px); max-height: calc(100vh - var(--topbar-h) - 30px); overflow-y: auto; }
+.side-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 2px; }
+.side-title {
+  margin: 16px 0 6px; font-size: var(--fz-xs); font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.side-notes { display: flex; flex-direction: column; gap: 8px; }
+.side-note { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; }
+.side-note-form { margin-top: 8px; }
+.side-note-form input { flex: 1 1 auto; min-width: 0; }
+.side-list { display: flex; flex-direction: column; }
+.side-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px solid var(--border); font-size: var(--fz-sm);
+}
+.side-row:last-child { border-bottom: 0; }
+.side-row .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* На ноутбуке 13–15″ карточка сбоку отнимала бы у таблицы слишком много:
+   ниже 1820 px она встаёт сверху во всю ширину, список остаётся целым. */
+@media (max-width: 1820px) {
+  .split.has-card { grid-template-columns: minmax(0, 1fr); }
+  .side-card { position: static; max-height: none; order: -1; }
+}
+
+/* Карточка открыта — списку достаётся меньше ширины. Форму «+ дни» из строки
+   убираем: те же кнопки есть в карточке, а столбец «Действия» перестаёт
+   выдавливать таблицу в скролл. Ссылку ужимаем: полный адрес в подсказке. */
+.split .quick-grant { display: none; }
+.split th.c-link { width: 216px; }
+@media (max-width: 1620px) { .split th.c-link { width: 150px; } }
+
+/* ------------------------------------------------------------- тосты */
+/* Результат действия без перезагрузки: плашка в углу, список обновляется
+   на месте (см. admin.js). Ошибки живут дольше успехов. */
+.toasts {
+  position: fixed; right: 18px; bottom: 18px; z-index: 80;
+  display: flex; flex-direction: column; gap: 8px;
+  max-width: min(430px, calc(100% - 36px));
+}
+.toast {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 10px 12px;
+  font-size: var(--fz-sm); color: var(--text); animation: toast-in .18s ease;
+}
+.toast.ok { border-left-color: var(--ok); }
+.toast.err { border-left-color: var(--err); }
+.toast svg { flex: 0 0 auto; margin-top: 1px; }
+.toast.ok svg { color: var(--ok); }
+.toast.err svg { color: var(--err); }
+.toast .grow { min-width: 0; }
+.toast button { margin-left: auto; color: var(--text-3); font-size: 16px; line-height: 1; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
+/* ------------------------------------------------ командная палитра ⌘K */
+/* Одно поле вместо хождения по меню: разделы, клиенты и заказы в одном списке.
+   Разметка живёт в base.html, данные ищет /admin/search. */
+.cmdk { position: fixed; inset: 0; z-index: 70; display: none; }
+.cmdk.open { display: block; }
+.cmdk-back { position: absolute; inset: 0; background: rgba(15, 23, 42, .45); }
+.cmdk-panel {
+  position: relative; margin: 10vh auto 0; width: min(580px, calc(100% - 32px));
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.cmdk-panel input {
+  width: 100%; border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+  padding: 15px 18px; font-size: var(--fz-md); background: transparent; color: var(--text);
+}
+.cmdk-panel input:focus { outline: none; }
+.cmdk-list { max-height: 54vh; overflow-y: auto; padding: 6px; }
+.cmdk-group {
+  padding: 8px 10px 4px; font-size: var(--fz-xs); font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.cmdk-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+  border-radius: var(--radius); cursor: pointer; color: var(--text);
+}
+.cmdk-item:hover, .cmdk-item.active { background: var(--accent-soft); color: var(--accent); }
+.cmdk-item .grow { min-width: 0; flex: 1 1 auto; }
+.cmdk-item .t { display: block; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item .s { display: block; font-size: var(--fz-xs); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-item.active .s { color: var(--accent); opacity: .8; }
+.cmdk-item svg { color: var(--text-3); }
+.cmdk-item.active svg, .cmdk-item:hover svg { color: var(--accent); }
+.cmdk-empty { padding: 18px 14px; color: var(--text-3); font-size: var(--fz-sm); }
+.cmdk-foot {
+  display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border);
+  font-size: var(--fz-xs); color: var(--text-3);
+}
+.cmdk-foot kbd { padding: 0 5px; }
+.topbar .cmdk-hint { font-size: var(--fz-xs); color: var(--text-3); }
+@media (max-width: 1240px) { .topbar .cmdk-hint { display: none; } }
+
+/* Меню столбцов в шапке страницы */
+.colmenu { position: relative; }.colmenu > summary {
+  list-style: none; cursor: pointer; user-select: none;
+}
+.colmenu > summary::-webkit-details-marker { display: none; }
+.colmenu[open] > summary { border-color: var(--accent-border); color: var(--accent); }
+.colmenu-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 208px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg); padding: 8px;
+}
+.colmenu-pop label {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border-radius: var(--radius-sm); font-size: var(--fz-sm); color: var(--text-2); cursor: pointer;
+}
+.colmenu-pop label:hover { background: var(--surface-3); color: var(--text); }
+.colmenu-pop .hint { padding: 2px 8px 6px; }
+
+/* Бюджет столбцов. Ровно один столбец без ширины (Клиент) забирает остаток —
+   он и должен тянуться, потому что там имя и Telegram-ник. */
+th.c-id { width: 54px; }
+th.c-check { width: 36px; }
+th.c-tags { width: 148px; }
+th.c-status { width: 120px; }
+th.c-date { width: 132px; }
+th.c-days { width: 104px; }
+th.c-num { width: 84px; }
+th.c-link { width: 268px; min-width: 120px; }
+th.c-actions { width: 266px; }
+th.c-plan { width: 148px; }
+th.c-sum { width: 118px; }
+th.c-provider { width: 168px; }
+
+/* Бюджет столбцов на ноутбуках: на 15″ (и тем более 13″) те же столбцы
+   должны ужиматься, а не уезжать за край. Ключевое — «Клиент» иначе не
+   помещается, поэтому первыми сжимаются ссылка, метки и действия. */
+@media (max-width: 1620px) {
+  th.c-link { width: 208px; }
+  th.c-actions { width: 244px; }
+  th.c-tags { width: 124px; }
+  th.c-provider { width: 140px; }
+  th.c-plan { width: 132px; }
+}
+@media (max-width: 1500px) {
+  th.c-link { width: 148px; min-width: 88px; }
+  th.c-actions { width: 228px; }
+  th.c-tags { width: 104px; }
+  th.c-date { width: 118px; }
+  th.c-days { width: 88px; }
+  th.c-num { width: 68px; }
+  th.c-status { width: 106px; }
+  th.c-provider { width: 124px; }
+  th.c-plan { width: 132px; }
+  /* Быстрая выдача дней из списка — удобство широкого экрана. На 13–14″
+     её место занимает «Клиент»: та же операция есть в карточке клиента. */
+  table.data.fit .quick-grant { display: none; }
+  /* Второстепенные столбцы заказов уходят, чтобы очередь не уезжала в скролл. */
+  .hide-md { display: none !important; }
+}
+
+/* 13–14″: последнее, что уходит, — метки клиента. Они есть в карточке и в
+   фильтре «Все метки», а «Клиент» и «Действия» нужны в каждой строке. */
+@media (max-width: 1400px) {
+  .hide-sm { display: none !important; }
+}
+
+/* Имя и ник в одну строку с многоточием: раньше «Мария Зайцева» ломалась
+   на три строки и строка таблицы вырастала вдвое. */
+.who-cell .nm, .who-cell .meta {
+  display: block; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.who-cell > span:last-child { min-width: 0; flex: 1 1 auto; }
+
+/* Ссылка-подписка: короткая подпись + открыть + скопировать. Копирование
+   по-прежнему кладёт в буфер полный адрес — он же в подсказке. */
+.copy-chip.is-flex { display: flex; width: 100%; }
+.copy-chip .icon-btn, .copy-chip button { flex: 0 0 auto; }
+.icon-btn {
+  display: grid; place-items: center; padding: 2px; border-radius: var(--radius-xs);
+  color: var(--text-3); background: transparent; border: 0; cursor: pointer;
+}
+.icon-btn:hover { color: var(--accent); background: var(--accent-soft); }
+.icon-btn svg { width: 14px; height: 14px; }
+
+.input-days { width: 56px; }
+
+/* В ячейках с выравниванием вправо (`right`) запрещён перенос строк. Для
+   подписи-пояснения под суммой это лишнее: она распирала столбец. */
+.wrap, .right .wrap { white-space: normal; }
+
+/* Container query для карточки «Заявки на оплату»: её ширина зависит от сетки
+   дашборда, а не от окна, поэтому обычные media queries тут не работают.
+   Узкая карточка убирает «Тариф» — он есть в очереди заказов. */
+.card.mini-pending { container-type: inline-size; }
+@container (max-width: 620px) {
+  .mini-pending .hide-narrow { display: none !important; }
+}
+
+/* Заблокированный клиент помечен и строкой: на 13″ колонка меток (где стоит
+   бейдж) скрыта, а состояние должно читаться всегда. */
+table.data tr.row-blocked > td:first-child { box-shadow: inset 3px 0 0 var(--err); }
+
+/* В таблице с фиксированными столбцами действия обязаны укладываться в одну
+   строку: перенос кнопок удваивал высоту строки (93 px вместо 54). */
+table.data.fit .row-actions { flex-wrap: nowrap; }
+table.data.fit .row-actions .btn { white-space: nowrap; }
+
+/* Свёрнутый сайдбар: освобождает ~180 px под данные. Иконки остаются,
+   подписи уходят в подсказки (title), состояние помнит localStorage и
+   применяется атрибутом на <html> до первой отрисовки — без мигания. */
+:root[data-nav="min"] .sidebar { width: var(--sidebar-min); flex-basis: var(--sidebar-min); }
+:root[data-nav="min"] .brand { justify-content: center; padding: 0; }
+:root[data-nav="min"] .brand > span:not(.brand-mark) { display: none; }
+:root[data-nav="min"] .nav { padding: 12px 8px 20px; }
+:root[data-nav="min"] .nav-title { display: none; }
+:root[data-nav="min"] .nav-group + .nav-group { margin-top: 10px; }
+:root[data-nav="min"] .nav a { justify-content: center; padding: 10px 0; position: relative; }
+:root[data-nav="min"] .nav a > span:not(.count) { display: none; }
+:root[data-nav="min"] .nav a .count {
+  position: absolute; top: 1px; right: 7px; margin: 0; padding: 0 4px;
+  min-width: 16px; font-size: 10px; line-height: 16px;
+}
+:root[data-nav="min"] .sidebar-foot { padding: 10px 8px; }
+:root[data-nav="min"] .sidebar-foot .who { flex-direction: column; gap: 6px; }
+:root[data-nav="min"] .sidebar-foot .who > span:not(.avatar) { display: none; }
+:root[data-nav="min"] .sidebar-foot .btn { margin-left: 0 !important; }
+
+/* Кнопки-переключатели в шапке */
+.topbar .tools { display: flex; align-items: center; gap: 4px; }
+.density-toggle span { font-size: var(--fz-xs); font-weight: 550; }
+@media (max-width: 1240px) { .density-toggle span { display: none; } }
+
+/* На широком экране сетки не должны рассыпаться в десяток узких колонок:
+   панели дашборда — 2–3 в ряд, плитки метрик — 6 в ряд. */
+@media (min-width: 1500px) {
+  .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stats { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
 
 /* ------------------------------------------------------------- адаптив */
 .sidebar-toggle { display: none; }

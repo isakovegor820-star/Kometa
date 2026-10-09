@@ -35,8 +35,8 @@ async def cb_start_trial(call: CallbackQuery, session: AsyncSession, user: User)
         return
 
     panel = await subscriptions.all_user_panels(session)
-    # Заработанные на приглашениях дни добавляются к пробному доступу:
-    # считаем их до вызова, потому что start_trial обнуляет баланс.
+    # Заработанные на приглашениях дни показываем, но к триалу не добавляем:
+    # они копятся и прибавятся к первой оплате (иначе рефералка обесценивается).
     bonus_days = int(user.bonus_days_balance or 0)
     try:
         sub, granted = await subscriptions.start_trial(session, user, panel)
@@ -58,8 +58,12 @@ async def cb_start_trial(call: CallbackQuery, session: AsyncSession, user: User)
 
     link = subscriptions.subscription_link(sub.subscription_token)
     traffic = "безлимитный трафик" if not settings.trial_gb else f"{settings.trial_gb} ГБ трафика"
-    text = texts.TRIAL_STARTED.format(days=settings.trial_days + bonus_days, traffic=traffic)
-    if bonus_days:
+    # Дни, реально попавшие в триал: настройка может разрешать добавлять бонусы.
+    granted_bonus = (
+        bonus_days if settings.trial_applies_bonus_days and bonus_days else 0
+    )
+    text = texts.TRIAL_STARTED.format(days=settings.trial_days + granted_bonus, traffic=traffic)
+    if bonus_days and not granted_bonus:
         text += texts.TRIAL_BONUS_LINE.format(days=bonus_days)
     await call.message.edit_text(
         text,
@@ -70,4 +74,4 @@ async def cb_start_trial(call: CallbackQuery, session: AsyncSession, user: User)
         reply_markup=keyboards.connect_kb(link),
         disable_web_page_preview=True,
     )
-    await call.answer("Пробный доступ выдан 🎉")
+    await call.answer("Пробный доступ выдан ")

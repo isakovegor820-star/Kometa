@@ -211,7 +211,7 @@ def main() -> None:
         RATES["USD"] = args.fx * RATES["USD"] / old_eur
 
     net = average_monthly_revenue(DEFAULT_PLANS, PlanMix())
-    net_hand = DEFAULT_NET_PER_USER  # 182 ₽ чека минус 8 % СБП и 2 % конвертации
+    net_hand = DEFAULT_NET_PER_USER  # 109,5 ₽ чека минус 8 % СБП и 2 % конвертации
     print(f"Средний чек: {net:,.0f} ₽/мес с клиента; на руки после СБП 8 % и "
           f"конвертации 2 %: {net_hand:,.0f} ₽\n")
 

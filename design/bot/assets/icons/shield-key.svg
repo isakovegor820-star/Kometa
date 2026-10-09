@@ -1,0 +1,8 @@
+<!-- Kometa icon set · shield-key · 24×24 · stroke 1.75 · currentColor -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+ width="24" height="24"
+ fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 2.75 19.15 5.4v6.05c0 4.3-2.88 8.2-7.15 9.55-4.27-1.35-7.15-5.25-7.15-9.55V5.4L12 2.75Z"/>
+  <circle cx="12" cy="10.4" r="1.7"/>
+  <path d="M12 12.1v3.4"/>
+</svg>

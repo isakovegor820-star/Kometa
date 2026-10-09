@@ -252,7 +252,14 @@ async def start_trial(session: AsyncSession, user: User, panel: PanelClient) -> 
         # триал даётся один раз: повторно — только если подписки ещё не было
         return sub, False
 
-    bonus_days = await drain_bonus_balance(session, user, reason="trial")
+    # Бонусные дни по умолчанию НЕ добавляются к триалу: иначе заработанные
+    # на приглашениях дни уходят в бесплатный доступ, а не сокращают срок
+    # окупаемости первой оплаты. Поведение переключается настройкой.
+    bonus_days = (
+        await drain_bonus_balance(session, user, reason="trial")
+        if settings.trial_applies_bonus_days
+        else 0
+    )
     days = settings.trial_days + bonus_days
     panel_user, failed_panels = await _create_on_panels(
         _panel_list(panel),

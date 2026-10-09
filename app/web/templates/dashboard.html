@@ -148,7 +148,9 @@
     </div>
 
     {# --- очередь оплат -------------------------------------------------- #}
-    <div class="card">
+    {# `mini-pending` — контейнер для container query: карточка живёт в половине
+       экрана, и на 14″ «Тариф» в ней лишний (он есть в очереди заказов). #}
+    <div class="card mini-pending">
       <div class="card-head">
         <h2>Заявки на оплату</h2>
         <div class="actions">
@@ -158,9 +160,11 @@
       </div>
       {% if pending %}
       <div class="table-scroll">
-        <table class="data">
+        {# Мини-таблица живёт в половине экрана: без «Способа» она помещается
+           целиком и не требует горизонтальной прокрутки (способ виден в очереди). #}
+        <table class="data fit">
           <thead>
-            <tr><th>Заказ</th><th>Клиент</th><th>Тариф</th><th class="right">К переводу</th><th>Способ</th><th>Создан</th><th class="actions"></th></tr>
+            <tr><th>Заказ</th><th>Клиент</th><th class="hide-narrow">Тариф</th><th class="right">К переводу</th><th class="actions">Действия</th></tr>
           </thead>
           <tbody>
             {% for row in pending %}
@@ -169,18 +173,16 @@
               <td>
                 <div class="who-cell">
                   <span class="avatar">{{ initials(row.user.display_name if row.user else '—') }}</span>
-                  <span style="min-width:0">
-                    <a class="nm" href="/admin/users/{{ row.order.user_id }}">{{ row.user.display_name if row.user else '—' }}</a>
+                  <span>
+                    <a class="nm" href="/admin/users/{{ row.order.user_id }}" title="{{ row.user.display_name if row.user else '—' }}">{{ row.user.display_name if row.user else '—' }}</a>
                     <span class="meta">{{ row.user.tg_id if row.user else '' }}</span>
                   </span>
                 </div>
               </td>
-              <td>{{ row.plan.title if row.plan else '—' }}</td>
+              <td class="hide-narrow">{{ row.plan.title if row.plan else '—' }}<div class="xs dim">{{ ago(row.order.created_at) }}</div></td>
               <td class="right"><b>{{ row.order.pay_amount_text }} ₽</b>
-                {% if row.order.pay_kopecks %}<div class="xs dim">копейки — для автосверки</div>{% endif %}
+                {% if row.order.pay_kopecks %}<div class="xs dim wrap">копейки — для автосверки</div>{% endif %}
               </td>
-              <td class="small muted">{{ provider_label(row.order.provider) }}</td>
-              <td class="small dim nowrap">{{ ago(row.order.created_at) }}</td>
               <td class="actions">
                 {% if 'orders.act' in caps %}
                 <div class="row-actions">
@@ -189,7 +191,8 @@
                   </form>
                   <form method="post" action="/admin/orders/{{ row.order.id }}/reject" class="inline-form"
                         data-confirm="Отклонить заказ #{{ row.order.id }}?">
-                    <button class="btn btn-sm btn-danger" type="submit">Отклонить</button>
+                    <button class="btn btn-sm btn-danger btn-icon" type="submit" title="Отклонить заказ"
+                            aria-label="Отклонить заказ #{{ row.order.id }}">{{ icon('x') }}</button>
                   </form>
                 </div>
                 {% endif %}

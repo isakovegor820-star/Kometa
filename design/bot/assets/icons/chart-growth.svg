@@ -1,0 +1,7 @@
+<!-- Kometa icon set · chart-growth · 24×24 · stroke 1.75 · currentColor -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+ width="24" height="24"
+ fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3.75 20.25h16.5"/>
+  <path d="M7.5 20.25V15.5M12 20.25V11M16.5 20.25V6.75"/>
+</svg>

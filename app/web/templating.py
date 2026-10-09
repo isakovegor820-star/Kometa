@@ -18,6 +18,24 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+def static_version() -> str:
+    """Отпечаток статики: версия для ссылок на CSS/JS.
+
+    Зачем: панель отдаёт файлы без версии, и после выката браузер может
+    показать старую вёрстку из кэша — владелец видит «ничего не изменилось».
+    Отпечаток меняется вместе с правкой файлов и подставляется в URL
+    (``admin.css?v=…``), поэтому свежие стили приезжают сразу после обновления
+    страницы, без жёсткого перезагруза.
+    """
+    latest = 0.0
+    for name in ("admin.css", "admin.js"):
+        try:
+            latest = max(latest, (STATIC_DIR / name).stat().st_mtime)
+        except OSError:  # pragma: no cover - файл есть всегда
+            continue
+    return str(int(latest))
+
+
 def _build() -> Jinja2Templates:
     engine = Jinja2Templates(directory=str(TEMPLATES_DIR))
     engine.env.globals.update(
@@ -33,6 +51,7 @@ def _build() -> Jinja2Templates:
             "days_word": ui.days_word,
             "plural": ui.plural,
             "mask_secret": ui.mask_secret,
+            "link_label": ui.link_label,
             "status_label": ui.status_pair,
             "event_label": ui.event_label,
             "provider_label": lambda code: ui.PROVIDER_LABELS.get(code or "", code or "—"),
@@ -47,6 +66,7 @@ def _build() -> Jinja2Templates:
             "PROVIDER_LABELS": ui.PROVIDER_LABELS,
             "ADMIN_ACTION_LABELS": ui.ADMIN_ACTION_LABELS,
             "ROLES": ui.ROLES,
+            "static_version": static_version(),
         }
     )
     # Фильтры доступны и как `| money`, и как `money(...)` — шаблоны пишутся
@@ -60,6 +80,7 @@ def _build() -> Jinja2Templates:
             "ago": ui.ago,
             "initials": ui.initials,
             "mask": ui.mask_secret,
+            "link_label": ui.link_label,
             "event_label": ui.event_label,
         }
     )

@@ -25,6 +25,8 @@
 | [banner/kometa-intro.mp4](banner/kometa-intro.mp4) | он же анимацией 6 с (первое сообщение / закреп) |
 | [banner/kometa-intro-storyboard.png](banner/kometa-intro-storyboard.png) | раскадровка анимации по кадрам |
 | [banner/kometa-channel-cover-1280x720.png](banner/kometa-channel-cover-1280x720.png) | обложка канала |
+| [story/kometa-story-hook-1080x1920.png](story/kometa-story-hook-1080x1920.png) | кадр-крючок для личных стори: «вечером интернет тупит?» |
+| [story/kometa-story-offer-1080x1920.png](story/kometa-story-offer-1080x1920.png) | кадр-предложение: 3 дня бесплатно, цена, чипы |
 
 ## Как поставить
 
@@ -56,6 +58,18 @@ H.264) — тот же макет, где комета-стрела влетае
 по очереди; дальше свечение «дышит». Отправляется как `sendAnimation` — Telegram проигрывает
 её сам и зацикливает.
 
+> **Про число локаций на макетах (08.10.2026).** До этой даты на баннере, обложке канала и в
+> анимации стояло «2 локации», а на сервере работали три: 🇩🇪 🇫🇮 🇳🇱. Картинку нельзя обновить
+> вместе с `.env` — её загружают в Telegram руками, поэтому она и отстала от реальности.
+> Макеты пересобраны на «3 локации». Связку «сколько локаций в списке ↔ сколько нарисовано»
+> держит тест `tests/test_location_count_consistency.py`: когда появится четвёртая локация, он
+> упадёт и напомнит пересобрать ассеты и обновить `BRAND_ASSET_LOCATIONS` в
+> `app/bot/launch_copy.py`. **Меняли число локаций — пересоберите макеты:**
+
+```bash
+bash brand/tools/build_avatar.sh          # нужен запущенный Open Design
+```
+
 Анимацию рендерит HyperFrames внутри Open Design: исходник — HTML+GSAP-таймлайн
 (`source/comet-intro.html`), растеризация в Chromium и кодирование в MP4 там же.
 
@@ -67,6 +81,20 @@ $OD media scaffold --composition-dir .hyperframes-cache/comet-intro --project ko
 $OD media generate --surface video --model hyperframes-html --project kometa-brand \
   --composition-dir .hyperframes-cache/comet-intro --output kometa-intro.mp4
 ```
+
+## Стори 1080×1920
+
+Кадры для личных стори (`brand/story/`): тексты, ритм и как считать переходы —
+`docs/СТОРИ.md`. Собираются кодом из палитры выше, а не в редакторе: стори — единственное
+место, где картинку видно раньше текста, и кадр должен совпадать с брендом, а не выглядеть
+чужой рекламой.
+
+```bash
+python3 brand/tools/make_story.py        # нужен Pillow; в окружении бота его нет
+```
+
+Знак рубля в Arial отсутствует (рисуется пустым квадратом), поэтому в ценнике он набран
+системным SF Pro — это видно в коде как отдельный шрифт `FONT_RUBLE`.
 
 ## Альтернативы
 

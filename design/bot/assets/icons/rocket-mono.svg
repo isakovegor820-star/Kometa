@@ -1,0 +1,10 @@
+<!-- Kometa icon set · rocket · 24×24 · stroke 1.75 · #45E698 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+ width="24" height="24"
+ fill="none" stroke="#45E698" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 2.75c2.6 2.05 4.1 5 4.1 8.45v4.3H7.9v-4.3c0-3.45 1.5-6.4 4.1-8.45Z"/>
+  <circle cx="12" cy="9.4" r="1.85"/>
+  <path d="M7.9 12.4 5.35 15.1c-.4.42-.6.97-.6 1.54v1.86l3.15-1.65"/>
+  <path d="M16.1 12.4l2.55 2.7c.4.42.6.97.6 1.54v1.86l-3.15-1.65"/>
+  <path d="M10.6 17.9c.45.95.95 1.9 1.4 2.85.45-.95.95-1.9 1.4-2.85"/>
+</svg>

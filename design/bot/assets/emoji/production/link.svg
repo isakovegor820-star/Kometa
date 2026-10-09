@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="brand-e-link" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+    </linearGradient>
+    <linearGradient id="ring-e-link" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="46" fill="none" stroke="url(#ring-e-link)" stroke-width="2.6" opacity="0.62"/>
+  <g transform="translate(-21.25 -21.25) scale(5.9375)" fill="none" stroke="#FFFFFF" stroke-width="0.371" stroke-linecap="round" stroke-linejoin="round"><path d="M10.2 13.8a4 4 0 0 1 0-5.6l2.6-2.6a4 4 0 0 1 5.6 5.6l-1.4 1.4"/><path d="M13.8 10.2a4 4 0 0 1 0 5.6l-2.6 2.6a4 4 0 0 1-5.6-5.6l1.4-1.4"/></g>
+</svg>

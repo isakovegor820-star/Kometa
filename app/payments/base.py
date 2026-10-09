@@ -59,6 +59,9 @@ class PaymentProvider(ABC):
         *,
         price_override: int | None = None,
         exact_kopecks: int | None = None,
+        payer_user_id: int | str | None = None,
+        payer_user_name: str = "",
+        payer_ip: str = "",
     ) -> Invoice:
         """Создать счёт для заказа.
 
@@ -68,6 +71,11 @@ class PaymentProvider(ABC):
             Если не задана — провайдер считает сам от ``amount_rub``.
         :param exact_kopecks: точная сумма в копейках (для переводов с
             уникальной копеечной надбавкой, по которой автоплатёж находит заказ).
+        :param payer_user_id: кто платит (Telegram id) — нужен провайдерам,
+            которые передают данные плательщика в антифрод (Platega
+            ``metadata``). Остальные просто игнорируют.
+        :param payer_user_name: юзернейм или отображаемое имя плательщика.
+        :param payer_ip: IP плательщика, если провайдер его требует.
         """
 
     @abstractmethod

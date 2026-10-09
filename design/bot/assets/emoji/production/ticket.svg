@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="brand-e-ticket" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+    </linearGradient>
+    <linearGradient id="ring-e-ticket" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2BC57F"/><stop offset="52%" stop-color="#45E698"/><stop offset="100%" stop-color="#DCFF5C"/>
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="46" fill="none" stroke="url(#ring-e-ticket)" stroke-width="2.6" opacity="0.62"/>
+  <g transform="translate(-0.67 -7.00) scale(4.2222)" fill="none" stroke="#FFFFFF" stroke-width="0.521" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v1.6a2.4 2.4 0 0 0 0 4.8v1.6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1.6a2.4 2.4 0 0 0 0-4.8V9.5Z"/><path d="M9.5 8v8"/></g>
+</svg>
