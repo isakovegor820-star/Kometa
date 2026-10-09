@@ -138,3 +138,18 @@ def test_location_words_come_from_settings():
     """Названия локаций берём из launch_copy, а не вписываем руками в проверку."""
     assert "Германия" in post_channel.location_words()
     assert all("🇩🇪" not in word for word in post_channel.location_words())
+
+
+def test_pin_problem_tells_what_to_do():
+    """Нет права закреплять — сообщение должно называть право и путь в Telegram.
+
+    09.10.2026 бот был администратором канала без ``can_pin_messages``, и
+    ``--apply --pin`` падал уже ПОСЛЕ отправки поста: выглядело как «ничего не
+    вышло», хотя пост ушёл.
+    """
+    text = post_channel.pin_problem_text(RuntimeError("not enough rights"))
+
+    assert "can_pin_messages" in text
+    assert "Закреплять сообщения" in text
+    assert "not enough rights" in text
+    assert "--apply --pin" in text
