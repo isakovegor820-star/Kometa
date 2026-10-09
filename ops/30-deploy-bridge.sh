@@ -94,12 +94,14 @@ ALLOW_EXIT_HOSTNAME=0
 
 BRIDGE_ADDRESS=""
 BRIDGE_PORT=443
+BRIDGE_PORT_SET=0
 BRIDGE_SNI=""
 BRIDGE_SNI_EXTRA=""
 BRIDGE_PUBKEY=""
 BRIDGE_PRIVKEY=""
 BRIDGE_SHORTID=""
-MIN_CLIENT_VER="0.0.0"
+MIN_CLIENT_VER=""
+ALLOW_FLAGGED_FP=0
 
 XRAY_VERSION="$DEFAULT_XRAY_VERSION"
 XRAY_VERSION_ACTUAL=""
@@ -120,6 +122,7 @@ DO_MSS=1
 KEEP_IPV6=0
 HARDEN_FIREWALL=0
 SSH_PORT=22
+SYSCTL_DIR="/etc/sysctl.d"
 
 DRY_RUN=0
 LINKS_ONLY=0
@@ -134,6 +137,7 @@ C_PLATFORMS=()
 C_OPERATORS=()
 
 TMPFILES=()
+WORK_TMP=""
 REG_ACTIVE=0
 REG_REVOKED=0
 REG_ADDED=0
@@ -161,13 +165,27 @@ box() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Временный файл: mktemp есть и на мосте, и на маке; путь запоминаем, чтобы
-# гарантированно убрать за собой.
-tmp_file() {
-    local f
-    f="$(mktemp 2>/dev/null || printf '%s/kometa-bridge.%s.%s' "${TMPDIR:-/tmp}" "$$" "${RANDOM:-0}")"
-    TMPFILES+=("$f")
-    printf '%s' "$f"
+# Временные файлы. Два урока, из-за которых это выглядит именно так:
+#  * каталог создаётся ОДИН раз в основной оболочке (init_tmp) и попадает в
+#    TMPFILES; раньше путь создавался внутри $( ), и trap cleanup не видел его
+#    вовсе — в /tmp оставался файл с приватным ключом Reality;
+#  * у конфига ОБЯЗАТЕЛЬНО расширение .json: ядро Xray выбирает разборщик по
+#    расширению файла и на безымянном mktemp-файле отвечает
+#    «Failed to get format of …» — то есть xray run -test всегда падал бы, и
+#    мост не развернулся бы никогда.
+init_tmp() {
+    WORK_TMP="$(mktemp -d 2>/dev/null || true)"
+    [[ -n "$WORK_TMP" ]] || WORK_TMP="${TMPDIR:-/tmp}/kometa-bridge.$$"
+    mkdir -p "$WORK_TMP" 2>/dev/null || true
+    TMPFILES+=("$WORK_TMP")
+}
+
+tmp_file() { # tmp_file → путь во временном каталоге прогона
+    # Без суффиксов в шаблоне: BSD-mktemp (macOS) не подставляет X, если после
+    # них что-то есть, и создаёт файл с буквальным именем «kometa.XXXXXX.json».
+    local d="${WORK_TMP:-${TMPDIR:-/tmp}}"
+    mktemp "$d/kometa.XXXXXX" 2>/dev/null \
+        || printf '%s/kometa.%s.%s' "$d" "$$" "${RANDOM:-0}"
 }
 
 cleanup() {
@@ -205,7 +223,8 @@ Kometa · День 0 · шаг 6: мост «RU-адрес → зарубежн�
   --exit-sni DOMAIN     serverName Reality выхода (домен маскировки)
   --exit-shortid SID    shortId Reality выхода (hex, до 16 символов; пусто — без)
   --exit-fp FP          uTLS-отпечаток (по умолчанию firefox; chrome/safari/ios
-                        в эвристике июня 2026 помечены)
+                        в эвристике июня 2026 помечены — это ошибка)
+  --allow-flagged-fp    разрешить помеченный отпечаток (только осознанно)
   --exit-flow FLOW      flow клиента на выходе (по умолчанию xtls-rprx-vision)
   --allow-exit-hostname разрешить в --exit-address домен, а не IP (не советуем)
 
@@ -226,8 +245,9 @@ Kometa · День 0 · шаг 6: мост «RU-адрес → зарубежн�
                         при повторном запуске берётся из существующего конфига)
   --bridge-sni-extra L  запасные SNI через запятую (ротация без перевыпуска)
   --bridge-pubkey KEY   publicKey моста вручную (иначе из файла-спутника/ядра)
-  --min-client-ver V    minClientVer Reality (по умолчанию 0.0.0 = без минимума;
-                        пусто — поле не писать)
+  --min-client-ver V    minClientVer Reality. По умолчанию поле НЕ пишется:
+                        в актуальном ядре пусто = без минимума, а жёсткое
+                        значение рискует отсечь не-Xray клиентов (sing-box)
   --rotate-keys         перевыпустить ключи Reality моста (ВСЕ ссылки изменятся)
   --rotate-shortid      перевыпустить shortId моста (все ссылки изменятся)
   --direct-ru           РФ-трафик — напрямую с моста (geoip:ru + geosite:ru).
@@ -255,6 +275,8 @@ Kometa · День 0 · шаг 6: мост «RU-адрес → зарубежн�
   --keep-ipv6           не выключать IPv6 (по умолчанию выключается)
   --harden-firewall     включить ufw: только SSH и порт моста (по умолчанию
                         скрипт лишь показывает правила и не трогает фаервол)
+  --sysctl-dir PATH     куда писать файл отключения IPv6 (по умолчанию
+                        /etc/sysctl.d; отдельный путь нужен для прогонов)
   --ssh-port N          SSH-порт для --harden-firewall и подсказок (по умолчанию 22)
   --dry-run             предпросмотр: ничего не пишет и не ходит в сеть
   --links-only          только напечатать ссылки по существующему конфигу
@@ -292,14 +314,20 @@ add_client_full() { # add_client_full "UUID[,Имя[,Платформа[,Опе�
 }
 
 add_client() { # add_client <uuid> [имя] [платформа] [оператор] — повторный UUID обновляет запись
-    local u="$1" n="${2:-}" p="${3:-}" o="${4:-}" i=0
+    local u="$1" n="${2:-}" p="${3:-}" o="${4:-}" i=0 new_info=0
     while [[ $i -lt ${#C_UUIDS[@]} ]]; do
         if [[ "${C_UUIDS[$i]}" == "$u" ]]; then
             # Повтор без новых данных — это почти наверняка попытка выдать одну
             # ссылку нескольким людям. Отдельного клиента не создаём (иначе один
             # отзыв рвал бы всех), но говорим прямо.
-            if [[ -z "$n" && -z "$p" && -z "$o" ]]; then
-                warn "UUID ${u} указан повторно — это ОДИН клиент, а не два. Разным людям нужны разные UUID: одна ссылка на всех запрещена."
+            # «Новые данные» = поле, которое отличается от уже сохранённого.
+            # Повтор без новых данных — это попытка выдать одну ссылку
+            # нескольким людям (или опечатка в UUID), и это ошибка.
+            if [[ -n "$n" && "$n" != "${C_NAMES[$i]}" ]]; then new_info=$((new_info + 1)); fi
+            if [[ -n "$p" && "$p" != "${C_PLATFORMS[$i]}" ]]; then new_info=$((new_info + 1)); fi
+            if [[ -n "$o" && "$o" != "${C_OPERATORS[$i]}" ]]; then new_info=$((new_info + 1)); fi
+            if [[ "$new_info" -eq 0 ]]; then
+                die "UUID ${u} указан повторно без новых данных — это ОДИН клиент, а не несколько. Разным людям нужны разные UUID: одна ссылка на всех запрещена."
             fi
             [[ -n "$n" ]] && C_NAMES[$i]="$n"
             [[ -n "$p" ]] && C_PLATFORMS[$i]="$p"
@@ -339,7 +367,7 @@ parse_args() {
             --client-uuid)      need "$1" $#; add_client "$2"; shift 2 ;;
             --client)           need "$1" $#; add_client_full "$2"; shift 2 ;;
             --bridge-address)   need "$1" $#; BRIDGE_ADDRESS="$2"; shift 2 ;;
-            --bridge-port)      need "$1" $#; BRIDGE_PORT="$2"; shift 2 ;;
+            --bridge-port)      need "$1" $#; BRIDGE_PORT="$2"; BRIDGE_PORT_SET=1; shift 2 ;;
             --bridge-sni)       need "$1" $#; BRIDGE_SNI="$2"; shift 2 ;;
             --bridge-sni-extra) need "$1" $#; BRIDGE_SNI_EXTRA="$2"; shift 2 ;;
             --bridge-pubkey)    need "$1" $#; BRIDGE_PUBKEY="$2"; shift 2 ;;
@@ -354,6 +382,8 @@ parse_args() {
             --xray-zip)         need "$1" $#; XRAY_ZIP="$2"; shift 2 ;;
             --allow-other-version) ALLOW_OTHER_VERSION=1; shift ;;
             --allow-non-root)   ALLOW_NON_ROOT=1; shift ;;
+            --allow-flagged-fp) ALLOW_FLAGGED_FP=1; shift ;;
+            --sysctl-dir)       need "$1" $#; SYSCTL_DIR="$2"; shift 2 ;;
             --config)           need "$1" $#; CONFIG="$2"; shift 2 ;;
             --registry)         need "$1" $#; REGISTRY="$2"; shift 2 ;;
             --no-registry)      NO_REGISTRY=1; shift ;;
@@ -371,7 +401,12 @@ parse_args() {
 }
 
 # ---------------------------------------------------------------- проверки ---
-is_ipv4() { [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; }
+is_ipv4() { # 999.999.999.999 — не адрес, хотя под регулярку подходит
+    printf '%s' "$1" | awk -F. '
+        NF != 4 { exit 1 }
+        { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]{1,3}$/ || $i + 0 > 255) exit 1 }
+        { exit 0 }'
+}
 
 validate_exit_params() {
     [[ -n "$EXIT_ADDRESS" ]] || die "Обязателен --exit-address (IP зарубежного выхода)."
@@ -398,7 +433,11 @@ validate_exit_params() {
     esac
     case "$EXIT_FP" in
         chrome | safari | ios | ios14 | ios15)
-            warn "Отпечаток «${EXIT_FP}» в чёрном списке эвристики июня 2026 — рекомендуется firefox/edge/android." ;;
+            if [[ "$ALLOW_FLAGGED_FP" -eq 1 ]]; then
+                warn "Отпечаток «${EXIT_FP}» в чёрном списке эвристики июня 2026 — продолжаю только потому, что задан --allow-flagged-fp."
+            else
+                die "Отпечаток «${EXIT_FP}» в чёрном списке эвристики июня 2026 (chrome/safari/ios помечены). Поставь firefox, edge, android или randomized. Осознанно — добавь --allow-flagged-fp."
+            fi ;;
     esac
     case "$EXIT_PUBKEY" in
         *[!A-Za-z0-9_=-]* | "") warn "publicKey выхода «${EXIT_PUBKEY}» выглядит необычно (обычно 43 символа base64url)." ;;
@@ -578,6 +617,11 @@ ensure_xray() {
         XRAY_BIN="$(find_xray)" || die "После установки ядро всё ещё не найдено в ${XRAY_BIN_DEFAULT}."
     fi
     systemctl enable xray >/dev/null 2>&1 || true
+    if [[ -f /etc/systemd/system/xray.service ]] \
+       && ! grep -qF -- "$CONFIG" /etc/systemd/system/xray.service 2>/dev/null; then
+        warn "Юнит /etc/systemd/system/xray.service не ссылается на ${CONFIG} — служба может поднять другой файл."
+        warn "  в юните: $(grep -m1 '^ExecStart' /etc/systemd/system/xray.service 2>/dev/null)"
+    fi
     version_actual="$(xray_version_of "$XRAY_BIN")"
     [[ -n "$version_actual" ]] || version_actual="(не разобрал вывод)"
     if [[ "$version_actual" != "$XRAY_VERSION" ]]; then
@@ -644,8 +688,10 @@ resolve_keys() {
     # 1. Ключи и shortId — из существующего конфига (иначе розданные ссылки
     #    отвалились бы при каждом повторном запуске скрипта).
     if [[ "$ROTATE_KEYS" -eq 0 && -f "$CONFIG" ]] && ! jq -e . "$CONFIG" >/dev/null 2>&1; then
-        warn "Существующий конфиг ${CONFIG} не читается как JSON: ключи моста из него не восстановить."
-        warn "Если у трёх человек уже на руках ссылки — прерви работу (Ctrl+C) и почини конфиг; при продолжении будут выпущены НОВЫЕ ключи, и старые ссылки перестанут подключаться."
+        # Не «предупредить и поехать дальше»: запуск неинтерактивный
+        # (ssh 'bash 30-deploy-bridge.sh …'), и молчаливый перевыпуск ключей
+        # оставил бы трёх человек с нерабочими ссылками и без причины в логе.
+        die "Существующий конфиг ${CONFIG} не читается как JSON — ключи моста из него не восстановить. Почини конфиг или, если готов перевыпустить все ссылки, запусти с --rotate-keys."
     fi
     if [[ "$ROTATE_KEYS" -eq 0 && -f "$CONFIG" ]]; then
         BRIDGE_PRIVKEY="$(inbound_field "$CONFIG" '.streamSettings.realitySettings.privateKey' || true)"
@@ -685,14 +731,26 @@ resolve_keys() {
         fi
     fi
 
-    # 3. Публичный ключ: явный флаг → спутник → вывод из приватного.
-    if [[ -z "$BRIDGE_PUBKEY" ]]; then
-        BRIDGE_PUBKEY="$(meta_get publicKey || true)"
-    fi
-    if [[ -z "$BRIDGE_PUBKEY" ]] && [[ "$BRIDGE_PRIVKEY" != \<* ]]; then
+    # 3. Публичный ключ. Источник истины — приватный ключ, который РЕАЛЬНО
+    #    лежит в конфиге. Спутник мог остаться от неудачного --rotate-keys:
+    #    тогда в нём новый publicKey, а в конфиге — старый private, и ссылки
+    #    у всех трёх человек были бы мёртвыми при зелёном выводе скрипта.
+    local derived="" meta_pub=""
+    if [[ "$BRIDGE_PRIVKEY" != \<* ]]; then
         if bin="$(find_xray)"; then
-            BRIDGE_PUBKEY="$(derive_public_key "$bin" "$BRIDGE_PRIVKEY" || true)"
+            derived="$(derive_public_key "$bin" "$BRIDGE_PRIVKEY" || true)"
         fi
+    fi
+    meta_pub="$(meta_get publicKey || true)"
+    if [[ -n "$derived" ]]; then
+        if [[ -n "$BRIDGE_PUBKEY" && "$BRIDGE_PUBKEY" != "$derived" ]]; then
+            warn "publicKey (${BRIDGE_PUBKEY}) не соответствует приватному ключу конфига — беру выведенный из ключа (${derived})."
+        elif [[ -n "$meta_pub" && "$meta_pub" != "$derived" ]]; then
+            warn "Файл-спутник расходится с ключом конфига — беру ключ из конфига."
+        fi
+        BRIDGE_PUBKEY="$derived"
+    elif [[ -z "$BRIDGE_PUBKEY" ]]; then
+        BRIDGE_PUBKEY="$meta_pub"
     fi
     if [[ -z "$BRIDGE_PUBKEY" ]]; then
         if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -751,7 +809,14 @@ build_rules_json() {
         or test("^[0-9]{1,3}(\\.[0-9]{1,3}){3}(/[0-9]{1,2})?$")
         or test("^[0-9a-fA-F:.]+/[0-9]{1,3}$");
       [ { type:"field", ruleTag:"Kometa-Block-Private", inboundTag:["bridge-in"],
-          ip:["geoip:private","169.254.0.0/16","fd00::/8"], outboundTag:"block" } ]
+          # Явные приватные диапазоны, а НЕ geoip:private: тот требует
+          # geoip.dat, и на чужом/распакованном вручную ядре конфиг не
+          # загрузился бы вовсе.
+          ip:["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","127.0.0.0/8",
+              "169.254.0.0/16","fc00::/7","fe80::/10"], outboundTag:"block" } ]
+      + [ { type:"field", ruleTag:"Kometa-Block-Checkers", inboundTag:["bridge-in"],
+            domain:["api.ipify.org","ifconfig.me","ifconfig.co","icanhazip.com",
+                    "ident.me","checkip.amazonaws.com"], outboundTag:"block" } ]
       + (if ($tokens | length) > 0 then
            [ { type:"field", ruleTag:"Kometa-Direct", inboundTag:["bridge-in"], outboundTag:"direct" }
              + (if ($tokens | map(select(ipish | not)) | length) > 0
@@ -867,8 +932,17 @@ print_links() {
 
 load_clients_from_config() { # для --links-only: клиенты берутся из конфига моста
     local uuid
+    local seen="" i=0
     while IFS= read -r uuid; do
         [[ -n "$uuid" ]] || continue
+        # В конфиге дубля быть не должно, но чтение чужого файла не повод
+        # падать: молча берём по одному разу.
+        i=0; seen=0
+        while [[ $i -lt ${#C_UUIDS[@]} ]]; do
+            [[ "${C_UUIDS[$i]}" == "$uuid" ]] && seen=1
+            i=$((i + 1))
+        done
+        [[ "$seen" -eq 1 ]] && continue
         add_client "$uuid"
     done < <(existing_inbound_json "$CONFIG" | jq -r '.settings.clients[]?.id // empty' 2>/dev/null)
 }
@@ -907,17 +981,41 @@ registry_has_uuid() { # registry_has_uuid <uuid> → 0/1
 }
 
 registry_update() { # registry_update <куда писать>; ставит REG_ACTIVE/REG_REVOKED/REG_ADDED
-    local target="$1" tmp today r_name r_uuid r_date r_plat r_oper r_status r_rdate
+    local target="$1" tmp today line lineno=0
+    local r_name r_uuid r_date r_plat r_oper r_status r_rdate
     local i=0 found_name found_plat found_oper rev_date
     today="$(date +%F)"
     tmp="$(tmp_file)"
+
+    # Реестр — единственный след выдачи. Если он есть, но не читается, писать
+    # поверх нельзя: имена, платформы и даты выдачи исчезли бы молча.
+    if [[ -f "$REGISTRY" && ! -r "$REGISTRY" ]]; then
+        if [[ "$target" == "$REGISTRY" ]]; then
+            die "Реестр ${REGISTRY} не читается (права?). Исправь права (chmod 600 ${REGISTRY}) и запусти снова — иначе имена, платформы и даты выдачи потеряются."
+        fi
+        warn "Реестр ${REGISTRY} не читается — предпросмотр напечатан без прежних строк."
+    fi
+
     REG_ACTIVE=0; REG_REVOKED=0; REG_ADDED=0; REG_REVOKED_NOW=""
 
     {
         printf 'имя,uuid,дата_выдачи,платформа,оператор,статус,дата_отзыва\n'
-        if [[ -f "$REGISTRY" ]]; then
-            while IFS=, read -r r_name r_uuid r_date r_plat r_oper r_status r_rdate; do
-                [[ -n "$r_uuid" && "$r_uuid" != "uuid" ]] || continue
+        if [[ -f "$REGISTRY" && -r "$REGISTRY" ]]; then
+            while IFS= read -r line || [[ -n "$line" ]]; do
+                lineno=$((lineno + 1))
+                [[ -n "$line" ]] || continue
+                case "$line" in
+                    имя,uuid,*) continue ;;   # шапку печатаем свою, выше
+                esac
+                r_name=""; r_uuid=""; r_date=""; r_plat=""; r_oper=""; r_status=""; r_rdate=""
+                IFS=, read -r r_name r_uuid r_date r_plat r_oper r_status r_rdate <<<"$line"
+                if [[ ! "$r_uuid" =~ $UUID_RE ]]; then
+                    # Строку не «чиним»: иначе сдвинутые колонки молча
+                    # превратились бы в «отозван» и дубль пустой записи.
+                    warn "Реестр ${REGISTRY}: строка ${lineno} не похожа на запись (2-е поле не UUID) — оставляю её как есть."
+                    printf '%s\n' "$line"
+                    continue
+                fi
                 i=0; found_name=""; found_plat=""; found_oper=""
                 while [[ $i -lt ${#C_UUIDS[@]} ]]; do
                     if [[ "${C_UUIDS[$i]}" == "$r_uuid" ]]; then
@@ -988,7 +1086,8 @@ registry_warn_missing_fields() {
 
 # ------------------------------------------------------ хост: IPv6, MSS, ufw --
 apply_ipv6_off() {
-    local f="/etc/sysctl.d/99-kometa-noipv6.conf" global
+    local f="${SYSCTL_DIR}/99-kometa-noipv6.conf" global
+    mkdir -p "$SYSCTL_DIR" 2>/dev/null || true
     printf 'net.ipv6.conf.all.disable_ipv6 = 1\nnet.ipv6.conf.default.disable_ipv6 = 1\nnet.ipv6.conf.lo.disable_ipv6 = 1\n' >"$f" \
         || { warn "Не записал ${f}."; return 0; }
     sysctl --system >/dev/null 2>&1 || sysctl -p "$f" >/dev/null 2>&1 || warn "sysctl не применился."
@@ -1005,7 +1104,11 @@ apply_ipv6_off() {
     fi
 }
 
-mss_rule() { printf '%s -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %s' "$1" "$2"; }
+# Цепочка OUTPUT, а не FORWARD. Мост терминирует VLESS локально: сессия
+# клиента — это INPUT/OUTPUT моста, а соединение до выхода — OUTPUT. Через
+# FORWARD в этой схеме не проходит ничего, поэтому правило там не работало бы
+# (и «SSH жив, сайты висят» на LTE осталось бы).
+mss_rule() { printf '%s -t mangle -C OUTPUT -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss %s' "$1" "$2"; }
 
 apply_mss_clamp() {
     local mss4 mss6 bin mss rule removed spec
@@ -1016,7 +1119,9 @@ apply_mss_clamp() {
         have "$bin" || continue
         rule="$(mss_rule "$bin" "$mss")"
         removed=0
-        while $rule -D >/dev/null 2>&1; do removed=$((removed + 1)); done
+        # Ограничение сверху: если backend отвечает «успех» на любое -D
+        # (такое бывает у самодельных обёрток), цикл иначе не кончится.
+        while [[ "$removed" -lt 10 ]] && $rule -D >/dev/null 2>&1; do removed=$((removed + 1)); done
         if $rule -I >/dev/null 2>&1; then
             ok "MSS-clamp ${bin}: MSS ${mss} (MTU ${LTE_MTU}) для транзитного TCP."
         else
@@ -1072,7 +1177,7 @@ write_config_and_restart() { # write_config_and_restart <tmp-config>
 
     log "Проверяю конфиг ядром (xray run -test)…"
     if ! config_test "$tmp"; then
-        die "Конфиг не проходит проверку ядром (вывод выше). Ничего не менял: старый конфиг на месте, служба не тронута."
+        die "Конфиг не проходит проверку ядром (вывод выше). Конфиг на мосте не тронут, служба не перезапускалась. Учти: IPv6, MSS, фаервол и файл-спутник к этому моменту уже применены — к конфигу они отношения не имеют."
     fi
     ok "Конфиг валиден."
 
@@ -1108,8 +1213,8 @@ write_config_and_restart() { # write_config_and_restart <tmp-config>
         systemctl status xray --no-pager -l 2>&1 | head -25 >&2 || true
         err "--- journalctl -u xray -n 30 ---"
         journalctl -u xray -n 30 --no-pager 2>&1 >&2 || true
-        if [[ -n "$old_hash" && -f "${CONFIG}.bak-"* ]]; then
-            warn "Откат: последний бэкап конфига лежит рядом (${CONFIG}.bak-*)."
+        if [[ -n "$old_hash" ]] && ls "${CONFIG}".bak-* >/dev/null 2>&1; then
+            warn "Откат: последний бэкап конфига лежит рядом (${CONFIG}.bak-*) — верни его и перезапусти xray."
         fi
         exit 1
     fi
@@ -1178,8 +1283,9 @@ print_next_steps() {
 
 # -------------------------------------------------------------------- main ----
 main() {
-    local tmp_config ver
+    local tmp_config ver priv bin derived meta_pub need_geo f
     parse_args ${1+"$@"}
+    init_tmp
 
     box "Kometa · День 0 · мост RU → зарубежный выход"
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -1201,12 +1307,32 @@ main() {
         [[ -z "$BRIDGE_ADDRESS" ]] && BRIDGE_ADDRESS="$(meta_get address || true)"
         [[ -z "$BRIDGE_ADDRESS" ]] && BRIDGE_ADDRESS="$(detect_bridge_address)"
         [[ -n "$BRIDGE_ADDRESS" ]] || die "--links-only: не определил адрес моста, передай --bridge-address."
-        [[ -n "$BRIDGE_PUBKEY" ]] || BRIDGE_PUBKEY="$(meta_get publicKey || true)"
-        [[ -n "$BRIDGE_PUBKEY" ]] || die "--links-only: нет publicKey (файл-спутник $(meta_file)); передай --bridge-pubkey."
+        # publicKey: источник истины — приватный ключ, который реально лежит в
+        # конфиге. Спутник мог остаться от неудачного --rotate-keys, и тогда
+        # перепечатанные ссылки были бы нерабочими при зелёном выводе.
+        meta_pub="$(meta_get publicKey || true)"
+        priv="$(inbound_field "$CONFIG" '.streamSettings.realitySettings.privateKey' || true)"
+        derived=""
+        if [[ -n "$priv" ]] && bin="$(find_xray)"; then
+            derived="$(derive_public_key "$bin" "$priv" || true)"
+        fi
+        if [[ -n "$derived" ]]; then
+            if [[ -n "$BRIDGE_PUBKEY" && "$BRIDGE_PUBKEY" != "$derived" ]]; then
+                warn "--bridge-pubkey (${BRIDGE_PUBKEY}) не соответствует ключу конфига — беру выведенный (${derived})."
+            elif [[ -n "$meta_pub" && "$meta_pub" != "$derived" ]]; then
+                warn "Файл-спутник расходится с ключом конфига — беру ключ из конфига."
+            fi
+            BRIDGE_PUBKEY="$derived"
+        elif [[ -z "$BRIDGE_PUBKEY" ]]; then
+            BRIDGE_PUBKEY="$meta_pub"
+        fi
+        [[ -n "$BRIDGE_PUBKEY" ]] || die "--links-only: нет publicKey (нет ни спутника $(meta_file), ни ядра, чтобы вывести его из ключа конфига) — передай --bridge-pubkey."
         [[ -n "$BRIDGE_SNI" ]] || BRIDGE_SNI="$(inbound_field "$CONFIG" '.streamSettings.realitySettings.serverNames[0]' || true)"
         [[ -n "$BRIDGE_SHORTID" ]] || BRIDGE_SHORTID="$(inbound_field "$CONFIG" '.streamSettings.realitySettings.shortIds[0]' || true)"
-        BRIDGE_PORT="$(inbound_field "$CONFIG" '.port' || true)"
-        [[ -n "$BRIDGE_PORT" ]] || BRIDGE_PORT=443
+        if [[ "$BRIDGE_PORT_SET" -eq 0 ]]; then
+            BRIDGE_PORT="$(inbound_field "$CONFIG" '.port' || true)"
+            [[ -n "$BRIDGE_PORT" ]] || BRIDGE_PORT=443
+        fi
         load_clients_from_config
         [[ ${#C_UUIDS[@]} -ge 1 ]] || die "--links-only: в конфиге нет клиентов."
         enrich_names_from_registry
@@ -1276,21 +1402,37 @@ main() {
         *[!A-Za-z0-9.-]* | "") die "SNI моста «${BRIDGE_SNI}» не похож на домен (--bridge-sni / --exit-sni)." ;;
     esac
 
-    # Geo-файлы нужны только для geo-правил.
-    if [[ "$DIRECT_RU" -eq 1 && -z "$DIRECT_FILE" ]]; then
-        if [[ "$DRY_RUN" -eq 0 && ! -f /usr/local/share/xray/geosite.dat ]]; then
-            die "--direct-ru: нет /usr/local/share/xray/geosite.dat. Поставь geoip.dat/geosite.dat или задай список доменами через --direct-file."
+    # Geo-файлы: нужны и для geoip:ru, и для geosite:category-ru. Проверять
+    # только geosite.dat мало — ядро грузит и geoip.dat, и без него конфиг
+    # вообще не поднимется (а человек увидит невнятную ошибку загрузки).
+    if [[ "$DIRECT_RU" -eq 1 && "$DRY_RUN" -eq 0 ]]; then
+        need_geo=0
+        if [[ -n "$DIRECT_FILE" ]]; then
+            grep -qE '^[[:space:]]*(geoip|geosite):' "$DIRECT_FILE" 2>/dev/null && need_geo=1
+        else
+            need_geo=1
+        fi
+        if [[ "$need_geo" -eq 1 ]]; then
+            for f in geosite.dat geoip.dat; do
+                [[ -f "/usr/local/share/xray/$f" ]] \
+                    || die "--direct-ru: нет /usr/local/share/xray/$f. Официальный установщик кладёт geo-файлы сам; при --xray-zip возьми архив с geoip.dat/geosite.dat или задай список обычными доменами/CIDR через --direct-file."
+            done
         fi
     fi
 
     # Конфиг.
-    tmp_config="$(tmp_file)"
+    # Имя фиксированное, но каталог уникален — и главное, конфиг ВСЕГДА
+    # с расширением .json: иначе ядро не станет его разбирать.
+    tmp_config="${WORK_TMP}/config.json"
     build_config_json >"$tmp_config" || die "Не собрал конфиг (jq)."
     if [[ ! -s "$tmp_config" ]]; then die "Конфиг пуст — сборка не удалась."; fi
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
         box "Конфиг (будет записан в ${CONFIG} при запуске без --dry-run)"
-        cat "$tmp_config"
+        # privateKey в предпросмотре скрыт: dry-run разрешено запускать на
+        # боевом мосте, а его вывод часто уходит в чат «что прислать».
+        sed -E 's/("privateKey"[[:space:]]*:[[:space:]]*")[^"]*(")/\1<СКРЫТО-ПРИ-ПЕЧАТИ>\2/' "$tmp_config"
+        note "(privateKey скрыт намеренно — это секрет моста.)"
         note ""
         note "Проверка ядром: xray run -test -config <временный файл> — выполняется на мосте перед перезапуском."
         if [[ "$NO_REGISTRY" -eq 0 ]]; then
@@ -1308,9 +1450,11 @@ main() {
     if [[ "$KEEP_IPV6" -eq 0 ]]; then apply_ipv6_off; else warn "IPv6 не выключаю (--keep-ipv6): в приёмке пункт «ip -6 addr show scope global пусто» не выполнится."; fi
     [[ "$DO_MSS" -eq 1 ]] && apply_mss_clamp
     apply_firewall "$(detect_ssh_port)"
-    write_meta
     check_port_free
     write_config_and_restart "$tmp_config"
+    # Спутник — после успеха: иначе при падении на проверке конфига в нём
+    # остался бы новый publicKey, не соответствующий живому конфигу.
+    write_meta
 
     if [[ "$NO_REGISTRY" -eq 0 ]]; then
         registry_update "$REGISTRY"

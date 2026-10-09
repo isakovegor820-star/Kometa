@@ -72,21 +72,42 @@ REGISTRY_HEADER = "имя,uuid,дата_выдачи,платформа,опер
 
 XRAY_STUB = r"""#!/usr/bin/env bash
 # Шим ядра Xray: version / x25519 [-i priv] / run -test -config FILE.
+#
+# Две особенности повторяют НАСТОЯЩЕЕ ядро, и обе однажды стоили дефекта:
+#   * формат конфига выбирается по расширению файла: на безымянном mktemp-файле
+#     ядро отвечает «Failed to get format of …» и мост не разворачивается;
+#   * x25519 выдаёт согласованную пару: `x25519 -i <priv>` даёт ровно тот
+#     publicKey, который соответствует этому приватному ключу.
 [[ -n "${XRAY_LOG:-}" ]] && echo "$*" >> "$XRAY_LOG"
+PRIV="${XRAY_STUB_PRIV:-PRIVKEYTEST0000000000000000000000000000}"
+PUB="${XRAY_STUB_PUB:-PUBLICKEYTEST000000000000000000000000000}"
 case "${1:-}" in
     version)
         printf 'Xray %s (Xray, Penetrates Everything.) Custom (go1.25.0 linux/amd64)\n' "${XRAY_STUB_VERSION:-26.9.30}"
         exit 0 ;;
     x25519)
         if [[ "${2:-}" == "-i" ]]; then
-            printf 'PrivateKey: %s\nPassword (PublicKey): PUB_OF_%s\n' "$3" "${3:0:8}"
+            if [[ "$3" == "$PRIV" ]]; then
+                pub="$PUB"
+            else
+                pub="PUB_OF_${3:0:8}"
+            fi
+            printf 'PrivateKey: %s\nPassword (PublicKey): %s\n' "$3" "$pub"
         else
-            printf 'PrivateKey: %s\nPassword (PublicKey): %s\n' \
-                "${XRAY_STUB_PRIV:-PRIVKEYTEST0000000000000000000000000000}" \
-                "${XRAY_STUB_PUB:-PUBLICKEYTEST000000000000000000000000000}"
+            printf 'PrivateKey: %s\nPassword (PublicKey): %s\n' "$PRIV" "$PUB"
         fi
         exit 0 ;;
     run|-test)
+        cfg=""
+        prev=""
+        for a in "$@"; do
+            [[ "$prev" == "-config" ]] && cfg="$a"
+            prev="$a"
+        done
+        case "$cfg" in
+            *.json) ;;
+            *) echo "core: Failed to get format of ${cfg}" >&2; exit 23 ;;
+        esac
         if [[ "${XRAY_STUB_TEST_FAIL:-0}" == "1" ]]; then
             echo "failed to build config: unknown field" >&2
             exit 23
@@ -119,6 +140,27 @@ esac
 exit 0
 """
 
+IPTABLES_STUB = r"""#!/usr/bin/env bash
+[[ -n "${IPTABLES_LOG:-}" ]] && echo "$(basename "$0") $*" >> "$IPTABLES_LOG"
+# Как настоящее ядро: -D без совпавшего правила возвращает ошибку (иначе
+# «снятие дублей» в скрипте не закончится никогда).
+case "$*" in
+    *" -D "*) exit 1 ;;
+esac
+exit 0
+"""
+
+SYSCTL_STUB = r"""#!/usr/bin/env bash
+[[ -n "${SYSCTL_LOG:-}" ]] && echo "$*" >> "$SYSCTL_LOG"
+exit 0
+"""
+
+IP_STUB = r"""#!/usr/bin/env bash
+[[ -n "${IP_LOG:-}" ]] && echo "$*" >> "$IP_LOG"
+# `ip -6 addr show scope global` в тестах пуст: IPv6 «выключен».
+exit 0
+"""
+
 SS_STUB = r"""#!/usr/bin/env bash
 [[ -n "${SS_LOG:-}" ]] && echo "$*" >> "$SS_LOG"
 [[ -n "${SS_STUB_OUTPUT:-}" ]] && printf '%s\n' "$SS_STUB_OUTPUT"
@@ -142,6 +184,10 @@ def stub_bin(tmp_path: Path) -> Path:
     write_stub(d / "curl", CURL_STUB)
     write_stub(d / "ufw", UFW_STUB)
     write_stub(d / "ss", SS_STUB)
+    write_stub(d / "iptables", IPTABLES_STUB)
+    write_stub(d / "ip6tables", IPTABLES_STUB)
+    write_stub(d / "sysctl", SYSCTL_STUB)
+    write_stub(d / "ip", IP_STUB)
     return d
 
 
@@ -156,7 +202,8 @@ def clean_env() -> dict:
     env = dict(os.environ)
     for name in ("XRAY_STUB_VERSION", "XRAY_STUB_TEST_FAIL", "XRAY_STUB_PRIV",
                  "XRAY_STUB_PUB", "XRAY_LOG", "SYSTEMCTL_LOG", "SYSTEMCTL_ACTIVE",
-                 "CURL_LOG", "UFW_LOG", "UFW_STATUS", "SS_LOG", "SS_STUB_OUTPUT"):
+                 "CURL_LOG", "UFW_LOG", "UFW_STATUS", "SS_LOG", "SS_STUB_OUTPUT",
+                 "IPTABLES_LOG", "SYSCTL_LOG", "IP_LOG"):
         env.pop(name, None)
     return env
 
@@ -303,19 +350,37 @@ def test_apply_without_root_is_refused(stub_bin: Path):
     assert "требует root" in out(proc)
 
 
-def test_duplicate_uuid_warns_that_one_link_for_all_is_forbidden():
+def test_duplicate_uuid_without_new_data_is_an_error():
+    """«Одна ссылка на всех» — запрет из плана, а не пожелание: это ошибка."""
     proc = run(*base_args("--client-uuid", UUID_1, "--client-uuid", UUID_1))
     text = out(proc)
-    assert proc.returncode == 0
+    assert proc.returncode != 0
     assert "указан повторно" in text and "одна ссылка на всех запрещена" in text
-    assert "Пользователей: 1" in text
-    assert len(links(text)) == 1
+    assert links(text) == []
 
 
-def test_chrome_fingerprint_is_flagged():
+def test_same_uuid_with_new_data_is_allowed():
+    """Штатный случай: UUID объявили отдельно, данные к нему дописали."""
+    proc = run(*base_args("--client-uuid", UUID_1,
+                          f"--client={UUID_1},Иван,Android/Happ,МТС"))
+    text = out(proc)
+    assert proc.returncode == 0, text
+    assert "Пользователей: 1" in text and len(links(text)) == 1
+    assert "Иван" in text
+
+
+def test_flagged_fingerprint_is_an_error_unless_allowed():
     proc = run(*base_args("--client-uuid", UUID_1, "--exit-fp", "chrome"))
-    assert "чёрном списке эвристики июня 2026" in out(proc)
-    assert "fp=firefox" not in out(proc)
+    text = out(proc)
+    assert proc.returncode != 0
+    assert "чёрном списке эвристики июня 2026" in text
+    assert "fp=chrome" not in text
+
+    allowed = run(*base_args("--client-uuid", UUID_1, "--exit-fp", "chrome",
+                             "--allow-flagged-fp"))
+    text2 = out(allowed)
+    assert allowed.returncode == 0, text2
+    assert "fp=chrome" in text2 and "--allow-flagged-fp" in text2
 
 
 # ------------------------------------------------------ dry-run: изоляция ----
@@ -406,10 +471,35 @@ def test_dry_run_config_matches_plan(workdir: Path, stub_bin: Path):
     assert ereality["serverName"] == EXIT_SNI and ereality["shortId"] == EXIT_SID
     assert ereality["fingerprint"] == "firefox"
 
+    # Поля, без которых мост не работает вовсе (проверяются именно значения,
+    # а не факт наличия ключа: listen 127.0.0.1 сделал бы мост недоступным).
+    assert inbound["listen"] == "0.0.0.0", "мост обязан слушать внешний интерфейс"
+    assert all(c["flow"] == "xtls-rprx-vision" for c in inbound["settings"]["clients"])
+    assert inbound["sniffing"]["enabled"] is True
+    assert exit_ob["settings"]["vnext"][0]["users"][0]["encryption"] == "none"
+    assert "minClientVer" not in reality, \
+        "по умолчанию поле не пишется: жёсткое значение рискует отсечь не-Xray клиентов"
+
     tags = [r["ruleTag"] for r in cfg["routing"]["rules"]]
-    assert tags == ["Kometa-Block-Private", "Kometa-Exit"], "по умолчанию РФ-прямых правил нет"
+    assert tags == ["Kometa-Block-Private", "Kometa-Block-Checkers", "Kometa-Exit"], \
+        "по умолчанию РФ-прямых правил нет"
     assert cfg["routing"]["rules"][-1]["outboundTag"] == "exit"
     assert cfg["routing"]["domainStrategy"] == "AsIs", "мост сам ничего не резолвит — порт 53 молчит"
+    # Приватные диапазоны — явными CIDR, а не geoip:private: тот требует
+    # geoip.dat, и на ядре из архива конфиг не загрузился бы.
+    assert "10.0.0.0/8" in cfg["routing"]["rules"][0]["ip"]
+    assert all(not str(x).startswith("geoip:") for x in cfg["routing"]["rules"][0]["ip"])
+    # Проверялки, которые план намеренно закрывает.
+    checkers = cfg["routing"]["rules"][1]
+    assert "api.ipify.org" in checkers["domain"] and "ifconfig.me" in checkers["domain"]
+
+
+def test_min_client_ver_is_written_only_when_asked(workdir: Path, stub_bin: Path):
+    asked = run(*base_args("--min-client-ver", "26.3.0", "--client-uuid", UUID_1))
+    raw = re.search(r'^\{"log".*\}$', asked.stdout, re.MULTILINE)
+    assert raw
+    cfg = json.loads(raw.group(0))
+    assert cfg["inbounds"][0]["streamSettings"]["realitySettings"]["minClientVer"] == "26.3.0"
 
 
 def test_direct_ru_adds_direct_rule_first(workdir: Path, stub_bin: Path):
@@ -422,8 +512,10 @@ def test_direct_ru_adds_direct_rule_first(workdir: Path, stub_bin: Path):
     assert raw
     cfg = json.loads(raw.group(0))
     rules = cfg["routing"]["rules"]
-    assert [r["ruleTag"] for r in rules] == ["Kometa-Block-Private", "Kometa-Direct", "Kometa-Exit"]
-    direct = rules[1]
+    assert [r["ruleTag"] for r in rules] == [
+        "Kometa-Block-Private", "Kometa-Block-Checkers", "Kometa-Direct", "Kometa-Exit",
+    ]
+    direct = rules[2]
     assert "geosite:category-ru" in direct["domain"] and "geoip:ru" in direct["ip"]
 
 
@@ -531,10 +623,17 @@ def apply(workdir: Path, stub_bin: Path, *extra_clients: str, env_extra: dict | 
 
 def test_apply_writes_config_meta_registry_and_reports_active(workdir: Path, stub_bin: Path, tmp_path: Path):
     systemctl_log = tmp_path / "systemctl.log"
+    xray_log = tmp_path / "xray.log"
     proc = apply(workdir, stub_bin, *CLIENTS,
-                 env_extra={"SYSTEMCTL_LOG": str(systemctl_log)})
+                 env_extra={"SYSTEMCTL_LOG": str(systemctl_log), "XRAY_LOG": str(xray_log)})
     text = out(proc)
     assert proc.returncode == 0, text
+    # Ядро выбирает разборщик по расширению файла: безымянный mktemp-конфиг
+    # оно отвергает («Failed to get format of …»), и мост не поднимается.
+    xray_calls = xray_log.read_text(encoding="utf-8")
+    tested = re.findall(r"-config (\S+)", xray_calls)
+    assert tested, f"ядро не получило -config: {xray_calls}"
+    assert all(pth.endswith(".json") for pth in tested), f"конфиг без .json: {tested}"
     assert "Служба xray: active" in text
     assert "Пользователей: 3" in text and len(links(text)) == 3
 
@@ -765,8 +864,9 @@ def test_private_bridge_address_is_flagged(workdir: Path, stub_bin: Path):
     assert "приватный" in text
 
 
-def test_unreadable_existing_config_warns_about_new_keys(workdir: Path, stub_bin: Path, tmp_path: Path):
-    """Битый конфиг = ключи не восстановить; молча выпустить новые нельзя."""
+def test_unreadable_existing_config_stops_instead_of_rekeying(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """Битый конфиг = ключи не восстановить. Запуск неинтерактивный, поэтому
+    не «предупредить и поехать», а остановиться: иначе трое остаются без связи."""
     config = workdir / "config.json"
     config.write_text("{ это не JSON", encoding="utf-8")
     proc = run(
@@ -775,5 +875,156 @@ def test_unreadable_existing_config_warns_about_new_keys(workdir: Path, stub_bin
         env_extra={"SYSTEMCTL_LOG": str(tmp_path / "s.log")},
     )
     text = out(proc)
-    assert "не читается как JSON" in text
-    assert "НОВЫЕ ключи" in text
+    assert proc.returncode != 0
+    assert "не читается как JSON" in text and "--rotate-keys" in text
+    assert config.read_text(encoding="utf-8") == "{ это не JSON"
+
+
+# --------------------------- пробелы, найденные ревью прогонами -------------------
+def test_dry_run_masks_secret_and_leaves_no_traces(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """dry-run разрешён на боевом мосте: приватный ключ не печатаем, /tmp не сорим."""
+    assert apply(workdir, stub_bin, *CLIENTS,
+                 env_extra={"SYSTEMCTL_LOG": str(tmp_path / "s.log")}).returncode == 0
+    isolated_tmp = tmp_path / "isolated-tmp"
+    isolated_tmp.mkdir()
+
+    proc = run(
+        *base_args("--config", str(workdir / "config.json"),
+                   "--registry", str(workdir / "users.csv"),
+                   "--client-uuid", UUID_1),
+        stub_bin=stub_bin,
+        env_extra={"TMPDIR": str(isolated_tmp)},
+    )
+    text = out(proc)
+    assert proc.returncode == 0, text
+    assert "PRIVKEYTEST" not in text, "приватный ключ Reality не должен попадать в вывод"
+    assert "<СКРЫТО-ПРИ-ПЕЧАТИ>" in text
+    assert list(isolated_tmp.iterdir()) == [], "trap cleanup обязан убрать временный каталог"
+
+
+def test_mss_clamp_is_applied_to_output_chain(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """Мост терминирует VLESS локально: трафика через FORWARD нет, клэмпить надо OUTPUT."""
+    ipt_log = tmp_path / "iptables.log"
+    proc = run(
+        *base_args("--allow-non-root", "--keep-ipv6", "--no-install",
+                   "--xray-bin", str(stub_bin / "xray"),
+                   "--config", str(workdir / "config.json"),
+                   "--registry", str(workdir / "users.csv"),
+                   *(f"--client={c}" for c in CLIENTS), dry_run=False),
+        stub_bin=stub_bin,
+        env_extra={"SYSTEMCTL_LOG": str(tmp_path / "s.log"), "IPTABLES_LOG": str(ipt_log)},
+    )
+    assert proc.returncode == 0, out(proc)
+    calls = ipt_log.read_text(encoding="utf-8")
+    assert "-t mangle" in calls and "OUTPUT" in calls
+    assert "--set-mss 1240" in calls, "LTE MTU 1280 → MSS 1240 для IPv4"
+    assert "--set-mss 1220" in calls, "IPv6: 1280 − 60"
+    assert "FORWARD" not in calls, "в этой схеме FORWARD не используется"
+
+
+def test_ipv6_is_disabled_when_not_kept(workdir: Path, stub_bin: Path, tmp_path: Path):
+    sysctl_dir = tmp_path / "sysctl.d"
+    sysctl_log = tmp_path / "sysctl.log"
+    proc = run(
+        *base_args("--allow-non-root", "--no-mss", "--no-install",
+                   "--xray-bin", str(stub_bin / "xray"),
+                   "--sysctl-dir", str(sysctl_dir),
+                   "--config", str(workdir / "config.json"),
+                   "--registry", str(workdir / "users.csv"),
+                   *(f"--client={c}" for c in CLIENTS), dry_run=False),
+        stub_bin=stub_bin,
+        env_extra={"SYSTEMCTL_LOG": str(tmp_path / "s.log"), "SYSCTL_LOG": str(sysctl_log)},
+    )
+    text = out(proc)
+    assert proc.returncode == 0, text
+    conf = (sysctl_dir / "99-kometa-noipv6.conf").read_text(encoding="utf-8")
+    assert conf.count("disable_ipv6 = 1") == 3
+    assert "IPv6 выключен" in text, "приёмка требует пустой `ip -6 addr show scope global`"
+
+
+def test_links_only_derives_pubkey_from_config_without_meta(workdir: Path, stub_bin: Path):
+    """Спутника нет — ключ выводится из приватного ключа конфига, а не отказ."""
+    config = workdir / "config.json"
+    cfg = json.loads(json.dumps(FOREIGN_FIRST_CONFIG))
+    cfg["inbounds"][1]["streamSettings"]["realitySettings"]["privateKey"] = "PRIV_ONLY"
+    config.write_text(json.dumps(cfg), encoding="utf-8")
+    proc = run("--links-only", "--config", str(config), "--bridge-address", BRIDGE_ADDRESS,
+               stub_bin=stub_bin)
+    text = out(proc)
+    assert proc.returncode == 0, text
+    assert "pbk=PUB_OF_PRIV_ONL" in text, "publicKey выведен из ключа конфига"
+
+
+def test_stale_meta_pubkey_does_not_reach_links(workdir: Path, stub_bin: Path):
+    """Спутник от неудачного --rotate-keys не должен подменять живой ключ."""
+    config = workdir / "config.json"
+    config.write_text(json.dumps(FOREIGN_FIRST_CONFIG), encoding="utf-8")
+    (workdir / "config.bridge.json").write_text(
+        json.dumps({"publicKey": "STALE_PUB", "address": BRIDGE_ADDRESS}), encoding="utf-8")
+    proc = run("--links-only", "--config", str(config), stub_bin=stub_bin)
+    text = out(proc)
+    assert proc.returncode == 0, text
+    assert "расходится" in text
+    assert "pbk=PUB_OF_KEEPME_P" in text
+    assert "STALE_PUB" not in text
+
+
+def test_stale_meta_does_not_break_deploy_links(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """То же правило, но на пути РАЗВЁРТЫВАНИЯ, а не перепечатки ссылок: живой
+    конфиг + спутник с чужим publicKey. Ссылки обязаны нести ключ из конфига."""
+    config = workdir / "config.json"
+    config.write_text(json.dumps(FOREIGN_FIRST_CONFIG), encoding="utf-8")
+    (workdir / "config.bridge.json").write_text(
+        json.dumps({"publicKey": "STALE_PUB", "address": BRIDGE_ADDRESS}), encoding="utf-8")
+
+    proc = apply(workdir, stub_bin, CLIENTS[0],
+                 env_extra={"SYSTEMCTL_LOG": str(tmp_path / "s.log")})
+    text = out(proc)
+    assert proc.returncode == 0, text
+    assert "расходится" in text
+    assert "pbk=PUB_OF_KEEPME_P" in text, "в ссылку обязан попасть ключ из конфига"
+    assert "STALE_PUB" not in text
+
+
+def test_unreadable_registry_stops_apply_instead_of_losing_names(workdir: Path, stub_bin: Path, tmp_path: Path):
+    env = {"SYSTEMCTL_LOG": str(tmp_path / "s.log")}
+    assert apply(workdir, stub_bin, *CLIENTS, env_extra=env).returncode == 0
+    registry = workdir / "users.csv"
+    registry.chmod(0o000)
+    try:
+        proc = apply(workdir, stub_bin, CLIENTS[0], CLIENTS[2], env_extra=env)
+        text = out(proc)
+        assert proc.returncode != 0
+        assert "не читается" in text
+    finally:
+        registry.chmod(0o600)
+
+
+def test_shifted_registry_line_is_preserved(workdir: Path, stub_bin: Path):
+    """Строку со сдвинутыми колонками не «чиним» и не помечаем отозванной."""
+    registry = workdir / "users.csv"
+    shifted = f"Иван,Пётр,{UUID_2},Android,МТС,активен,"
+    registry.write_text(f"{REGISTRY_HEADER}\n{shifted}\n", encoding="utf-8")
+    proc = run(*base_args("--registry", str(registry), "--client-uuid", UUID_1), stub_bin=stub_bin)
+    text = out(proc)
+    assert proc.returncode == 0, text
+    assert "не похожа на запись" in text
+    assert shifted in text, "строка обязана остаться как есть"
+
+
+def test_ipv4_like_but_invalid_address_is_rejected():
+    proc = run("--dry-run", "--exit-address", "999.999.999.999", "--exit-port", "443",
+               "--exit-uuid", EXIT_UUID, "--exit-pubkey", EXIT_PUBKEY,
+               "--exit-sni", EXIT_SNI, "--exit-shortid", EXIT_SID, "--client-uuid", UUID_1)
+    text = out(proc)
+    assert proc.returncode != 0
+    assert "--allow-exit-hostname" in text
+
+
+def test_links_only_respects_explicit_bridge_port(workdir: Path, stub_bin: Path, tmp_path: Path):
+    assert apply(workdir, stub_bin, *CLIENTS,
+                 env_extra={"SYSTEMCTL_LOG": str(tmp_path / "s.log")}).returncode == 0
+    proc = run("--links-only", "--config", str(workdir / "config.json"), "--bridge-port", "8443")
+    text = out(proc)
+    assert proc.returncode == 0, text
+    assert f"@{BRIDGE_ADDRESS}:8443" in text
