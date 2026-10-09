@@ -34,7 +34,7 @@ from app.db.models import Order, User
 from app.panels.base import PanelClient
 from app.payments.matching import parse_order_code
 from app.payments.statements import IncomingPayment, StatementError, StatementSource
-from app.services import events, notifications
+from app.services import alerts as alerts_service, events, notifications
 from app.services import orders as orders_service
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,11 @@ settings = get_settings()
 
 #: Сколько ключей обработанных платежей помним (защита от повторного подтверждения)
 MAX_REMEMBERED_KEYS = 1000
+
+#: Причина «не сопоставлено»: под сумму подходит больше одного заказа.
+#: Подтверждать автоматически нельзя — деньги одного клиента оплатят доступ
+#: другому. Такой платёж уходит админам как «неопознанный».
+AMBIGUOUS_MATCH = "несколько заказов на ту же сумму — нужен человек"
 
 
 @dataclass
@@ -54,6 +59,9 @@ class ReconcileResult:
         #: деньги приняты, выдачу повторит фоновая задача (B2).
         pending_grant: list[int] = field(default_factory=list)
         unmatched: list[IncomingPayment] = field(default_factory=list)
+        #: Почему платёж не сопоставлен (ключ → текст): «несколько заказов на
+        #: ту же сумму» и т.п. Нужно для уведомления и алерта.
+        unmatched_reasons: dict[str, str] = field(default_factory=dict)
         errors: list[str] = field(default_factory=list)
         skipped: int = 0
 
@@ -179,14 +187,23 @@ async def find_order_for_payment(
                                 return order, "по коду заказа в комментарии"
 
         # 2. Точная сумма с уникальными копейками
-        for order in pending:
-                if abs(payment.amount_kopecks - order.pay_amount_kopecks) <= tolerance:
-                        return order, "по точной сумме"
+        exact = [order for order in pending if abs(payment.amount_kopecks - order.pay_amount_kopecks) <= tolerance]
+        if len(exact) == 1:
+                return exact[0], "по точной сумме"
+        if len(exact) > 1:
+                # Совпало несколько заказов (например, допуск копеек разрешён
+                # настройкой): выбирать «первый по дате» нельзя — это оплата
+                # чужого заказа.
+                return None, AMBIGUOUS_MATCH
 
-        # 3. Сумма без копеек — банк мог не передать надбавку
-        for order in pending:
-                if payment.amount_kopecks == order.amount_rub * 100:
-                        return order, "по сумме без копеек (уточнить вручную)"
+        # 3. Сумма без копеек — банк мог не передать надбавку. Подтверждаем
+        # ТОЛЬКО когда такой заказ ровно один: иначе платёж одного клиента
+        # выдаст доступ другому (PoC ревью: платёж клиента №2 подтвердил заказ №1).
+        bare = [order for order in pending if payment.amount_kopecks == order.amount_rub * 100]
+        if len(bare) == 1:
+                return bare[0], "по сумме без копеек (уточнить вручную)"
+        if len(bare) > 1:
+                return None, AMBIGUOUS_MATCH
 
         return None, ""
 
@@ -240,6 +257,8 @@ async def reconcile(
                 order, reason = await find_order_for_payment(session, payment)
                 if order is None:
                         result.unmatched.append(payment)
+                        if reason:
+                                result.unmatched_reasons[payment.key] = reason
                 else:
                         user = await session.get(User, order.user_id)
                         try:
@@ -295,15 +314,34 @@ async def reconcile(
                         "",
                 ]
                 for payment in result.unmatched[:10]:
+                        why = result.unmatched_reasons.get(payment.key, "")
                         lines.append(
                                 f"• {payment.amount_kopecks / 100:.2f} ₽"
                                 f"{' от ' + payment.counterparty if payment.counterparty else ''}"
                                 f"{' — «' + payment.comment + '»' if payment.comment else ''}"
                                 f" ({payment.received_at:%d.%m %H:%M}, {payment.source})"
+                                + (f"\n  ⚠️ {why}" if why else "")
                         )
                 lines.append("")
                 lines.append("Проверь выписку и подтверди заказ вручную в /admin.")
                 await notifications.notify_admins(bot, "\n".join(lines))
+
+        # Алерт в панели: сообщение в Telegram легко пропустить, а «деньги пришли,
+        # заказ не найден» — работа, которая не должна потеряться. Для неоднозначной
+        # суммы это ещё и защита: без человека доступ не выдаётся никому (B3).
+        for payment in result.unmatched[:10]:
+                why = result.unmatched_reasons.get(payment.key, "")
+                await alerts_service.raise_alert(
+                        session,
+                        "payment_unmatched",
+                        title=f"Поступление {payment.amount_kopecks / 100:.2f} ₽ без заказа",
+                        message=(
+                                f"{payment.amount_kopecks / 100:.2f} ₽, {payment.received_at:%d.%m %H:%M}, "
+                                f"источник: {payment.source or '—'}"
+                                f"{' — ' + why if why else ''}"
+                        ),
+                        fingerprint=f"payment:{payment.key}",
+                )
 
         if result.errors and bot is not None:
                 await notifications.notify_admins(

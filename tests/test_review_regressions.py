@@ -25,14 +25,15 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import get_settings
-from app.db.models import Alert, Order, Subscription
+from app.db.models import Alert, Event, Order, Subscription
 from app.panels.base import PanelError, PanelUser, UserSpec
 from app.panels.fake import FakePanel
 from app.payments.base import PaymentCheck, PaymentStatus
 from app.payments.registry import payments
+from app.payments.statements import IncomingPayment
 from app.services import orders, subscriptions
 from app.web.sub import build_app
 
@@ -208,3 +209,117 @@ async def test_short_grant_is_treated_as_failure(session):
     assert order.granted_at is None
     assert "ожидали минимум" in order.grant_last_error or "срок подписки" in order.grant_last_error
     assert sub is not None  # подписка есть, но факт выдачи не подтверждён — ретрай доведёт
+
+
+# ------------------------------------------------------------------------- B3
+class _StaticSource:
+    """Источник выписки для теста: отдаёт заранее заданные поступления."""
+
+    name = "static"
+
+    def __init__(self, payments: list) -> None:  # noqa: ANN001
+        self._payments = payments
+
+    async def fetch(self, since: datetime) -> list:  # noqa: ANN001
+        return list(self._payments)
+
+    async def close(self) -> None:  # pragma: no cover
+        return None
+
+
+@pytest.fixture
+def autopay_env(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "autopay_enabled", True)
+    monkeypatch.setattr(settings, "statement_state_file", str(tmp_path / "state.json"))
+    monkeypatch.setattr(settings, "autopay_tolerance_kopecks", 0)
+    yield
+
+
+def _payment(amount_kopecks: int, *, comment: str = "", key: str = "op-1") -> IncomingPayment:
+    return IncomingPayment(
+        amount_kopecks=amount_kopecks,
+        received_at=datetime.now(timezone.utc),
+        comment=comment,
+        source="static",
+        external_id=key,
+    )
+
+
+async def test_amount_without_kopecks_is_not_guessed_between_two_orders(session, autopay_env):
+    """B3: два заказа на одну сумму — платёж без копеек не достаётся никому.
+
+    PoC аудита: при совпадении суммы без копеек брался первый по ``created_at``
+    pending-заказ, и платёж клиента №2 подтверждал заказ №1.
+    """
+    from app.services import autopay
+
+    user_a, order_a = await _make_order(session, 9906, provider="manual")
+    user_b, order_b = await _make_order(session, 9907, provider="manual")
+    await session.commit()
+
+    order, reason = await autopay.find_order_for_payment(
+        session, _payment(order_a.amount_rub * 100, comment="перевод")
+    )
+
+    assert order is None
+    assert reason == autopay.AMBIGUOUS_MATCH
+
+    # И на уровне всего цикла: доступ не выдаётся никому, админ получает алерт.
+    result = await autopay.reconcile(
+        session, None, None, sources=[_StaticSource([_payment(order_a.amount_rub * 100, comment="перевод")])]
+    )
+    await session.commit()
+
+    assert result.confirmed == []
+    assert result.unmatched
+    assert await session.scalar(select(Subscription).where(Subscription.user_id.in_([user_a.id, user_b.id]))) is None
+    alert = await session.scalar(select(Alert).where(Alert.kind == "payment_unmatched"))
+    assert alert is not None
+
+
+async def test_amount_without_kopecks_matches_the_only_candidate(session, autopay_env):
+    """B3: если кандидат один — платёж без копеек подтверждает именно его."""
+    from app.services import autopay
+
+    _, order = await _make_order(session, 9908, provider="manual")
+    await session.commit()
+
+    found, reason = await autopay.find_order_for_payment(session, _payment(order.amount_rub * 100))
+
+    assert found is not None and found.id == order.id
+    assert "без копеек" in reason
+
+
+# ------------------------------------------------------------------------- B4
+async def test_one_payment_grants_once_even_with_stale_order_object(session, panel):
+    """B4: повторное подтверждение с устаревшим объектом не продлевает срок дважды.
+
+    PoC: между чтением заказа и подтверждением проходит запрос к платёжной
+    системе (в бою ~10 с), за это время заказ подтверждает параллельный путь, а
+    в памяти вызывающего статус всё ещё ``pending``.
+    """
+    user, order = await _make_order(session, 9909, provider="manual")
+    stale = await session.get(Order, order.id)
+
+    first_sub, first_already = await orders.mark_paid(session, order, panel)
+    await session.commit()
+    first_expiry = first_sub.expires_at
+
+    second_sub, second_already = await orders.mark_paid(session, stale, panel)
+    await session.commit()
+
+    assert first_already is False
+    assert second_already is True
+    assert second_sub is not None and second_sub.expires_at == first_expiry
+
+    subs = list(
+        (await session.scalars(select(Subscription).where(Subscription.user_id == user.id))).all()
+    )
+    assert len(subs) == 1
+    paid_events = int(
+        await session.scalar(
+            select(func.count(Event.id)).where(Event.kind == "order_paid", Event.user_id == user.id)
+        )
+        or 0
+    )
+    assert paid_events == 1
