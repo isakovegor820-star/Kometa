@@ -128,6 +128,9 @@ _EXTRA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("orders", "plan_days", "INTEGER"),
     ("orders", "plan_devices_limit", "INTEGER"),
     ("orders", "plan_traffic_gb", "INTEGER"),
+    # Захват выдачи: пока он стоит, фоновая задача не зовёт панель второй раз по
+    # тому же платежу. Истекает сам, если процесс упал.
+    ("orders", "grant_claimed_at", "DATETIME"),
     ("users", "promo_code", "VARCHAR(32)"),
     ("users", "bonus_days_balance", "INTEGER DEFAULT 0"),
     ("users", "tags", "VARCHAR(128) DEFAULT ''"),

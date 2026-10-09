@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from aiogram import Bot
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -246,6 +246,47 @@ def grant_terms(order: Order, plan: Plan) -> tuple[int, int, int]:
     return int(days), int(devices), int(traffic)
 
 
+#: Сколько держим захват выдачи, если процесс упал между захватом и результатом.
+#: Больше любого ответа панели, но не настолько, чтобы заказ завис: повтор у
+#: фоновой задачи идёт каждые 3 минуты, и после истечения захвата она возьмёт
+#: заказ снова.
+GRANT_CLAIM_TTL_MINUTES = 5
+
+
+async def claim_grant(session: AsyncSession, order: Order) -> bool:
+    """Взять заказ на выдачу. ``False`` — его уже выдаёт кто-то другой.
+
+    Зачем. Деньги фиксируются в БД **до** обращения к панели (B2), поэтому
+    между этими двумя моментами заказ виден как ``paid`` + ``granted_at IS NULL``.
+    Фоновая задача брала такой заказ и звала панель второй раз по тому же
+    платежу — в худшем случае это лишний месяц доступа за одну оплату.
+
+    Захват атомарный: условный ``UPDATE`` выигрывает ровно один претендент.
+    Просроченный захват (упавший процесс) перехватывается по TTL.
+    """
+    now = datetime.now(timezone.utc)
+    stale_before = now - timedelta(minutes=GRANT_CLAIM_TTL_MINUTES)
+    result = await session.execute(
+        update(Order)
+        .where(
+            Order.id == order.id,
+            Order.granted_at.is_(None),
+            or_(Order.grant_claimed_at.is_(None), Order.grant_claimed_at < stale_before),
+        )
+        .values(grant_claimed_at=now)
+    )
+    await session.commit()
+    if result.rowcount:
+        order.grant_claimed_at = now
+        return True
+    return False
+
+
+def release_grant_claim(order: Order) -> None:
+    """Отпустить заказ: попытка закончилась, повтор снова возможен сразу."""
+    order.grant_claimed_at = None
+
+
 def _grant_target(sub: Subscription | None, plan: Plan, *, now: datetime | None = None) -> datetime:
     """До какого срока подписка должна продлиться после оплаты.
 
@@ -421,6 +462,13 @@ async def grant_ungranted_orders(
             await session.commit()
             continue
 
+        # Захват: между «оплата зафиксирована» и ответом панели заказ виден как
+        # paid + granted_at IS NULL, поэтому без захвата панель звали дважды по
+        # одному платежу. Взяли — обрабатываем; не взяли — это делает кто-то другой.
+        if not await claim_grant(session, order):
+            logger.info("Заказ #%s: выдача уже выполняется другим путём — пропускаю", order.id)
+            continue
+
         try:
             days, devices, traffic = grant_terms(order, plan)
             await subscriptions.activate_plan(
@@ -434,6 +482,7 @@ async def grant_ungranted_orders(
             )
         except Exception as exc:  # noqa: BLE001 - панель может не ответить
             logger.error("Повторная выдача по заказу #%s не удалась: %s", order.id, exc)
+            release_grant_claim(order)
             await _record_grant_failure(session, order, target, exc, bot=bot)
             continue
 
@@ -443,11 +492,13 @@ async def grant_ungranted_orders(
         problem = _grant_problem(sub, target)
         if problem:
             logger.error("Заказ #%s: %s", order.id, problem)
+            release_grant_claim(order)
             await _record_grant_failure(session, order, target, PanelError(problem), bot=bot)
             continue
 
         order.granted_at = datetime.now(timezone.utc)
         order.grant_last_error = ""
+        release_grant_claim(order)
         await alerts_service.resolve_by_fingerprint(session, _grant_fingerprint(order.id), by="auto")
         done.append(order.id)
         if bot is not None:
@@ -616,6 +667,12 @@ async def mark_paid(
     # «paid» и выдача жили в одной транзакции: панель не ответила, вызывающий
     # погасил ошибку и закоммитил — заказ выпадал из всех очередей ретрая
     # («деньги приняты, доступа нет и не будет», B2).
+    #
+    # Захват ставим здесь же, тем же коммитом: с этой секунды заказ виден как
+    # «оплачен и не выдан», и без захвата фоновая задача звала бы панель второй
+    # раз по тому же платежу. Статус «paid» выставляется атомарным UPDATE выше,
+    # поэтому владелец выдачи ровно один.
+    order.grant_claimed_at = datetime.now(timezone.utc)
     await session.commit()
 
     try:
@@ -631,6 +688,7 @@ async def mark_paid(
         )
     except Exception as exc:  # noqa: BLE001 - панель может не ответить
         logger.error("Панель не выдала доступ по заказу #%s: %s", order.id, exc)
+        release_grant_claim(order)
         await _record_grant_failure(session, order, target, exc, bot=bot)
         return None, False
 
@@ -638,12 +696,16 @@ async def mark_paid(
     problem = _grant_problem(sub, target)
     if problem:
         logger.error("Заказ #%s: %s", order.id, problem)
+        release_grant_claim(order)
         await _record_grant_failure(session, order, target, PanelError(problem), bot=bot)
         return sub, False
 
     order.granted_at = datetime.now(timezone.utc)
     order.grant_target_at = target
     order.grant_last_error = ""
+    # Выдача состоялась — захват снимаем: держать его смысла нет, а повтор
+    # (например, ручная проверка в админке) должен видеть заказ свободным.
+    release_grant_claim(order)
     await session.flush()
 
     reward = await referral.reward_on_payment(session, order, panel)

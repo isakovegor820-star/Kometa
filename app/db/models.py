@@ -235,6 +235,12 @@ class Order(Base):
     plan_days: Mapped[int | None] = mapped_column(Integer, default=None)
     plan_devices_limit: Mapped[int | None] = mapped_column(Integer, default=None)
     plan_traffic_gb: Mapped[int | None] = mapped_column(Integer, default=None)
+    #: Когда заказ взят на выдачу. Между «оплата зафиксирована» и «панель
+    #: ответила» заказ виден как ``paid`` + ``granted_at IS NULL``, поэтому
+    #: фоновая задача брала его и звала панель второй раз по тому же платежу.
+    #: Захват снимается по завершении попытки; если процесс упал — истекает сам
+    #: (``GRANT_CLAIM_TTL_MINUTES``), чтобы заказ не завис навсегда.
+    grant_claimed_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
     #: Уникальная надбавка в копейках (1…99) для автоматического сопоставления
     #: перевода с заказом: 199 ₽ + 13 копеек = 199.13 ₽.
     pay_kopecks: Mapped[int] = mapped_column(Integer, default=0)

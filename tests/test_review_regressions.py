@@ -211,6 +211,67 @@ async def test_short_grant_is_treated_as_failure(session):
     assert sub is not None  # подписка есть, но факт выдачи не подтверждён — ретрай доведёт
 
 
+# ----------------------- C7 (находка 09.10.2026): захват выдачи
+async def test_inflight_grant_is_not_started_twice(session, panel):
+    """C7: пока выдача идёт, фоновая задача не зовёт панель второй раз.
+
+    Находка 09.10.2026: деньги фиксируются в БД ДО обращения к панели (B2),
+    поэтому между этими моментами заказ виден как «оплачен и не выдан».
+    Фоновая задача брала такой заказ и продлевала клиента второй раз — в худшем
+    случае лишний месяц доступа за одну оплату.
+    """
+    _, order = await _make_order(session, 9941, provider="manual")
+    await orders.mark_paid(session, order, DeadPanel())
+    await session.commit()
+    await session.refresh(order)
+
+    assert order.grant_claimed_at is None, "неудачная попытка обязана освободить захват"
+
+    # Кто-то уже выдаёт этот заказ прямо сейчас.
+    order.grant_claimed_at = datetime.now(timezone.utc)
+    await session.commit()
+
+    granted = await orders.grant_ungranted_orders(session, [panel])
+    await session.commit()
+    await session.refresh(order)
+
+    assert granted == [], "заказ выдан, хотя его уже выдаёт другой путь"
+    assert order.granted_at is None
+
+
+async def test_expired_claim_is_taken_over(session, panel):
+    """Просроченный захват (процесс упал) не блокирует заказ навсегда."""
+    _, order = await _make_order(session, 9942, provider="manual")
+    await orders.mark_paid(session, order, DeadPanel())
+    await session.commit()
+    await session.refresh(order)
+
+    order.grant_claimed_at = datetime.now(timezone.utc) - timedelta(
+        minutes=orders.GRANT_CLAIM_TTL_MINUTES + 1
+    )
+    await session.commit()
+
+    granted = await orders.grant_ungranted_orders(session, [panel])
+    await session.commit()
+    await session.refresh(order)
+
+    assert granted == [order.id]
+    assert order.granted_at is not None
+
+
+async def test_retry_is_not_delayed_by_the_claim(session, panel):
+    """После неудачи захват снят: следующий тик выдаёт сразу, а не через TTL."""
+    _, order = await _make_order(session, 9943, provider="manual")
+    await orders.mark_paid(session, order, DeadPanel())
+    await session.commit()
+    await session.refresh(order)
+
+    granted = await orders.grant_ungranted_orders(session, [panel])
+    await session.commit()
+
+    assert granted == [order.id]
+
+
 # ------------------- C6 (находка 09.10.2026): выдача по снимку тарифа
 async def test_grant_uses_plan_snapshot_not_live_plan(session, panel):
     """C6: правка тарифа в окне заказа не меняет то, что получит клиент.
