@@ -930,3 +930,26 @@ def test_rollback_hint_points_to_real_backup(workdir: Path, stub_bin: Path, tmp_
     text = out(proc)
     assert proc.returncode != 0
     assert "config.json.bak-20261009010101" in text, f"нет ссылки на реальный бэкап: {text}"
+
+
+def test_harden_firewall_respects_explicit_ssh_port(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """Явный --ssh-port обязан побеждать детект.
+
+    Регрессия: ``apply_firewall`` вызывался с ``detect_ssh_port()``, а тот читает
+    только ``/etc/ssh/sshd_config``. На Ubuntu порт лежит в ``sshd_config.d/*.conf``,
+    детект возвращал 22, и ``--harden-firewall`` разрешал не тот порт — то есть
+    отрезал SSH к мосту.
+    """
+    log = tmp_path / "ufw.log"
+    proc = run(
+        *apply_args(workdir, "--client-uuid", UUID_1,
+                    "--harden-firewall", "--ssh-port", "2222"),
+        stub_bin=stub_bin,
+        env_extra={"UFW_LOG": str(log), "UFW_STATUS": "active",
+                   "SYSTEMCTL_LOG": str(tmp_path / "s.log")},
+    )
+    assert proc.returncode == 0, out(proc)
+    text = log.read_text(encoding="utf-8")
+    assert "allow 2222/tcp" in text, f"явный SSH-порт проигнорирован: {text}"
+    assert "allow 22/tcp" not in text, f"разрешён не тот SSH-порт (локаут): {text}"
+    assert "allow 443/tcp" in text, f"порт моста не разрешён: {text}"

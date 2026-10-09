@@ -124,6 +124,7 @@ DO_MSS=1
 KEEP_IPV6=0
 HARDEN_FIREWALL=0
 SSH_PORT=22
+SSH_PORT_SET=0
 
 DRY_RUN=0
 LINKS_ONLY=0
@@ -414,7 +415,7 @@ parse_args() {
             --no-mss)           DO_MSS=0; shift ;;
             --keep-ipv6)        KEEP_IPV6=1; shift ;;
             --harden-firewall)  HARDEN_FIREWALL=1; shift ;;
-            --ssh-port)         need "$1" $#; SSH_PORT="$2"; shift 2 ;;
+            --ssh-port)         need "$1" $#; SSH_PORT="$2"; SSH_PORT_SET=1; shift 2 ;;
             --dry-run)          DRY_RUN=1; shift ;;
             --show-secrets)     SHOW_SECRETS=1; shift ;;
             --allow-flagged-fp) ALLOW_FLAGGED_FP=1; shift ;;
@@ -527,9 +528,19 @@ detect_bridge_address() {
 }
 
 detect_ssh_port() {
-    local p=""
+    local p="" f
     if [[ -r /etc/ssh/sshd_config ]]; then
         p="$(sed -n 's/^[[:space:]]*Port[[:space:]]\+\([0-9]\+\).*/\1/p' /etc/ssh/sshd_config | head -1)"
+    fi
+    # На Ubuntu (и в свежих Debian) Port часто задан в sshd_config.d/*.conf, а не
+    # в основном файле: тогда детект возвращал 22, `--harden-firewall` разрешал не
+    # тот порт — и отрезал SSH к мосту.
+    if [[ -z "$p" ]]; then
+        for f in /etc/ssh/sshd_config.d/*.conf; do
+            [[ -r "$f" ]] || continue
+            p="$(sed -n 's/^[[:space:]]*Port[[:space:]]\+\([0-9]\+\).*/\1/p' "$f" | head -1)"
+            [[ -n "$p" ]] && break
+        done
     fi
     printf '%s' "${p:-22}"
 }
@@ -1409,7 +1420,9 @@ main() {
     # Применение.
     if [[ "$KEEP_IPV6" -eq 0 ]]; then apply_ipv6_off; else warn "IPv6 не выключаю (--keep-ipv6): в приёмке пункт «ip -6 addr show scope global пусто» не выполнится."; fi
     [[ "$DO_MSS" -eq 1 ]] && apply_mss_clamp
-    apply_firewall "$(detect_ssh_port)"
+    # --ssh-port важнее детекта: если порт задан явно, детект не должен его
+    # перебивать (иначе --harden-firewall разрешит 22 и отрежет SSH).
+    apply_firewall "$([[ "$SSH_PORT_SET" -eq 1 ]] && printf '%s' "$SSH_PORT" || detect_ssh_port)"
     write_meta
     check_port_free
     write_config_and_restart "$tmp_config"
