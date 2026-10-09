@@ -33,7 +33,9 @@ PROJECT_DIR="$(pwd)"
 
 GREEN=$'\033[0;32m'; RED=$'\033[0;31m'; YELLOW=$'\033[0;33m'; BOLD=$'\033[1m'; NC=$'\033[0m'
 
-PY=".venv/bin/python"
+# Интерпретатор можно переопределить (CI, другой каталог окружения):
+#   ACCEPT_PYTHON=/path/to/python bash scripts/accept_review.sh
+PY="${ACCEPT_PYTHON:-.venv/bin/python}"
 [[ -x "$PY" ]] || PY="python3"
 if ! "$PY" -c "import pytest" >/dev/null 2>&1; then
   echo "${RED}Нет pytest: создай окружение (.venv) и установи requirements.txt${NC}"
@@ -163,7 +165,9 @@ if [[ "${ACCEPT_CLEAN_CLONE:-0}" == "1" ]]; then
   _banner "5b. Полный набор на чистом клоне"
   CLONE_DIR="$(mktemp -d)"
   if git clone -q --local "$PROJECT_DIR" "$CLONE_DIR/repo" 2>/dev/null; then
-    CLONE_OUT="$(cd "$CLONE_DIR/repo" && "$PROJECT_DIR/$PY" -m pytest -q -o addopts="" --tb=line 2>&1)"
+    PY_ABS="$PY"
+    [[ "$PY_ABS" == /* ]] || PY_ABS="$PROJECT_DIR/$PY"
+    CLONE_OUT="$(cd "$CLONE_DIR/repo" && "$PY_ABS" -m pytest -q -o addopts="" --tb=line 2>&1)"
     CLONE_CODE=$?
     echo "  $(echo "$CLONE_OUT" | tail -1)"
     if [[ $CLONE_CODE -eq 0 ]]; then
