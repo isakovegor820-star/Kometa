@@ -6,11 +6,12 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery, Message, PreCheckoutQuery
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import keyboards, texts
 from app.config import get_settings
-from app.db.models import User
+from app.db.models import Order, User
 from app.panels.base import PanelError
 from app.panels.registry import registry
 from app.payments.base import PaymentError, PaymentStatus
@@ -393,7 +394,24 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
                         user_id=user.id,
                         payload={"order_id": order.id, "reopened_from": order.status},
                 )
-                order.status = "pending"
+                # Открываем заказ условным UPDATE, а не присваиванием в памяти:
+                # пока мы читали статус и ходили в платёжную систему, тот же
+                # заказ мог подтвердить другой путь (опрос, вебхук, кнопка).
+                # Присваивание затёрло бы его результат и позволило выдать
+                # доступ второй раз (инцидент 09.10.2026, заказ #8).
+                await session.execute(
+                        update(Order)
+                        .where(Order.id == order.id, Order.status.in_(("canceled", "expired")))
+                        .values(status="pending")
+                )
+                await session.refresh(order)
+                if order.status != "pending":
+                        logger.info(
+                                "Заказ #%s уже обработан другим путём (%s) — второй раз не выдаю",
+                                order.id,
+                                order.status,
+                        )
+                        return
 
         panel = await subscriptions.all_user_panels(session)
         try:

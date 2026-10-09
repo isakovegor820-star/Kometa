@@ -83,14 +83,17 @@ async def test_referral_is_not_rewarded_twice_for_one_order(session, panel):
     await session.commit()
     order_id = order.id
 
+    # Путь A читает заказ заранее (как кнопка «Проверить оплату» до ответа Platega).
+    stale_session = SessionMaker()
+    stale_order = await orders.get_order(stale_session, order_id)
+    assert stale_order.status == "pending"
+
     async with SessionMaker() as fast_session:
         fresh_order = await orders.get_order(fast_session, order_id)
         await orders.mark_paid(fast_session, fresh_order, panel)
         await fast_session.commit()
 
     # Повторная выдача по тому же заказу (баг) не должна считаться «продлением».
-    stale_session = SessionMaker()
-    stale_order = await orders.get_order(stale_session, order_id)
     await orders.mark_paid(stale_session, stale_order, panel)
     await stale_session.commit()
     await stale_session.close()

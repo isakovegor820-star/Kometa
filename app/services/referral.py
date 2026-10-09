@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -25,6 +26,7 @@ from app.panels.base import PanelClient
 from app.services import events, promo as promo_service, subscriptions
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -109,6 +111,15 @@ async def reward_on_payment(session: AsyncSession, order: Order, panel: PanelCli
     """
     ref = await session.scalar(select(Referral).where(Referral.invited_id == order.user_id))
     if ref is None:
+        return None
+
+    # Одну и ту же оплату награждаем ровно один раз. Без этой проверки повторное
+    # подтверждение того же заказа (вебхук + опрос + кнопка «Проверить оплату»)
+    # выглядело как «продление»: пригласивший получал ещё и вторую награду
+    # (инцидент 09.10.2026, заказ #8: +30 дней как за первую оплату и +14 дней
+    # как за несуществующее продление).
+    if ref.paid_order_id == order.id:
+        logger.info("Оплата по заказу #%s уже награждена (referral %s) — повторно не считаю", order.id, ref.id)
         return None
 
     referrer = await session.get(User, ref.referrer_id)

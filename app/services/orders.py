@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from aiogram import Bot
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -163,13 +163,18 @@ async def mark_paid(
     Возвращает (подписка, уже_был_оплачен). Второй элемент True означает, что
     заказ уже был оплачен ранее — повторная выдача не производится.
 
+    Идемпотентность держится на **атомарном захвате заказа в БД**, а не на
+    статусе объекта в памяти. Причина: между чтением заказа и этой функцией
+    проходит проверка платежа в платёжной системе (в бою ``GET /transaction``
+    у Platega отвечает ~10 секунд). За это время тот же заказ успевает
+    подтвердить параллельный путь — фоновый опрос, вебхук или кнопка
+    «Проверить оплату». В памяти вызывающего статус остаётся ``pending``,
+    поэтому проверка по объекту пропускала вторую выдачу: клиент заплатил за
+    один месяц, а срок продлевался дважды (инцидент 09.10.2026, заказ #8 —
+    «36 дн.» и «66 дн.» в одном чате).
+
     Если передан ``bot``, пригласивший получает сообщение о начисленных днях.
     """
-    if order.status == "paid":
-        return await subscriptions.get_subscription(session, order.user_id), True
-    if order.status in {"canceled", "expired"}:
-        return None, False
-
     plan = await get_plan(session, order.plan_id) if order.plan_id else None
     if plan is None:
         raise ValueError(f"у заказа #{order.id} нет тарифа")
@@ -178,11 +183,29 @@ async def mark_paid(
     if user is None:
         raise ValueError(f"у заказа #{order.id} нет пользователя")
 
-    order.status = "paid"
-    order.paid_at = datetime.now(timezone.utc)
-    order.confirmed_by = confirmed_by
+    # Захват заказа: право выдать доступ получает ровно один вызов. Условие
+    # «status = pending» проверяется и меняется одной инструкцией, поэтому
+    # второй и последующие подтверждения получают rowcount = 0, даже если
+    # пришли с устаревшим объектом заказа.
+    values: dict[str, object] = {
+        "status": "paid",
+        "paid_at": datetime.now(timezone.utc),
+        "confirmed_by": confirmed_by,
+    }
     if provider_payment_id:
-        order.comment = f"payment_id={provider_payment_id}"
+        values["comment"] = f"payment_id={provider_payment_id}"
+    claimed = await session.execute(
+        update(Order).where(Order.id == order.id, Order.status == "pending").values(**values)
+    )
+    # Объект в памяти мог устареть (в том числе по статусу) — подтягиваем факт из БД.
+    await session.refresh(order)
+
+    if not claimed.rowcount:
+        # Заказ уже обработан другим путём. Оплачен — доступ выдан, повторять
+        # нечего; закрыт (отменён/истёк) — вызывающий сам решает, что делать.
+        if order.status in {"paid", "refunded"}:
+            return await subscriptions.get_subscription(session, order.user_id), True
+        return None, False
 
     # Партнёр, который привёл этого человека: фиксируем снимок в заказе и
     # считаем выплату. Партнёр получает с КАЖДОГО платежа, а не только с
