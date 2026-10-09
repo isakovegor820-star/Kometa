@@ -37,7 +37,6 @@ PROVIDER_LABELS = {
         "manual": "перевод по СБП",
         "crypto": "криптовалюта",
         "stars": "Telegram Stars",
-        "wata": "карта или СБП",
         "platega_sbp": "СБП или QR-код",
         "platega_card": "карта МИР",
         "platega_intl": "зарубежная карта",

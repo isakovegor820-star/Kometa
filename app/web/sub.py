@@ -248,7 +248,6 @@ async def _service_status() -> dict:
             "stars": settings.stars_enabled,
             "manual": bool(settings.manual_payment_details),
             "crypto": bool(settings.cryptobot_token),
-            "wata": bool(settings.wata_token),
         },
         "nodes": nodes,
         "checked_at": datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M"),

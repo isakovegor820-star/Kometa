@@ -305,7 +305,7 @@ async def pay_gift(call: CallbackQuery, session: AsyncSession, user: User) -> No
                         ttl=settings.order_ttl_minutes,
                 )
                 markup = keyboards.manual_order_kb(order.id)
-        elif provider.code in {"crypto", "wata"} or provider.code.startswith("platega"):
+        elif provider.code == "crypto" or provider.code.startswith("platega"):
                 text = (
                         f"🎁 <b>Подарок: заказ #{order.id}</b>\n\n"
                         f"К оплате: <b>{order.amount_rub} ₽</b>\n"

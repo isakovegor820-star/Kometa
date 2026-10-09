@@ -82,7 +82,6 @@ PROVIDER_TITLES = {
     "platega_intl": "Зарубежная карта (Platega)",
     "crypto": "Крипта (Crypto Pay)",
     "stars": "Telegram Stars",
-    "wata": "Карта/СБП (WATA)",
 }
 
 #: Способы оплаты через банка-партнёра (НСПК): с оборота удерживается
@@ -147,8 +146,6 @@ def _net_for_order(order, plan) -> int:  # noqa: ANN001 - Order, Plan | None
         gross_usd = stars * settings.stars_payout_usd
         net_rub = gross_usd * settings.usd_rub_rate
         return int(round(net_rub * (1 - settings.fragment_withdrawal_percent / 100)))
-    if order.provider == "wata":
-        return int(round(order.amount_rub * (1 - settings.fee_percent_wata / 100)))
     if order.provider == "crypto":
         return int(round(order.amount_rub * (1 - settings.fee_percent_crypto / 100)))
     if order.provider in SBP_PROVIDERS:

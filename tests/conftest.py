@@ -30,7 +30,6 @@ os.environ["MANUAL_PAYMENT_DETAILS"] = "СБП: +7 900 000-00-00 (тест)"
 os.environ["PLATEGA_MERCHANT_ID"] = ""
 os.environ["PLATEGA_SECRET"] = ""
 os.environ["CRYPTOBOT_TOKEN"] = ""
-os.environ["WATA_TOKEN"] = ""
 # Продажи в тестах открыты по умолчанию: боевой .env может держать их
 # закрытыми до готовности ноды, но это не должно ломать сценарии покупки.
 os.environ["SALES_ENABLED"] = "true"

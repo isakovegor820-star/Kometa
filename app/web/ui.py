@@ -135,7 +135,6 @@ PROVIDER_LABELS: dict[str, str] = {
     "platega_intl": "Зарубежная карта (Platega)",
     "crypto": "Крипта (Crypto Pay)",
     "stars": "Telegram Stars",
-    "wata": "Карта/СБП (WATA)",
 }
 
 ORDER_KIND: dict[str, str] = {"purchase": "Покупка", "renew": "Продление", "trial": "Пробный"}
