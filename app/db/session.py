@@ -129,6 +129,8 @@ _EXTRA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("users", "channel_verified_at", "DATETIME"),
     # Ретенция: когда персональные данные удалены (по запросу или через 12 мес.).
     ("users", "anonymized_at", "DATETIME"),
+    # Версия админ-сессий: выход, смена пароля/роли, деактивация гасят старые cookie.
+    ("admin_accounts", "session_version", "INTEGER DEFAULT 1"),
     # Источник привлечения: из какого канала/размещения пришёл человек.
     # Без этих полей нельзя посчитать CAC по каналам (docs/МАРКЕТИНГ-ЭКОНОМИКА.md).
     ("users", "source", "VARCHAR(32) DEFAULT ''"),

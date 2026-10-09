@@ -410,10 +410,15 @@ validate_bridge_params() {
     [[ "$BRIDGE_PORT" -ge 1 && "$BRIDGE_PORT" -le 65535 ]] || die "--bridge-port вне диапазона 1..65535: ${BRIDGE_PORT}"
     [[ "$BRIDGE_PORT" -eq 443 ]] || warn "Мост на порту ${BRIDGE_PORT}: в режиме белых списков проходит только 443. Порт оставлен как просили."
 
-    [[ -n "$BRIDGE_SNI" ]] || BRIDGE_SNI="$EXIT_SNI"
-    case "$BRIDGE_SNI" in
-        *[!A-Za-z0-9.-]* | "") die "--bridge-sni «${BRIDGE_SNI}» не похож на домен." ;;
-    esac
+    # SNI моста здесь НЕ подставляем: подстановка «--exit-sni по умолчанию»
+    # делается ПОСЛЕ чтения существующего конфига (main → resolve_keys).
+    # Иначе повторный запуск с другим --exit-sni молча сменил бы домен
+    # маскировки моста, и уже розданные ссылки перестали бы подключаться.
+    if [[ -n "$BRIDGE_SNI" ]]; then
+        case "$BRIDGE_SNI" in
+            *[!A-Za-z0-9.-]* | "") die "--bridge-sni «${BRIDGE_SNI}» не похож на домен." ;;
+        esac
+    fi
 
     [[ -n "$MIN_CLIENT_VER" ]] && [[ "$MIN_CLIENT_VER" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] \
         || [[ -z "$MIN_CLIENT_VER" ]] \
@@ -511,7 +516,7 @@ install_xray_from_network() {
         || die "Не скачал install-release.sh. Если у моста нет доступа к GitHub — скачай архив Xray (Xray-linux-64.zip) на своей машине, перенеси на мост и запусти с --xray-zip /root/xray.zip."
     log "Ставлю Xray ${XRAY_VERSION}…"
     bash "$tmp" install --version "${XRAY_VERSION#v}" \
-        || die "Установщик Xray завершился ошибкой (см. его вывод выше)."
+        || die "Установщик Xray завершился ошибкой (см. его вывод выше). Проверь, что релиз ${XRAY_VERSION} существует: https://github.com/XTLS/Xray-core/releases — или передай --xray-version <версия>."
     ok "Ядро установлено: ${XRAY_VERSION}"
 }
 
@@ -1015,8 +1020,21 @@ apply_mss_clamp() {
     done
 }
 
+check_port_free() { # предупредить заранее, если порт моста занят чужим процессом
+    local active holders
+    active="$(systemctl is-active xray 2>/dev/null || true)"
+    [[ "$active" == "active" ]] && return 0   # наш xray уже слушает — это норма
+    have ss || return 0
+    holders="$(ss -ltn 2>/dev/null | awk -v p="[.:]${BRIDGE_PORT}\$" '$4 ~ p {print}' || true)"
+    [[ -n "$holders" ]] || return 0
+    warn "Порт ${BRIDGE_PORT} уже кем-то занят, а xray не запущен:"
+    printf '%s\n' "$holders" >&2
+    warn "Это почти всегда nginx/apache на 443. Освободи порт или укажи другой --bridge-port, иначе xray не поднимется (в приёмке порт обязан быть 443)."
+}
+
 apply_firewall() {
     local ssh_port="$1"
+    if have ufw; then
         # Именно «Status: active»: строка «Status: inactive» тоже содержит
         # подстроку «active», и по ней легко решить, что фаервол включён.
         if ufw status 2>/dev/null | head -1 | grep -q '^Status: active'; then
@@ -1059,7 +1077,8 @@ write_config_and_restart() { # write_config_and_restart <tmp-config>
 
     if [[ -n "$old_hash" && "$old_hash" == "$new_hash" ]]; then
         log "Конфиг не изменился — перезапуск не нужен (ссылки и ключи те же)."
-    else        if [[ -f "$CONFIG" ]]; then
+    else
+        if [[ -f "$CONFIG" ]]; then
             backup="${CONFIG}.bak-$(date +%Y%m%d%H%M%S)"
             cp -a "$CONFIG" "$backup" && log "Бэкап конфига: ${backup}"
             # держим последние 5 бэкапов, чтобы /usr/local/etc/xray не пух
@@ -1234,9 +1253,14 @@ main() {
         ver="$XRAY_VERSION_ACTUAL"
     fi
 
-    # Ключи Reality моста.
+    # Ключи Reality моста: свои → из существующего конфига → новые.
     resolve_keys
+    # SNI по умолчанию — как у выхода; существующий конфиг уже прочитан выше,
+    # поэтому розданные ссылки не поедут при повторном запуске.
     [[ -n "$BRIDGE_SNI" ]] || BRIDGE_SNI="$EXIT_SNI"
+    case "$BRIDGE_SNI" in
+        *[!A-Za-z0-9.-]* | "") die "SNI моста «${BRIDGE_SNI}» не похож на домен (--bridge-sni / --exit-sni)." ;;
+    esac
 
     # Geo-файлы нужны только для geo-правил.
     if [[ "$DIRECT_RU" -eq 1 && -z "$DIRECT_FILE" ]]; then
@@ -1269,6 +1293,7 @@ main() {
     [[ "$DO_MSS" -eq 1 ]] && apply_mss_clamp
     apply_firewall "$(detect_ssh_port)"
     write_meta
+    check_port_free
     write_config_and_restart "$tmp_config"
 
     if [[ "$NO_REGISTRY" -eq 0 ]]; then

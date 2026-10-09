@@ -8,6 +8,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app.db.models import AdminAccount
 from app.db.session import SessionMaker
 from app.services import audit
 from app.web import security
@@ -114,7 +115,11 @@ async def login_submit(request: Request, password: str = Form(""), login: str = 
     response.set_cookie(
         security.COOKIE_NAME,
         security.issue_session(
-            name=session.name, role=session.role, account_id=session.account_id, tg_id=session.tg_id
+            name=session.name,
+            role=session.role,
+            account_id=session.account_id,
+            tg_id=session.tg_id,
+            version=session.version,
         ),
         httponly=True,
         samesite="lax",
@@ -139,6 +144,13 @@ async def logout_post(request: Request):
                         name=session.name, role=session.role, tg_id=session.tg_id, ip=security.client_ip(request)
                     ),
                 )
+                # Выход должен гасить сессию НА СЕРВЕРЕ, а не только в браузере:
+                # поднятая версия делает недействительными все cookie этой учётки
+                # (в том числе украденную копию).
+                if session.account_id is not None:
+                    account = await db.get(AdminAccount, int(session.account_id))
+                    if account is not None:
+                        await security.bump_session_version(db, account)
                 await db.commit()
         except Exception as exc:  # noqa: BLE001 - выход не должен падать из-за журнала
             logger.warning("Не записал выход в журнал: %s", exc)

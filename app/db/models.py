@@ -668,6 +668,11 @@ class AdminAccount(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(TZDateTime, default=None)
+    #: Версия сессий учётной записи. Растёт при выходе, смене пароля, роли и
+    #: деактивации — и все выданные ранее cookie становятся недействительными.
+    #: Без неё выход не «выключал» сессию на сервере: украденная cookie жила
+    #: свои 12 часов, а понижение роли не мешало делать прежние действия.
+    session_version: Mapped[int] = mapped_column(Integer, default=1)
 
     @property
     def name(self) -> str:

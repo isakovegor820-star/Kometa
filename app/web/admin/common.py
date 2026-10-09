@@ -147,13 +147,24 @@ async def require(
     deny_if_foreign(request)
     deny_if_cross_site(request)
 
-    async with SessionMaker() as db:  # type: AsyncSession
-        if not await security.panel_available(db):
-            return RedirectResponse("/admin/login", status_code=303)
-
     session = security.read_session(request.cookies.get(security.COOKIE_NAME))
     if session is None:
         return RedirectResponse("/admin/login", status_code=303)
+
+    async with SessionMaker() as db:  # type: AsyncSession
+        if not await security.panel_available(db):
+            return RedirectResponse("/admin/login", status_code=303)
+        # Перечитываем учётную запись: выключенная, разжалованная или «вышедшая»
+        # (версия поднята) сессия не должна работать до истечения cookie.
+        account = await security.current_account(db, session)
+        if not security.session_matches_account(session, account):
+            logger.info(
+                "Сессия отклонена: учётная запись %s изменилась или выключена",
+                session.account_id,
+            )
+            response = RedirectResponse("/admin/login", status_code=303)
+            response.delete_cookie(security.COOKIE_NAME)
+            return response
 
     if capability and not ui.can(session.role, capability):
         return forbidden(request, session, capability)

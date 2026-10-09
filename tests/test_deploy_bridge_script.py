@@ -119,6 +119,12 @@ esac
 exit 0
 """
 
+SS_STUB = r"""#!/usr/bin/env bash
+[[ -n "${SS_LOG:-}" ]] && echo "$*" >> "$SS_LOG"
+[[ -n "${SS_STUB_OUTPUT:-}" ]] && printf '%s\n' "$SS_STUB_OUTPUT"
+exit 0
+"""
+
 
 def write_stub(path: Path, body: str) -> Path:
     path.write_text(body, encoding="utf-8")
@@ -128,13 +134,14 @@ def write_stub(path: Path, body: str) -> Path:
 
 @pytest.fixture
 def stub_bin(tmp_path: Path) -> Path:
-    """Каталог с шимами ядра, systemctl, curl и ufw."""
+    """Каталог с шимами ядра, systemctl, curl, ufw и ss."""
     d = tmp_path / "stub-bin"
     d.mkdir()
     write_stub(d / "xray", XRAY_STUB)
     write_stub(d / "systemctl", SYSTEMCTL_STUB)
     write_stub(d / "curl", CURL_STUB)
     write_stub(d / "ufw", UFW_STUB)
+    write_stub(d / "ss", SS_STUB)
     return d
 
 
@@ -149,7 +156,7 @@ def clean_env() -> dict:
     env = dict(os.environ)
     for name in ("XRAY_STUB_VERSION", "XRAY_STUB_TEST_FAIL", "XRAY_STUB_PRIV",
                  "XRAY_STUB_PUB", "XRAY_LOG", "SYSTEMCTL_LOG", "SYSTEMCTL_ACTIVE",
-                 "CURL_LOG", "UFW_LOG", "UFW_STATUS"):
+                 "CURL_LOG", "UFW_LOG", "UFW_STATUS", "SS_LOG", "SS_STUB_OUTPUT"):
         env.pop(name, None)
     return env
 
@@ -673,3 +680,75 @@ def test_links_only_reprints_from_config_with_meta_address(workdir: Path, stub_b
     assert all(f"@{BRIDGE_ADDRESS}:443" in link for link in found), \
         "адрес берётся из файла-спутника, а не из сети текущей машины"
     assert "Иван" in text
+
+
+# ------------------------------------- чужой конфиг и занятый порт (реальные грабли) --
+FOREIGN_FIRST_CONFIG = {
+    # Официальный установщик Xray кладёт свой демо-конфиг: первый инбаунд —
+    # не наш. Если читать «inbounds[0]», ключи и SNI возьмутся не оттуда, и
+    # повторный запуск молча выпустит новые ключи, порвав розданные ссылки.
+    "log": {"loglevel": "warning"},
+    "inbounds": [
+        {"tag": "socks-in", "port": 1080, "protocol": "socks",
+         "settings": {"auth": "noauth", "udp": True}},
+        {"tag": "bridge-in", "listen": "0.0.0.0", "port": 443, "protocol": "vless",
+         "settings": {"clients": [{"id": UUID_1, "email": "client-1"}], "decryption": "none"},
+         "streamSettings": {"network": "tcp", "security": "reality",
+                            "realitySettings": {"show": False, "xver": 0,
+                                                "target": f"{EXIT_SNI}:443",
+                                                "serverNames": ["keep.example.com"],
+                                                "privateKey": "KEEPME_PRIVATE_KEY",
+                                                "shortIds": ["keepme12"]}}},
+    ],
+    "outbounds": [{"tag": "freedom", "protocol": "freedom", "settings": {}}],
+    "routing": {"rules": []},
+}
+
+
+def test_keys_are_taken_from_bridge_inbound_not_from_first(workdir: Path, stub_bin: Path, tmp_path: Path):
+    config = workdir / "config.json"
+    config.write_text(json.dumps(FOREIGN_FIRST_CONFIG), encoding="utf-8")
+    (workdir / "config.bridge.json").write_text(
+        json.dumps({"publicKey": "OLD_PUB", "address": BRIDGE_ADDRESS}), encoding="utf-8")
+    env = {"SYSTEMCTL_LOG": str(tmp_path / "s.log")}
+
+    proc = run(
+        *apply_args(workdir, "--client-uuid", UUID_1, "--client-uuid", UUID_2),
+        stub_bin=stub_bin, env_extra=env,
+    )
+    text = out(proc)
+    assert proc.returncode == 0, text
+    cfg = json.loads(config.read_text(encoding="utf-8"))
+    ours = [i for i in cfg["inbounds"] if i.get("tag") == "bridge-in"][0]
+    reality = ours["streamSettings"]["realitySettings"]
+    assert reality["privateKey"] == "KEEPME_PRIVATE_KEY", "ключ обязан переиспользоваться"
+    assert reality["shortIds"] == ["keepme12"]
+    assert reality["serverNames"] == ["keep.example.com"]
+    assert "Приватный ключ моста взят из существующего конфига" in text
+
+
+def test_links_only_reads_our_inbound_and_meta(workdir: Path, stub_bin: Path):
+    config = workdir / "config.json"
+    config.write_text(json.dumps(FOREIGN_FIRST_CONFIG), encoding="utf-8")
+    (workdir / "config.bridge.json").write_text(
+        json.dumps({"publicKey": "OLD_PUB", "address": BRIDGE_ADDRESS}), encoding="utf-8")
+    proc = run("--links-only", "--config", str(config))
+    text = out(proc)
+    assert proc.returncode == 0, text
+    found = links(text)
+    assert len(found) == 1, "клиент один — и он из bridge-in, а не из socks-инбаунда"
+    assert f"vless://{UUID_1}@" in found[0]
+    assert "pbk=OLD_PUB" in found[0]
+    assert "sid=keepme12" in found[0]
+    assert f"sni=keep.example.com" in found[0]
+
+
+def test_busy_bridge_port_is_reported_before_restart(workdir: Path, stub_bin: Path, tmp_path: Path):
+    """443 занят nginx, xray не запущен: сказать об этом ДО перезапуска, а не после."""
+    proc = apply(workdir, stub_bin, *CLIENTS,
+                 env_extra={"SYSTEMCTL_LOG": str(tmp_path / "s.log"),
+                            "SYSTEMCTL_ACTIVE": "inactive",
+                            "SS_STUB_OUTPUT": "LISTEN 0 511 0.0.0.0:443 0.0.0.0:*"})
+    text = out(proc)
+    assert "уже кем-то занят" in text
+    assert "0.0.0.0:443" in text
