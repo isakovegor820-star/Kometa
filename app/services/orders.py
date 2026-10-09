@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from aiogram import Bot
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import texts
@@ -36,6 +37,10 @@ KIND_PURCHASE = "purchase"
 KIND_RENEW = "renew"
 #: Покупка подписки в подарок: доступ выдаётся не покупателю, а получателю.
 KIND_GIFT = "gift"
+
+#: Сколько раз пробуем подобрать свободные копейки, если заказ не вставился
+#: из-за гонки: два клиента одновременно увидели одну и ту же надбавку.
+MAX_KOPECK_ATTEMPTS = 5
 
 #: Сколько раз фоновая задача пытается выдать доступ по оплаченному заказу.
 #: После лимита заказ оставляем человеку: алерт уже поднят, а бесконечно
@@ -86,25 +91,18 @@ async def create_order(
         # оба по половинной цене.
         await _cancel_other_discounted(session, user)
 
-    order = Order(
-        user_id=user.id,
-        plan_id=plan.id,
+    order = await _insert_order(
+        session,
+        user=user,
+        plan=plan,
         kind=kind,
+        provider=provider,
         amount_rub=amount_rub,
-        base_amount_rub=base_rub,
+        base_rub=base_rub,
         discount_rub=discount_rub,
         promo_code=discount.code if discount else None,
         stars_amount=stars_amount,
-        # Уникальные копейки нужны только для ручных переводов: по ним система
-        # сама узнаёт, какой заказ оплатили.
-        pay_kopecks=await _allocate_pay_kopecks(session, amount_rub) if provider == "manual" else 0,
-        provider=provider,
-        status="pending",
-        external_id=f"ord-{uuid4().hex[:16]}",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.order_ttl_minutes),
     )
-    session.add(order)
-    await session.flush()
     await events.log_event(
         session,
         events.ORDER_CREATED,
@@ -128,6 +126,70 @@ async def create_order(
             payload={"order_id": order.id, "code": discount.code, "discount_rub": discount_rub},
         )
     return order
+
+
+async def _insert_order(
+    session: AsyncSession,
+    *,
+    user: User,
+    plan: Plan,
+    kind: str,
+    provider: str,
+    amount_rub: int,
+    base_rub: int,
+    discount_rub: int,
+    promo_code: str | None,
+    stars_amount: int,
+) -> Order:
+    """Вставить заказ, подбирая копейки так, чтобы не столкнуться с чужими.
+
+    Уникальность пары «сумма + копейки» среди pending-заказов держит частичный
+    UNIQUE-индекс (``uq_orders_pending_kopeck``). Два клиента могут нажать
+    «оплатить» одновременно: оба увидят одну и ту же свободную надбавку, и один
+    из INSERT-ов получит IntegrityError. Это не ошибка оплаты, а гонка за
+    подписью — здесь мы её разбираем: откатываем только свою вставку
+    (SAVEPOINT), подбираем следующие свободные копейки и пробуем снова.
+
+    Раньше такой гонки не ловили: два заказа на одну сумму получали одинаковые
+    копейки, и автоплатёж не мог понять, чей это перевод (H3).
+    """
+    for attempt in range(MAX_KOPECK_ATTEMPTS):
+        kopecks = await _allocate_pay_kopecks(session, amount_rub) if provider == "manual" else 0
+        order = Order(
+            user_id=user.id,
+            plan_id=plan.id,
+            kind=kind,
+            amount_rub=amount_rub,
+            base_amount_rub=base_rub,
+            discount_rub=discount_rub,
+            promo_code=promo_code,
+            stars_amount=stars_amount,
+            # Уникальные копейки нужны только для ручных переводов: по ним
+            # система сама узнаёт, какой заказ оплатили.
+            pay_kopecks=kopecks,
+            provider=provider,
+            status="pending",
+            external_id=f"ord-{uuid4().hex[:16]}",
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.order_ttl_minutes),
+        )
+        try:
+            # SAVEPOINT: откат неудачной вставки не рушит остальную транзакцию
+            # (скидку, отмену прежних заказов, лог событий).
+            async with session.begin_nested():
+                session.add(order)
+                await session.flush()
+            return order
+        except IntegrityError:
+            logger.info(
+                "Копейки %s для %s ₽ уже заняты другим pending-заказом — подбираю другие (попытка %s)",
+                kopecks,
+                amount_rub,
+                attempt + 1,
+            )
+    raise RuntimeError(
+        f"не удалось подобрать уникальные копейки для заказа на {amount_rub} ₽ "
+        f"за {MAX_KOPECK_ATTEMPTS} попыток"
+    )
 
 
 async def _cancel_other_discounted(session: AsyncSession, user: User) -> list[Order]:

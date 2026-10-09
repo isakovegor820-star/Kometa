@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -9,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import get_settings
 from app.db.models import Base
+
+logger = logging.getLogger(__name__)
 
 _settings = get_settings()
 engine = create_async_engine(_settings.resolved_db_url, echo=False, future=True)
@@ -110,6 +114,15 @@ _EXTRA_INDEXES: tuple[tuple[str, str], ...] = (
     ("ix_orders_status_created", "CREATE INDEX IF NOT EXISTS ix_orders_status_created ON orders (status, created_at)"),
     ("ix_events_kind_created", "CREATE INDEX IF NOT EXISTS ix_events_kind_created ON events (kind, created_at)"),
     ("ix_alerts_status_created", "CREATE INDEX IF NOT EXISTS ix_alerts_status_created ON alerts (status, created_at)"),
+    # Уникальность копеек среди открытых заказов: два клиента на одну сумму не
+    # должны получить одинаковую подпись (H3). Индекс частичный: у заказов без
+    # ручной оплаты копеек нет (pay_kopecks = 0), и общий UNIQUE запретил бы
+    # два счёта Stars/Platega на одну сумму.
+    (
+        "uq_orders_pending_kopeck",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_pending_kopeck "
+        "ON orders (amount_rub, pay_kopecks) WHERE status = 'pending' AND pay_kopecks > 0",
+    ),
 )
 
 
@@ -126,11 +139,20 @@ async def _apply_light_migrations(conn) -> None:  # noqa: ANN001 - AsyncConnecti
         existing = {row[1] for row in result.fetchall()}
         if existing and column not in existing:
             await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
-    for _name, ddl in _EXTRA_INDEXES:
+    for name, ddl in _EXTRA_INDEXES:
         try:
             await conn.exec_driver_sql(ddl)
-        except Exception:  # noqa: BLE001 - таблицы может ещё не быть в старой базе
-            pass
+        except Exception as exc:  # noqa: BLE001 - таблицы может ещё не быть в старой базе
+            # Молча пропускать нельзя: если уникальный индекс копеек не встал,
+            # значит в базе уже есть дубли и автоплатёж будет путать заказы.
+            logger.warning(
+                "Индекс %s не создан (%s). Если это uq_orders_pending_kopeck — в базе есть "
+                "pending-заказы с одинаковыми суммой и копейками: разбери их вручную "
+                "(SELECT amount_rub, pay_kopecks, COUNT(*) FROM orders WHERE status='pending' "
+                "GROUP BY 1,2 HAVING COUNT(*) > 1) и перезапусти бота.",
+                name,
+                exc,
+            )
 
 
 async def seed_plans() -> None:

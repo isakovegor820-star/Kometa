@@ -22,6 +22,7 @@ from sqlalchemy import (
     Text,
     TypeDecorator,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -191,7 +192,24 @@ class Subscription(Base):
 
 class Order(Base):
     __tablename__ = "orders"
-    __table_args__ = (Index("ix_orders_status_created", "status", "created_at"),)
+    __table_args__ = (
+        Index("ix_orders_status_created", "status", "created_at"),
+        # Частичный UNIQUE: среди ОТКРЫТЫХ заказов не может быть двух с
+        # одинаковой парой «сумма + копейки», иначе автоплатёж не поймёт, чей
+        # это перевод (H3). Частичный — потому что оплаченные заказы живут по
+        # своим правилам, а у не-ручных способов (Stars, Platega) копеек нет
+        # вовсе: pay_kopecks = 0, и общий UNIQUE запретил бы два счёта на одну
+        # сумму. Условие ``pay_kopecks > 0`` оставляет в индексе только заказы
+        # с реальной подписью.
+        Index(
+            "uq_orders_pending_kopeck",
+            "amount_rub",
+            "pay_kopecks",
+            unique=True,
+            sqlite_where=text("status = 'pending' AND pay_kopecks > 0"),
+            postgresql_where=text("status = 'pending' AND pay_kopecks > 0"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
