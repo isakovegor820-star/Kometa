@@ -166,7 +166,10 @@ if [[ -n "$WEB_SSL_CERT" ]]; then
   CURL_TLS=(--insecure)
 fi
 
-HEALTH="$(curl -s -m 8 "${CURL_TLS[@]}" "${WEB_SCHEME}://127.0.0.1:${WEB_PORT}/health" || true)"
+# `${CURL_TLS[@]+...}` вместо `${CURL_TLS[@]}`: в bash 3.2 (macOS) раскрытие
+# пустого массива при `set -u` — это ошибка «unbound variable», и проверка
+# веб-слоя падала с техническим текстом вместо понятного вердикта.
+HEALTH="$(curl -s -m 8 ${CURL_TLS[@]+"${CURL_TLS[@]}"} "${WEB_SCHEME}://127.0.0.1:${WEB_PORT}/health" || true)"
 if grep -q '"status":"ok"' <<<"$HEALTH"; then
   ok "Веб-слой отвечает на ${WEB_SCHEME}://127.0.0.1:${WEB_PORT}"
 else
