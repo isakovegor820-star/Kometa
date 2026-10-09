@@ -37,6 +37,13 @@ _EXTRA_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("orders", "refund_note", "TEXT"),
     # Оплата по закрытому заказу: когда об этом сообщили админам (один раз).
     ("orders", "payment_alerted_at", "DATETIME"),
+    # Выдача доступа после оплаты: цель, факт, число попыток и текст ошибки.
+    # Нужны, чтобы «деньги приняты, доступа нет» не терялось: заказ с пустым
+    # granted_at подхватывает фоновая задача и повторяет выдачу.
+    ("orders", "grant_target_at", "DATETIME"),
+    ("orders", "granted_at", "DATETIME"),
+    ("orders", "grant_attempts", "INTEGER DEFAULT 0"),
+    ("orders", "grant_last_error", "VARCHAR(300) DEFAULT ''"),
     ("users", "promo_code", "VARCHAR(32)"),
     ("users", "bonus_days_balance", "INTEGER DEFAULT 0"),
     ("users", "tags", "VARCHAR(128) DEFAULT ''"),

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -13,18 +14,33 @@ from aiogram import Bot
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bot import texts
 from app.config import get_settings
 from app.db.models import Order, Plan, Subscription, User
-from app.panels.base import PanelClient
+from app.panels.base import PanelClient, PanelError
 from app.payments.matching import allocate_signature
-from app.services import events, notifications, partners, promo as promo_service, referral, subscriptions
+from app.services import (
+    alerts as alerts_service,
+    events,
+    notifications,
+    partners,
+    promo as promo_service,
+    referral,
+    subscriptions,
+)
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 KIND_PURCHASE = "purchase"
 KIND_RENEW = "renew"
 #: Покупка подписки в подарок: доступ выдаётся не покупателю, а получателю.
 KIND_GIFT = "gift"
+
+#: Сколько раз фоновая задача пытается выдать доступ по оплаченному заказу.
+#: После лимита заказ оставляем человеку: алерт уже поднят, а бесконечно
+#: дёргать мёртвую панель бессмысленно и вредно.
+MAX_GRANT_ATTEMPTS = 10
 
 
 async def _allocate_pay_kopecks(session: AsyncSession, base_rub: int) -> int:
@@ -140,6 +156,182 @@ async def get_order(session: AsyncSession, order_id: int) -> Order | None:
     return await session.get(Order, order_id)
 
 
+# ------------------------------------------------------- выдача доступа (B2)
+def _grant_fingerprint(order_id: int) -> str:
+    """Отпечаток алерта «оплаченный заказ без доступа» — один на заказ."""
+    return f"grant:order:{order_id}"
+
+
+def _grant_target(sub: Subscription | None, plan: Plan, *, now: datetime | None = None) -> datetime:
+    """До какого срока подписка должна продлиться после оплаты.
+
+    Считаем от текущего срока (если подписка ещё жива) или от «сейчас»: это
+    минимум, который обязана подтвердить панель. Бонусные дни и ручные правки в
+    панели только увеличивают срок, поэтому проверка «не меньше цели» —
+    корректный способ убедиться, что выдача состоялась.
+    """
+    moment = now or datetime.now(timezone.utc)
+    base = sub.expires_at if sub is not None and sub.expires_at and sub.expires_at > moment else moment
+    return base + timedelta(days=max(0, plan.days))
+
+
+def _grant_problem(sub: Subscription | None, target: datetime | None) -> str:
+    """Расхождение «что ждали ↔ что выдала панель» текстом. Пусто — всё сошлось."""
+    if target is None:
+        return ""
+    if sub is None or sub.expires_at is None:
+        return "панель не вернула срок подписки"
+    if sub.expires_at < target:
+        return (
+            f"панель выдала доступ до {sub.expires_at:%d.%m.%Y %H:%M}, "
+            f"а ожидали минимум до {target:%d.%m.%Y %H:%M}"
+        )
+    return ""
+
+
+async def _record_grant_failure(
+    session: AsyncSession,
+    order: Order,
+    target: datetime | None,
+    exc: BaseException,
+) -> None:
+    """Запомнить, что оплаченный заказ ждёт выдачи, и поднять алерт.
+
+    Коммитим сразу: факт «деньги приняты, доступ не выдан» должен пережить и
+    падение процесса, и rollback вызывающего. Иначе заказ снова станет
+    «оплачен и забыт» — ровно та дыра, из-за которой клиент платил и не получал
+    ничего (B2).
+    """
+    order.grant_target_at = target or order.grant_target_at
+    order.grant_attempts = int(order.grant_attempts or 0) + 1
+    order.grant_last_error = str(exc)[:300]
+    await alerts_service.raise_alert(
+        session,
+        "panel_error",
+        title=f"Оплачен заказ #{order.id}, доступа нет",
+        message=(
+            f"Заказ #{order.id} на {order.amount_rub} ₽ оплачен, но доступ не выдан: "
+            f"{order.grant_last_error}. Фоновая задача повторит выдачу автоматически."
+        ),
+        fingerprint=_grant_fingerprint(order.id),
+        user_id=order.user_id,
+    )
+    await session.commit()
+
+
+async def grant_ungranted_orders(
+    session: AsyncSession,
+    panels: list[PanelClient] | None = None,
+    *,
+    bot: Bot | None = None,
+    limit: int = 50,
+) -> list[int]:
+    """Выдать доступ по оплаченным заказам, у которых выдача не подтверждена.
+
+    Покрывает два случая: панель лежала в момент оплаты и процесс упал между
+    оплатой и выдачей. Идемпотентность двойная:
+
+    * заказ берём только с пустым ``granted_at``;
+    * перед обращением к панели сверяем **факт**: если панель уже продлила
+      клиента (ответ потерялся, а панель успела), выдачу не повторяем — просто
+      отмечаем её выполненной.
+
+    Старые заказы без ``grant_target_at`` не трогаем: цель выдачи неизвестна,
+    автоматически продлевать их — значит дарить дни. Такие разбирает человек.
+    """
+    rows = list(
+        (
+            await session.scalars(
+                select(Order)
+                .where(
+                    Order.status == "paid",
+                    Order.granted_at.is_(None),
+                    Order.grant_target_at.is_not(None),
+                )
+                .order_by(Order.created_at)
+                .limit(limit)
+            )
+        ).all()
+    )
+
+    done: list[int] = []
+    for order in rows:
+        plan = await get_plan(session, order.plan_id) if order.plan_id else None
+        user = await session.get(User, order.user_id)
+        if plan is None or user is None:
+            continue
+
+        target = order.grant_target_at
+        sub = await subscriptions.get_subscription(session, user.id)
+        if not _grant_problem(sub, target):
+            # Панель уже выдала доступ — фиксируем факт и снимаем алерт.
+            order.granted_at = datetime.now(timezone.utc)
+            order.grant_last_error = ""
+            await alerts_service.resolve_by_fingerprint(session, _grant_fingerprint(order.id), by="auto")
+            done.append(order.id)
+            continue
+
+        if int(order.grant_attempts or 0) >= MAX_GRANT_ATTEMPTS:
+            logger.error(
+                "Заказ #%s: доступ не выдан после %s попыток (%s) — нужен человек",
+                order.id,
+                order.grant_attempts,
+                order.grant_last_error,
+            )
+            continue
+
+        try:
+            await subscriptions.activate_plan(
+                session, user, plan, panels or await subscriptions.all_user_panels(session)
+            )
+        except Exception as exc:  # noqa: BLE001 - панель может не ответить
+            logger.error("Повторная выдача по заказу #%s не удалась: %s", order.id, exc)
+            await _record_grant_failure(session, order, target, exc)
+            continue
+
+        # Проверяем факт, а не «не было исключения»: панель могла ответить
+        # успехом и не продлить срок (ручная правка, чужой клиент, старая нода).
+        sub = await subscriptions.get_subscription(session, user.id)
+        problem = _grant_problem(sub, target)
+        if problem:
+            logger.error("Заказ #%s: %s", order.id, problem)
+            await _record_grant_failure(session, order, target, PanelError(problem))
+            continue
+
+        order.granted_at = datetime.now(timezone.utc)
+        order.grant_last_error = ""
+        await alerts_service.resolve_by_fingerprint(session, _grant_fingerprint(order.id), by="auto")
+        done.append(order.id)
+        if bot is not None:
+            await notify_granted(bot, user, sub, order)
+
+    await session.flush()
+    return done
+
+
+async def notify_granted(bot: Bot, user: User, sub: Subscription | None, order: Order) -> None:
+    """Сообщить клиенту, что оплата наконец дошла до доступа (после повторной выдачи)."""
+    if sub is None:
+        return
+    from app.bot import keyboards
+
+    expires = sub.expires_at.strftime("%d.%m.%Y %H:%M") if sub.expires_at else "—"
+    link = subscriptions.subscription_link(sub.subscription_token)
+    try:
+        await bot.send_message(
+            user.tg_id,
+            f"✅ Оплата по заказу #{order.id} дошла до доступа. Подписка активна до <b>{expires}</b>.",
+        )
+        await bot.send_message(
+            user.tg_id,
+            texts.SUBSCRIPTION_LINK_HINT.format(link=link),
+            reply_markup=keyboards.connect_kb(link),
+            disable_web_page_preview=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - сообщение не важнее выдачи
+        logger.warning("Не смог сообщить о выдаче доступа %s: %s", user.tg_id, exc)
+
+
 async def get_plan(session: AsyncSession, plan_id: int) -> Plan | None:
     return await session.get(Plan, plan_id)
 
@@ -187,10 +379,17 @@ async def mark_paid(
     # «status = pending» проверяется и меняется одной инструкцией, поэтому
     # второй и последующие подтверждения получают rowcount = 0, даже если
     # пришли с устаревшим объектом заказа.
+    now = datetime.now(timezone.utc)
+    sub_before = await subscriptions.get_subscription(session, user.id)
+    target = _grant_target(sub_before, plan, now=now)
     values: dict[str, object] = {
         "status": "paid",
-        "paid_at": datetime.now(timezone.utc),
+        "paid_at": now,
         "confirmed_by": confirmed_by,
+        # Цель выдачи фиксируем ДО обращения к панели: по ней потом проверим
+        # факт, а фоновая задача поймёт, чего добиваться при повторе.
+        "grant_target_at": target,
+        "grant_last_error": "",
     }
     if provider_payment_id:
         values["comment"] = f"payment_id={provider_payment_id}"
@@ -231,8 +430,6 @@ async def mark_paid(
         )
         return sub, False
 
-    sub = await subscriptions.activate_plan(session, user, plan, panel)
-    await session.flush()
     await events.log_event(
         session,
         events.ORDER_PAID,
@@ -243,6 +440,7 @@ async def mark_paid(
             "discount": order.discount_rub,
             "promo": order.promo_code,
             "provider": order.provider,
+            "grant_target": target.isoformat(),
         },
     )
 
@@ -265,6 +463,31 @@ async def mark_paid(
                 owner = await session.get(User, promo_row.owner_user_id)
                 if owner is not None and owner.id != user.id:
                     await referral.attach_referrer(session, user, owner.referral_code)
+
+    # Деньги уже приняты — фиксируем это ДО обращения к панели. Раньше статус
+    # «paid» и выдача жили в одной транзакции: панель не ответила, вызывающий
+    # погасил ошибку и закоммитил — заказ выпадал из всех очередей ретрая
+    # («деньги приняты, доступа нет и не будет», B2).
+    await session.commit()
+
+    try:
+        sub = await subscriptions.activate_plan(session, user, plan, panel)
+    except Exception as exc:  # noqa: BLE001 - панель может не ответить
+        logger.error("Панель не выдала доступ по заказу #%s: %s", order.id, exc)
+        await _record_grant_failure(session, order, target, exc)
+        return None, False
+
+    # Выдача подтверждается фактом (срок в панели), а не отсутствием исключения.
+    problem = _grant_problem(sub, target)
+    if problem:
+        logger.error("Заказ #%s: %s", order.id, problem)
+        await _record_grant_failure(session, order, target, PanelError(problem))
+        return sub, False
+
+    order.granted_at = datetime.now(timezone.utc)
+    order.grant_target_at = target
+    order.grant_last_error = ""
+    await session.flush()
 
     reward = await referral.reward_on_payment(session, order, panel)
     # Временный атрибут (в БД не пишется): по нему вызывающий код добавляет

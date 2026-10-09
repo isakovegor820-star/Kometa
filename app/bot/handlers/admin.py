@@ -117,6 +117,16 @@ async def cb_confirm_order(call: CallbackQuery, session: AsyncSession, bot: Bot)
     user = await session.get(User, order.user_id)
     panel = await subscriptions.all_user_panels(session)
     sub, already = await orders.mark_paid(session, order, panel, confirmed_by=call.from_user.id, bot=bot)
+    if sub is None and not already and not order.gift_token:
+        # Оплата зафиксирована, но панель не подтвердила выдачу: заказ подхватит
+        # фоновая задача (job_grant_paid). Админ должен знать, что происходит,
+        # иначе «Подтверждено ✅» выглядит как выданный доступ.
+        await notifications.notify_admins(
+            bot,
+            f"⚠️ Заказ #{order.id} подтверждён, но доступ не выдан: "
+            f"<code>{order.grant_last_error or 'панель не ответила'}</code>\n"
+            "Повторю выдачу автоматически в течение нескольких минут.",
+        )
     await view.edit_screen(call.message, texts.ADMIN_CONFIRMED.format(order_id=order.id))
     await call.answer("Подтверждено ✅")
 

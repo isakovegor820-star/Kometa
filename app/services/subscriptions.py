@@ -301,8 +301,13 @@ async def activate_plan(
     *,
     extra_days: int = 0,
 ) -> Subscription:
-    """Оплаченная покупка/продление тарифа."""
-    bonus_days = await drain_bonus_balance(session, user, reason=plan.code)
+    """Оплаченная покупка/продление тарифа.
+
+    Накопленные бонусные дни списываем **после** успешного ответа панели: если
+    панель не ответила, выдача повторится (``orders.grant_ungranted_orders``), и
+    баланс должен дойти до клиента, а не исчезнуть в неудачной попытке.
+    """
+    bonus_days = int(user.bonus_days_balance or 0)
     days = plan.days + max(0, extra_days) + bonus_days
     sub = await get_subscription(session, user.id)
     spec = UserSpec(
@@ -353,6 +358,16 @@ async def activate_plan(
     sub.expires_at = panel_user.expires_at or (datetime.now(timezone.utc) + timedelta(days=days))
     sub.notified_3d = False
     sub.notified_1d = False
+
+    # Дни уже учтены в сроке выше — теперь их можно списать с баланса.
+    if bonus_days > 0:
+        user.bonus_days_balance = 0
+        await events.log_event(
+            session,
+            events.BONUS_DAYS_APPLIED,
+            user_id=user.id,
+            payload={"days": bonus_days, "reason": plan.code},
+        )
     await session.flush()
     return sub
 

@@ -86,10 +86,16 @@ async def test_panel_can_be_opened_to_all_if_explicitly_allowed(session, monkeyp
 
 
 async def test_payments_webhook_is_not_restricted(session):
-    """Вебхуки платёжек приходят с чужих IP — их блокировать нельзя."""
+    """Вебхуки платёжек приходят с чужих IP — их блокировать нельзя.
+
+    WATA-вебхука здесь больше нет (B1): маршрут удалён, поэтому проверяем
+    отказ по подписи у оставшихся провайдеров, а не по IP.
+    """
     async with await make_client(session, "203.0.113.7") as client:
         crypto = await client.post("/payments/crypto/webhook", content=b"{}")
-        wata = await client.post("/payments/wata/webhook", content=b"{}")
+        platega = await client.post("/payments/platega/webhook", content=b"{}")
 
     assert crypto.status_code == 403  # отказ по подписи, а не по IP
-    assert wata.status_code in {403, 503}
+    # Platega отвечает 200 на пустое тело (так она проверяет Callback URL) —
+    # главное, что запрос с чужого IP не отбит админским ограничением.
+    assert platega.status_code == 200

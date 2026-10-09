@@ -153,6 +153,16 @@ async def cb_confirm_order(call: CallbackQuery, session: AsyncSession) -> None:
     await _safe_edit(call, texts.ADMIN_CONFIRMED.format(order_id=order.id), order.id)
     await call.answer("Подтверждено ✅")
 
+    if sub is None and not already and not order.gift_token:
+        # Оплата зафиксирована, выдача не подтверждена — заказ доведёт фоновая
+        # задача. Это не ошибка подтверждения, но админ должен видеть статус.
+        await notifications.notify_admins(
+            client_bot,
+            f"⚠️ Заказ #{order.id} подтверждён, но доступ не выдан: "
+            f"<code>{order.grant_last_error or 'панель не ответила'}</code>\n"
+            "Повторю выдачу автоматически в течение нескольких минут.",
+        )
+
     if client_bot is None or user is None:
         logger.warning("Заказ #%s подтверждён, но клиенту не сообщить: нет основного бота", order.id)
         return

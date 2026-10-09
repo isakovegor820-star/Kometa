@@ -448,8 +448,10 @@ async def finalize_order(session: AsyncSession, order, bot: Bot, user: User) -> 
                                 f"⚠️ <b>Оплата подтверждена, но доступ по заказу #{order.id} не выдан</b>\n"
                                 f"Пользователь: {notifications.safe(user.display_name)} "
                                 f"(<code>{user.tg_id}</code>)\n"
-                                f"Сумма: {order.amount_rub} ₽, способ: {notifications.safe(order.provider)}\n\n"
-                                "Проверь заказ и выдай доступ вручную (/grant).",
+                                f"Сумма: {order.amount_rub} ₽, способ: {notifications.safe(order.provider)}\n"
+                                f"Причина: {notifications.safe(order.grant_last_error or 'панель не ответила')}\n\n"
+                                "Выдачу повторю автоматически (job_grant_paid). "
+                                "Если не получится — проверь заказ в /admin.",
                         )
                 return
 

@@ -269,6 +269,27 @@ async def startup_payment_check(bot: Bot) -> None:
         logger.warning("Стартовая проверка платежей не удалась: %s", exc)
 
 
+async def job_grant_paid(bot: Bot) -> None:
+    """Довести до доступа оплаченные заказы, по которым выдача не подтверждена.
+
+    Закрывает дыру «деньги приняты, доступа нет и не будет»: если панель не
+    ответила в момент оплаты, заказ остаётся с пустым ``granted_at`` и попадает
+    сюда. Функция сверяет факт (срок в панели) и либо отмечает выдачу
+    выполненной, либо повторяет её — с алертом и ограничением числа попыток.
+    """
+    from app.services import orders as orders_service
+
+    async with SessionMaker() as session:
+        try:
+            granted = await orders_service.grant_ungranted_orders(session, bot=bot)
+        except Exception as exc:  # noqa: BLE001 - фоновая задача не должна падать молча
+            logger.exception("Повторная выдача доступа упала: %s", exc)
+            return
+        await session.commit()
+        if granted:
+            logger.info("Повторная выдача доступа: заказы %s", granted)
+
+
 async def job_autopay(bot: Bot) -> None:
     """Автоподтверждение переводов по выписке банка."""
     from app.services import autopay
@@ -282,7 +303,7 @@ async def job_autopay(bot: Bot) -> None:
             logger.exception("Автоплатёж упал: %s", exc)
             return
         await session.commit()
-        if result.fetched or result.confirmed or result.errors:
+        if result.fetched or result.confirmed or result.errors or result.pending_grant:
             logger.info("Автоплатёж: %s", result.as_text())
 
 
@@ -499,6 +520,9 @@ async def main() -> None:
         args=[bot],
         id="autopay",
     )
+    # Повторная выдача доступа по оплаченным заказам: панель могла не ответить
+    # в момент оплаты. Раз в 3 минуты — клиент не должен ждать человека.
+    scheduler.add_job(job_grant_paid, "interval", minutes=3, args=[bot], id="grant_paid")
     scheduler.add_job(job_node_health, "interval", minutes=5, args=[bot], id="node_health")
     # Проба «глазами клиента»: TCP-порт и задержка. Отдельно от проверки
     # панели — панель отвечает, а порт может не пускать.

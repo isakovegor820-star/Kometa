@@ -50,6 +50,9 @@ class ReconcileResult:
 
         fetched: int = 0
         confirmed: list[int] = field(default_factory=list)
+        #: Оплаченные заказы, по которым панель не подтвердила выдачу доступа:
+        #: деньги приняты, выдачу повторит фоновая задача (B2).
+        pending_grant: list[int] = field(default_factory=list)
         unmatched: list[IncomingPayment] = field(default_factory=list)
         errors: list[str] = field(default_factory=list)
         skipped: int = 0
@@ -57,6 +60,7 @@ class ReconcileResult:
         def as_text(self) -> str:
                 return (
                         f"проверено поступлений: {self.fetched}, подтверждено: {len(self.confirmed)}, "
+                        f"ждут выдачи: {len(self.pending_grant)}, "
                         f"не сопоставлено: {len(self.unmatched)}, пропущено (уже видели): {self.skipped}"
                 )
 
@@ -249,6 +253,16 @@ async def reconcile(
                                 continue
 
                         result.confirmed.append(order.id)
+                        if sub is None and not already:
+                                # Оплата зафиксирована, но панель не подтвердила
+                                # выдачу: заказ подхватит job_grant_paid. В ошибки
+                                # выписки не пишем — окно проверки сдвигать можно.
+                                logger.warning(
+                                        "Заказ #%s оплачен, но доступ не выдан (%s) — повторю автоматически",
+                                        order.id,
+                                        order.grant_last_error or "панель не ответила",
+                                )
+                                result.pending_grant.append(order.id)
                         await events.log_event(
                                 session,
                                 events.ORDER_PAID,

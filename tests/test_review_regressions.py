@@ -21,13 +21,16 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 from sqlalchemy import select
 
 from app.config import get_settings
-from app.db.models import Order, Subscription
+from app.db.models import Alert, Order, Subscription
+from app.panels.base import PanelError, PanelUser, UserSpec
+from app.panels.fake import FakePanel
 from app.payments.base import PaymentCheck, PaymentStatus
 from app.payments.registry import payments
 from app.services import orders, subscriptions
@@ -36,6 +39,29 @@ from app.web.sub import build_app
 settings = get_settings()
 MERCHANT = "1a021d91-9b26-4762-b303-5d4aac74e921"
 SECRET = "test-platega-secret"
+
+
+class DeadPanel(FakePanel):
+    """Панель, которая не отвечает: воспроизводит «упала в момент оплаты» (B2)."""
+
+    name = "dead-panel"
+
+    async def create_user(self, spec: UserSpec) -> PanelUser:
+        raise PanelError("панель не отвечает (PoC B2)")
+
+    async def update_user(self, uuid: str, **kwargs) -> PanelUser:  # noqa: ANN003
+        raise PanelError("панель не отвечает (PoC B2)")
+
+
+class ShortGrantPanel(FakePanel):
+    """Панель отвечает «успехом», но срок не продлевает — расхождение с целью (B2)."""
+
+    name = "short-grant-panel"
+
+    async def create_user(self, spec: UserSpec) -> PanelUser:
+        user = await super().create_user(spec)
+        user.expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+        return user
 
 
 @pytest.fixture(autouse=True)
@@ -116,3 +142,69 @@ async def test_paid_webhook_with_wrong_amount_does_not_grant(
     await session.refresh(order)
     assert order.status == "pending"
     assert await session.scalar(select(Subscription).where(Subscription.user_id == order.user_id)) is None
+
+
+# ------------------------------------------------------------------------- B2
+async def test_panel_outage_keeps_paid_order_in_grant_queue(session):
+    """B2: панель упала при оплате — заказ остаётся оплаченным и ждёт выдачи.
+
+    PoC аудита: ``order.status`` становился ``paid`` до обращения к панели,
+    ``PanelError`` гасился, вызывающий коммитил — и заказ выпадал из всех
+    очередей ретрая. Клиент платил и не получал ничего.
+    """
+    user, order = await _make_order(session, 9902, provider="manual")
+
+    sub, already = await orders.mark_paid(session, order, DeadPanel())
+    await session.commit()
+    await session.refresh(order)
+
+    assert sub is None and already is False
+    assert order.status == "paid"
+    assert order.paid_at is not None
+    assert order.granted_at is None
+    assert order.grant_target_at is not None
+    assert "панель не отвечает" in order.grant_last_error
+
+    alert = await session.scalar(select(Alert).where(Alert.fingerprint == f"grant:order:{order.id}"))
+    assert alert is not None and alert.status == "open"
+    assert await session.scalar(select(Subscription).where(Subscription.user_id == user.id)) is None
+
+
+async def test_grant_is_retried_until_panel_gives_access(session, panel):
+    """B2: после восстановления панели фоновая задача выдаёт доступ сама."""
+    user, order = await _make_order(session, 9903, provider="manual")
+    await orders.mark_paid(session, order, DeadPanel())
+    await session.commit()
+    await session.refresh(order)
+    target = order.grant_target_at
+
+    granted = await orders.grant_ungranted_orders(session, [panel])
+    await session.commit()
+    await session.refresh(order)
+
+    assert granted == [order.id]
+    assert order.granted_at is not None
+    assert order.grant_last_error == ""
+    sub = await subscriptions.get_subscription(session, user.id)
+    assert sub is not None and sub.expires_at >= target
+
+    alert = await session.scalar(select(Alert).where(Alert.fingerprint == f"grant:order:{order.id}"))
+    assert alert is None or alert.status == "resolved"
+
+
+async def test_short_grant_is_treated_as_failure(session):
+    """B2: «успех» панели без продления срока — расхождение, а не выдача.
+
+    Панель могла ответить 200 и не продлить клиента (ручная правка, чужой
+    uuid). Сверяем факт: срок должен быть не меньше цели выдачи.
+    """
+    _, order = await _make_order(session, 9904, provider="manual")
+
+    sub, already = await orders.mark_paid(session, order, ShortGrantPanel())
+    await session.commit()
+    await session.refresh(order)
+
+    assert already is False
+    assert order.granted_at is None
+    assert "ожидали минимум" in order.grant_last_error or "срок подписки" in order.grant_last_error
+    assert sub is not None  # подписка есть, но факт выдачи не подтверждён — ретрай доведёт
